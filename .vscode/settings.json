@@ -25,7 +25,7 @@
   // The extension automatically uses SourceKit-LSP from your Swift toolchain
 
   // Enable experimental background indexing for better performance
-  "swift.sourcekit-lsp.backgroundIndexing": true,
+  "swift.sourcekit-lsp.backgroundIndexing": "on",
 
   // ============================================
   // CODE FORMATTING
