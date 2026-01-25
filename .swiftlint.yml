@@ -1,0 +1,305 @@
+# SwiftLint Configuration - Best Practices
+# This configuration enforces Swift API Design Guidelines and industry best practices
+
+# ============================================
+# ENABLED RULES (Best Practices)
+# ============================================
+opt_in_rules:
+  # Closure Practices
+  - closure_end_indentation
+  - closure_spacing
+  - trailing_closure
+  - unneeded_parentheses_in_closure_argument
+
+  # Code Quality
+  - array_init
+  - contains_over_filter_count
+  - contains_over_filter_is_empty
+  - contains_over_first_not_nil
+  - contains_over_range_nil_comparison
+  - empty_collection_literal
+  - empty_count
+  - empty_string
+  - first_where
+  - flatmap_over_map_reduce
+  - last_where
+  - reduce_into
+  - sorted_first_last
+
+  # Control Flow
+  - multiline_arguments
+  - multiline_function_chains
+  - multiline_literal_brackets
+  - multiline_parameters
+  - multiline_parameters_brackets
+
+  # Documentation
+  - missing_docs
+
+  # File Organization
+  - file_header
+  - file_types_order
+  - type_contents_order
+
+  # Naming
+  - implicit_return
+  - modifier_order
+  - operator_usage_whitespace
+  - overridden_super_call
+  - prohibited_super_call
+  - pattern_matching_keywords
+  - prefer_self_in_static_references
+  - prefer_self_type_over_type_of_self
+
+  # Readability
+  - explicit_init
+  - explicit_top_level_acl
+  - explicit_type_interface
+  - explicit_enum_raw_value
+  - fatal_error_message
+  - implicitly_unwrapped_optional
+  - legacy_multiple
+  - literal_expression_end_indentation
+  - lower_acl_than_parent
+  - number_separator
+  - object_literal
+  - prefer_zero_over_explicit_init
+  - private_action
+  - private_outlet
+  - redundant_nil_coalescing
+  - redundant_type_annotation
+  - single_test_class
+  - static_operator
+  - strict_fileprivate
+  - toggle_bool
+  - unavailable_function
+  - unowned_variable_capture
+  - vertical_parameter_alignment_on_call
+  - vertical_whitespace_closing_braces
+  - vertical_whitespace_opening_braces
+  - yoda_condition
+
+  # SwiftUI Best Practices
+  - empty_xctest_method
+  - final_test_case
+
+  # Force Unwrapping Safety
+  - discouraged_optional_boolean
+  - discouraged_optional_collection
+  - force_unwrapping
+  - required_enum_case
+
+# ============================================
+# DISABLED RULES
+# ============================================
+disabled_rules:
+  - todo # Allow TODOs during development
+  - trailing_whitespace # Handled by editor
+
+# ============================================
+# RULE CONFIGURATIONS
+# ============================================
+
+# Line Length
+line_length:
+  warning: 120
+  error: 150
+  ignores_function_declarations: false
+  ignores_comments: false
+  ignores_urls: true
+
+# File Length
+file_length:
+  warning: 400
+  error: 600
+  ignore_comment_only_lines: true
+
+# Type Body Length
+type_body_length:
+  warning: 300
+  error: 500
+
+# Function Body Length
+function_body_length:
+  warning: 40
+  error: 80
+
+# Function Parameter Count
+function_parameter_count:
+  warning: 5
+  error: 8
+
+# Cyclomatic Complexity
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+  ignores_case_statements: false
+
+# Nesting Depth
+nesting:
+  type_level:
+    warning: 2
+  function_level:
+    warning: 4
+
+# Identifier Naming
+identifier_name:
+  min_length:
+    warning: 2
+    error: 1
+  max_length:
+    warning: 50
+    error: 60
+  excluded:
+    - id
+    - i
+    - j
+    - x
+    - y
+    - z
+  validates_start_with_lowercase: true
+
+type_name:
+  min_length: 3
+  max_length:
+    warning: 40
+    error: 50
+  validates_start_with_lowercase: false
+  excluded: []
+
+# Multiline Arguments
+multiline_arguments:
+  first_argument_location: next_line
+  only_enforce_after_first_closure_on_first_line: false
+
+# Documentation
+missing_docs:
+  warning:
+    - public
+    - open
+  excludes_extensions: true
+  excludes_inherited_types: true
+
+# Type Contents Order
+type_contents_order:
+  order:
+    - case
+    - associated_type
+    - type_alias
+    - subtype
+    - type_property
+    - instance_property
+    - ib_outlet
+    - ib_inspectable
+    - initializer
+    - type_method
+    - view_life_cycle_method
+    - ib_action
+    - other_method
+    - subscript
+
+# Modifier Order
+modifier_order:
+  preferred_modifier_order:
+    - override
+    - acl
+    - setterACL
+    - dynamic
+    - mutators
+    - lazy
+    - final
+    - required
+    - convenience
+    - typeMethods
+    - owned
+
+# Number Separator
+number_separator:
+  minimum_length: 5
+  minimum_fraction_length: 5
+
+# Vertical Whitespace
+vertical_whitespace:
+  max_empty_lines: 1
+
+# Closure Parameter Position
+closure_parameter_position:
+  severity: error
+
+# Explicit ACL
+explicit_top_level_acl:
+  severity: warning
+
+# Implicit Return
+implicit_return:
+  included:
+    - closure
+    - function
+    - getter
+
+# Force Unwrapping (warn but don't error for now)
+force_unwrapping:
+  severity: warning
+
+# Discouraged Direct Init
+explicit_init:
+  severity: warning
+
+# ============================================
+# INCLUSIONS & EXCLUSIONS
+# ============================================
+
+included:
+  - Gleis/Sources
+  - GleisWidget
+
+excluded:
+  - Pods
+  - Carthage
+  - .build
+  - build
+  - DerivedData
+  - fastlane
+  - vendor
+  - "*.generated.swift"
+  - "*/Generated/*"
+  - "*/Protobuf/*"
+
+# ============================================
+# REPORTER
+# ============================================
+reporter: "xcode"
+
+# ============================================
+# CUSTOM RULES
+# ============================================
+custom_rules:
+  # Avoid hardcoded strings
+  no_hardcoded_strings:
+    name: "No Hardcoded Strings"
+    regex: '(Text|\.title|\.message)\s*\(\s*"[^"]+"\s*\)'
+    match_kinds:
+      - string
+    message: "Consider using localized strings instead of hardcoded text"
+    severity: warning
+
+  # Prefer self for clarity in closures
+  multiple_empty_lines:
+    name: "Multiple Empty Lines"
+    regex: '\n\n\n+'
+    message: "Use only one empty line between declarations"
+    severity: warning
+
+  # Force unwrapping in production code
+  force_unwrap_production:
+    name: "Avoid Force Unwrap"
+    regex: '!\s*(?!is\s|as\s)'
+    message: "Avoid using ! force unwrapping. Use optional binding or guard instead"
+    severity: warning
+
+  # Print statements in production
+  no_print_statements:
+    name: "No Print Statements"
+    regex: '\bprint\s*\('
+    message: "Use proper logging instead of print statements"
+    severity: warning

@@ -1,0 +1,168 @@
+{
+  // ============================================
+  // SWIFT EXTENSION (Official - 2026)
+  // ============================================
+  // Extension: "Swift" by swiftlang (swiftlang.swift-vscode)
+  // https://marketplace.visualstudio.com/items?itemName=swiftlang.swift-vscode
+
+  // Toolchain selection (auto-detected by default)
+  // Use Command Palette: "Swift: Select Toolchain..." to switch between versions
+
+  // Background compilation for real-time errors
+  "swift.backgroundCompilation": true,
+
+  // Diagnostics configuration
+  "swift.diagnosticsCollection": "keepAll",
+  "swift.diagnosticsStyle": "llvm",
+
+  // Swift testing
+  "swift.testEnvironmentVariables": {},
+
+  // ============================================
+  // SOURCEKIT-LSP (Language Server)
+  // ============================================
+  // Note: Path is auto-detected from toolchain - DO NOT manually configure
+  // The extension automatically uses SourceKit-LSP from your Swift toolchain
+
+  // Enable experimental background indexing for better performance
+  "swift.sourcekit-lsp.backgroundIndexing": true,
+
+  // ============================================
+  // CODE FORMATTING
+  // ============================================
+  // Option 1: Apple's swift-format (built into Xcode 16+)
+  // Run manually: xcrun swift-format format <file>
+  // Config file: .swift-format (JSON format)
+
+  // Option 2: SwiftFormat (Nick Lockwood's - still maintained)
+  // Requires: brew install swiftformat
+  // Extension: vknabel.vscode-swiftformat (if you want VSCode integration)
+  // Config file: .swiftformat
+
+  // ============================================
+  // CODE LINTING
+  // ============================================
+  // SwiftLint (Realm - still actively maintained in 2026)
+  // Requires: brew install swiftlint
+  // Extension: vknabel.vscode-swiftlint (for VSCode integration)
+  // Config file: .swiftlint.yml
+
+  // ============================================
+  // EDITOR SETTINGS FOR SWIFT
+  // ============================================
+  "[swift]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    },
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.trimAutoWhitespace": true,
+    "editor.rulers": [120],
+    "editor.wordWrap": "off",
+    "editor.suggest.insertMode": "replace",
+    "editor.suggestSelection": "first",
+    "editor.quickSuggestions": {
+      "other": true,
+      "comments": false,
+      "strings": false
+    },
+    "editor.snippetSuggestions": "top",
+    "editor.inlineSuggest.enabled": true,
+    "editor.semanticHighlighting.enabled": true,
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": true
+  },
+
+  // ============================================
+  // FILE ASSOCIATIONS
+  // ============================================
+  "files.associations": {
+    "*.swift": "swift",
+    "Package.swift": "swift",
+    ".swift-format": "json",
+    "*.plist": "xml",
+    "*.entitlements": "xml",
+    "*.xcconfig": "properties",
+    "*.strings": "properties",
+    "*.stringsdict": "xml"
+  },
+
+  // ============================================
+  // FILES TO EXCLUDE FROM SEARCH/WATCHER
+  // ============================================
+  "files.exclude": {
+    "**/.DS_Store": true,
+    "**/.git": true,
+    "**/xcuserdata": true,
+    "**/.build": true,
+    "**/build": true,
+    "**/.swiftpm": true,
+    "**/DerivedData": true,
+    "**/*.xcodeproj/project.xcworkspace": true,
+    "**/*.xcodeproj/xcuserdata": true
+  },
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
+    "**/.build/**": true,
+    "**/build/**": true,
+    "**/DerivedData/**": true,
+    "**/.swiftpm/**": true,
+    "**/xcuserdata/**": true
+  },
+
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "**/*.code-search": true,
+    "**/build": true,
+    "**/.build": true,
+    "**/DerivedData": true,
+    "**/.swiftpm": true,
+    "**/xcuserdata": true,
+    "**/*.xcodeproj/project.xcworkspace": true
+  },
+
+  // ============================================
+  // FILE TRIMMING & CLEANUP
+  // ============================================
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+
+  // ============================================
+  // PROBLEMS & DIAGNOSTICS
+  // ============================================
+  "problems.showCurrentInStatus": true,
+  "problems.autoReveal": true,
+
+  // ============================================
+  // GIT INTEGRATION
+  // ============================================
+  "git.ignoreLimitWarning": true,
+  "git.detectSubmodules": true,
+
+  // ============================================
+  // PERFORMANCE OPTIMIZATIONS
+  // ============================================
+  "files.autoSave": "onFocusChange",
+  "editor.minimap.enabled": true,
+  "editor.minimap.maxColumn": 120,
+
+  // ============================================
+  // BREADCRUMBS & NAVIGATION
+  // ============================================
+  "breadcrumbs.enabled": true,
+  "breadcrumbs.symbolPath": "on",
+
+  // ============================================
+  // TERMINAL
+  // ============================================
+  "terminal.integrated.env.osx": {
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:${env:PATH}"
+  }
+}
