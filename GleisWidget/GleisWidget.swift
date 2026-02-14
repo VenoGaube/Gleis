@@ -8,8 +8,7 @@ struct SelectTransportIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Select Transport"
     static var description: IntentDescription = "Choose which transport to display"
 
-    @Parameter(title: "Transport Type", default: .trainCommute)
-    var transportType: TransportTypeOption
+    @Parameter(title: "Transport Type", default: .trainCommute) var transportType: TransportTypeOption
 }
 
 // MARK: - TransportTypeOption
@@ -19,7 +18,7 @@ enum TransportTypeOption: String, AppEnum {
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Transport Type"
     static var caseDisplayRepresentations: [TransportTypeOption: DisplayRepresentation] = [
-        .trainCommute: DisplayRepresentation(title: "Train", image: .init(systemName: "tram.fill"))
+        .trainCommute: DisplayRepresentation(title: "Train", image: .init(systemName: "tram.fill")),
     ]
 }
 
@@ -53,19 +52,17 @@ struct GleisProvider: AppIntentTimelineProvider {
             if remaining > 60 {
                 // Create entries for each minute until we reach 1-minute timer mode
                 let minutesUntilTimer = Int((remaining - 60) / 60) + 1
-                for i in 0..<min(minutesUntilTimer, 30) {
-                    entries.append(GleisEntry(
-                        date: now.addingTimeInterval(TimeInterval(i * 60)),
-                        data: data,
-                        configuration: configuration
-                    ))
+                for i in 0 ..< min(minutesUntilTimer, 30) {
+                    entries.append(
+                        GleisEntry(
+                            date: now.addingTimeInterval(TimeInterval(i * 60)), data: data, configuration: configuration
+                        ))
                 }
                 // Add entry at 1 minute before (when timer mode starts)
-                entries.append(GleisEntry(
-                    date: current.leaveTime.addingTimeInterval(-60),
-                    data: data,
-                    configuration: configuration
-                ))
+                entries.append(
+                    GleisEntry(
+                        date: current.leaveTime.addingTimeInterval(-60), data: data, configuration: configuration
+                    ))
             } else if remaining > 0 {
                 // Already in timer mode or about to leave
                 entries.append(GleisEntry(date: now, data: data, configuration: configuration))
@@ -81,11 +78,11 @@ struct GleisProvider: AppIntentTimelineProvider {
                 // Add entry for next connection's timer mode
                 let nextRemaining = nextCurrent.leaveTime.timeIntervalSince(nextConnectionDate)
                 if nextRemaining > 60 {
-                    entries.append(GleisEntry(
-                        date: nextCurrent.leaveTime.addingTimeInterval(-60),
-                        data: data,
-                        configuration: configuration
-                    ))
+                    entries.append(
+                        GleisEntry(
+                            date: nextCurrent.leaveTime.addingTimeInterval(-60), data: data,
+                            configuration: configuration
+                        ))
                 }
             }
 
@@ -182,21 +179,13 @@ struct GleisWidgetEntryView: View {
 
     var body: some View {
         switch family {
-        case .systemSmall:
-            SmallWidgetView(entry: entry)
-                .widgetBackground(entry: entry, colorScheme: colorScheme)
-        case .systemMedium:
-            MediumWidgetView(entry: entry)
-                .widgetBackground(entry: entry, colorScheme: colorScheme)
+        case .systemSmall: SmallWidgetView(entry: entry).widgetBackground(entry: entry, colorScheme: colorScheme)
+        case .systemMedium: MediumWidgetView(entry: entry).widgetBackground(entry: entry, colorScheme: colorScheme)
         case .accessoryCircular:
-            CircularWidgetView(entry: entry)
-                .containerBackground(for: .widget) { AccessoryWidgetBackground() }
+            CircularWidgetView(entry: entry).containerBackground(for: .widget) { AccessoryWidgetBackground() }
         case .accessoryRectangular:
-            RectangularWidgetView(entry: entry)
-                .containerBackground(for: .widget) { AccessoryWidgetBackground() }
-        default:
-            MediumWidgetView(entry: entry)
-                .widgetBackground(entry: entry, colorScheme: colorScheme)
+            RectangularWidgetView(entry: entry).containerBackground(for: .widget) { AccessoryWidgetBackground() }
+        default: MediumWidgetView(entry: entry).widgetBackground(entry: entry, colorScheme: colorScheme)
         }
     }
 }
@@ -204,9 +193,7 @@ struct GleisWidgetEntryView: View {
 extension View {
     func widgetBackground(entry: GleisEntry, colorScheme: ColorScheme) -> some View {
         let color: Color = {
-            guard let data = entry.data,
-                  let current = data.connection(at: entry.date) else
-            {
+            guard let data = entry.data, let current = data.connection(at: entry.date) else {
                 return colorScheme == .dark ? Color(.systemBackground) : .white
             }
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
@@ -216,12 +203,9 @@ extension View {
         return containerBackground(for: .widget) {
             LinearGradient(
                 colors: [
-                    color.opacity(colorScheme == .dark ? 0.45 : 0.45),
-                    color.opacity(colorScheme == .dark ? 0.12 : 0.1),
-                    .clear
-                ],
-                startPoint: .trailing,
-                endPoint: .leading
+                    color.opacity(colorScheme == .dark ? 0.45 : 0.45), color.opacity(colorScheme == .dark ? 0.12 : 0.1),
+                    .clear,
+                ], startPoint: .trailing, endPoint: .leading
             )
         }
     }
@@ -241,8 +225,7 @@ struct SmallWidgetView: View {
 
             VStack(spacing: 0) {
                 // Top: Line badge (centered)
-                LineBadge(line: conn.lineNumber, size: .small)
-                    .padding(.top, 12)
+                LineBadge(line: conn.lineNumber, size: .small).padding(.top, 12)
 
                 Spacer(minLength: 0)
 
@@ -252,11 +235,8 @@ struct SmallWidgetView: View {
                 Spacer(minLength: 0)
 
                 // Bottom: Departure info - what you need at the station
-                DepartureInfo(connection: conn, size: .small)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-            }
-            .widgetURL(URL(string: "gleis://connection?id=\(conn.id)"))
+                DepartureInfo(connection: conn, size: .small).padding(.horizontal, 12).padding(.bottom, 12)
+            }.widgetURL(URL(string: "gleis://connection?id=\(conn.id)"))
         } else {
             EmptyWidgetView(size: .small)
         }
@@ -281,14 +261,11 @@ struct MediumWidgetView: View {
                     CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
 
                     if remaining > 0 {
-                        Text("Leave at \(current.leaveTime, style: .time)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .scalableText(minimumScale: 0.8)
+                        Text("Leave at \(current.leaveTime, style: .time)").font(.system(size: 10)).foregroundStyle(
+                            .secondary
+                        ).scalableText(minimumScale: 0.8)
                     }
-                }
-                .frame(width: 95)
-                .frame(maxHeight: .infinity)
+                }.frame(width: 95).frame(maxHeight: .infinity)
 
                 // Right: Journey details
                 VStack(alignment: .leading, spacing: 8) {
@@ -297,18 +274,13 @@ struct MediumWidgetView: View {
                         LineBadge(line: conn.lineNumber, size: .medium)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(conn.destination)
-                                .font(.subheadline.weight(.semibold))
-                                .scalableText(minimumScale: 0.8)
+                            Text(conn.destination).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
 
                             if conn.isPinned {
                                 HStack(spacing: 2) {
-                                    Image(systemName: "pin.fill")
-                                        .font(.system(size: 7))
-                                    Text("MY JOURNEY")
-                                        .font(.system(size: 7, weight: .semibold))
-                                }
-                                .foregroundStyle(.secondary)
+                                    Image(systemName: "pin.fill").font(.system(size: 7))
+                                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
+                                }.foregroundStyle(.secondary)
                             }
                         }
 
@@ -320,26 +292,21 @@ struct MediumWidgetView: View {
                     // Departure time + Platform (the critical info)
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("DEPARTURE")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
 
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 if conn.isDelayed {
-                                    Text(scheduledTime(conn.departureTime, delay: conn.delay))
-                                        .font(.title3.weight(.medium).monospacedDigit())
-                                        .strikethrough()
-                                        .foregroundStyle(.secondary)
-                                        .scalableText(minimumScale: 0.7)
+                                    Text(scheduledTime(conn.departureTime, delay: conn.delay)).font(
+                                        .title3.weight(.medium).monospacedDigit()
+                                    ).strikethrough().foregroundStyle(.secondary).scalableText(minimumScale: 0.7)
 
-                                    Text(timeFormatter.string(from: conn.departureTime))
-                                        .font(.title2.weight(.bold).monospacedDigit())
-                                        .foregroundStyle(.orange)
-                                        .scalableText(minimumScale: 0.7)
+                                    Text(timeFormatter.string(from: conn.departureTime)).font(
+                                        .title2.weight(.bold).monospacedDigit()
+                                    ).foregroundStyle(.orange).scalableText(minimumScale: 0.7)
                                 } else {
-                                    Text(timeFormatter.string(from: conn.departureTime))
-                                        .font(.title2.weight(.bold).monospacedDigit())
-                                        .scalableText(minimumScale: 0.7)
+                                    Text(timeFormatter.string(from: conn.departureTime)).font(
+                                        .title2.weight(.bold).monospacedDigit()
+                                    ).scalableText(minimumScale: 0.7)
                                 }
                             }
                         }
@@ -348,31 +315,23 @@ struct MediumWidgetView: View {
 
                         // Platform - same height as departure
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("PLATFORM")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.secondary)
+                            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
 
-                            Text(conn.platform ?? "–")
-                                .font(.title2.weight(.bold).monospacedDigit())
-                                .scalableText(minimumScale: 0.7)
+                            Text(conn.platform ?? "–").font(.title2.weight(.bold).monospacedDigit()).scalableText(
+                                minimumScale: 0.7)
                         }
                     }
 
                     // Delay indicator
                     if conn.isDelayed {
                         HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                            Text("+\(conn.delay) min delay")
-                                .font(.caption.weight(.medium))
-                        }
-                        .foregroundStyle(.orange)
+                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                            Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
+                        }.foregroundStyle(.orange)
                     }
-                }
-                .padding(14)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .widgetURL(URL(string: "gleis://connection?id=\(conn.id)"))
+                }.padding(14)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).widgetURL(
+                URL(string: "gleis://connection?id=\(conn.id)"))
         } else {
             EmptyWidgetView(size: .medium)
         }
@@ -397,49 +356,37 @@ struct CircularWidgetView: View {
 
             ZStack {
                 // Background ring
-                Circle()
-                    .stroke(lineWidth: 4)
-                    .opacity(0.2)
+                Circle().stroke(lineWidth: 4).opacity(0.2)
 
                 // Progress ring
                 if remaining > 0 {
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .widgetAccentable()
+                    Circle().trim(from: 0, to: progress).stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90)).widgetAccentable()
                 }
 
                 // Countdown
                 VStack(spacing: 0) {
                     if remaining <= 0 {
-                        Text("GO")
-                            .font(.system(size: 18, weight: .black, design: .rounded))
-                            .scalableText(minimumScale: 0.6)
+                        Text("GO").font(.system(size: 18, weight: .black, design: .rounded)).scalableText(
+                            minimumScale: 0.6)
                     } else if remaining <= 60 {
                         // Under 1 minute: live countdown with seconds
-                        Text(current.leaveTime, style: .timer)
-                            .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                            .multilineTextAlignment(.center)
-                            .scalableText(minimumScale: 0.6)
+                        Text(current.leaveTime, style: .timer).font(
+                            .system(size: 14, weight: .bold, design: .rounded).monospacedDigit()
+                        ).multilineTextAlignment(.center).scalableText(minimumScale: 0.6)
                     } else {
-                        Text("\(Int(ceil(remaining / 60)))")
-                            .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
-                            .scalableText(minimumScale: 0.6)
-                        Text("min")
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(.secondary)
+                        Text("\(Int(ceil(remaining / 60)))").font(
+                            .system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
+                        ).scalableText(minimumScale: 0.6)
+                        Text("min").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
                     }
                 }
-            }
-            .widgetURL(URL(string: "gleis://commute"))
+            }.widgetURL(URL(string: "gleis://commute"))
         } else {
             ZStack {
                 AccessoryWidgetBackground()
-                Image(systemName: "tram.fill")
-                    .font(.title3)
-            }
-            .widgetURL(URL(string: "gleis://commute"))
+                Image(systemName: "tram.fill").font(.title3)
+            }.widgetURL(URL(string: "gleis://commute"))
         }
     }
 }
@@ -458,72 +405,43 @@ struct RectangularWidgetView: View {
             VStack(alignment: .leading, spacing: 1) {
                 // Line 1: Line number + Destination
                 HStack(spacing: 5) {
-                    Text(conn.lineNumber)
-                        .fontWeight(.bold)
-                        .widgetAccentable()
-                    Text(conn.destination)
-                        .scalableText(minimumScale: 0.8)
-                }
-                .font(.headline)
+                    Text(conn.lineNumber).fontWeight(.bold).widgetAccentable()
+                    Text(conn.destination).scalableText(minimumScale: 0.8)
+                }.font(.headline)
 
                 // Line 2: Departure time + Platform
                 HStack(spacing: 5) {
-                    Text(timeFormatter.string(from: conn.departureTime))
-                        .fontWeight(.semibold)
-                        .scalableText(minimumScale: 0.8)
-                    if conn.isDelayed {
-                        Text("+\(conn.delay)'")
-                            .foregroundStyle(.orange)
-                    }
-                    Text("•")
-                        .foregroundStyle(.secondary)
-                    Text("Pl. \(conn.platform ?? "–")")
-                        .fontWeight(.semibold)
-                        .scalableText(minimumScale: 0.8)
-                }
-                .font(.subheadline)
+                    Text(timeFormatter.string(from: conn.departureTime)).fontWeight(.semibold).scalableText(
+                        minimumScale: 0.8)
+                    if conn.isDelayed { Text("+\(conn.delay)'").foregroundStyle(.orange) }
+                    Text("•").foregroundStyle(.secondary)
+                    Text("Pl. \(conn.platform ?? "–")").fontWeight(.semibold).scalableText(minimumScale: 0.8)
+                }.font(.subheadline)
 
                 // Line 3: Countdown
                 HStack(spacing: 4) {
                     if remaining <= 0 {
-                        Text("GO!")
-                            .fontWeight(.semibold)
-                            .widgetAccentable()
-                            .scalableText(minimumScale: 0.8)
+                        Text("GO!").fontWeight(.semibold).widgetAccentable().scalableText(minimumScale: 0.8)
                     } else if remaining <= 60 {
                         // Under 1 minute: live countdown with seconds
-                        Text(current.leaveTime, style: .timer)
-                            .fontWeight(.bold)
-                            .widgetAccentable()
-                            .scalableText(minimumScale: 0.8)
-                        Text("to go")
-                            .foregroundStyle(.secondary)
+                        Text(current.leaveTime, style: .timer).fontWeight(.bold).widgetAccentable().scalableText(
+                            minimumScale: 0.8)
+                        Text("to go").foregroundStyle(.secondary)
                     } else {
-                        Text(formatCountdown(remaining))
-                            .fontWeight(.bold)
-                            .widgetAccentable()
-                            .scalableText(minimumScale: 0.8)
-                        Text("to go")
-                            .foregroundStyle(.secondary)
+                        Text(formatCountdown(remaining)).fontWeight(.bold).widgetAccentable().scalableText(
+                            minimumScale: 0.8)
+                        Text("to go").foregroundStyle(.secondary)
                     }
-                }
-                .font(.subheadline)
-            }
-            .widgetURL(URL(string: "gleis://commute"))
+                }.font(.subheadline)
+            }.widgetURL(URL(string: "gleis://commute"))
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Image(systemName: "tram.fill")
-                        .widgetAccentable()
-                    Text("Gleis")
-                        .fontWeight(.semibold)
-                }
-                .font(.headline)
-                Text("Tap to set up route")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .widgetURL(URL(string: "gleis://setup"))
+                    Image(systemName: "tram.fill").widgetAccentable()
+                    Text("Gleis").fontWeight(.semibold)
+                }.font(.headline)
+                Text("Tap to set up route").font(.subheadline).foregroundStyle(.secondary)
+            }.widgetURL(URL(string: "gleis://setup"))
         }
     }
 }
@@ -560,13 +478,9 @@ struct LineBadge: View {
     }
 
     var body: some View {
-        Text(line)
-            .font(size.font)
-            .foregroundStyle(.white)
-            .scalableText(minimumScale: 0.7)
-            .padding(.vertical, size.verticalPadding)
-            .padding(.horizontal, size.horizontalPadding)
-            .background(Color.lineColor(for: line), in: Capsule())
+        Text(line).font(size.font).foregroundStyle(.white).scalableText(minimumScale: 0.7).padding(
+            .vertical, size.verticalPadding
+        ).padding(.horizontal, size.horizontalPadding).background(Color.lineColor(for: line), in: Capsule())
     }
 }
 
@@ -598,28 +512,18 @@ struct CountdownDisplay: View {
     var body: some View {
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("GO!")
-                    .font(size.mainFont)
-                    .foregroundStyle(.secondary)
-                    .scalableText(minimumScale: 0.6)
+                Text("GO!").font(size.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
             } else if remaining <= 60 {
                 // Under 1 minute: live countdown timer with seconds
-                Text(leaveTime, style: .timer)
-                    .font(size.mainFont.monospacedDigit())
-                    .foregroundStyle(urgencyColor(remaining))
-                    .multilineTextAlignment(.center)
-                    .scalableText(minimumScale: 0.6)
-                Text("leave now")
-                    .font(size.labelFont.weight(.medium))
-                    .foregroundStyle(.secondary)
+                Text(leaveTime, style: .timer).font(size.mainFont.monospacedDigit()).foregroundStyle(
+                    urgencyColor(remaining)
+                ).multilineTextAlignment(.center).scalableText(minimumScale: 0.6)
+                Text("leave now").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
             } else {
-                Text(formatCountdown(remaining))
-                    .font(size.mainFont.monospacedDigit())
-                    .foregroundStyle(urgencyColor(remaining))
-                    .scalableText(minimumScale: 0.6)
-                Text("to leave")
-                    .font(size.labelFont.weight(.medium))
-                    .foregroundStyle(.secondary)
+                Text(formatCountdown(remaining)).font(size.mainFont.monospacedDigit()).foregroundStyle(
+                    urgencyColor(remaining)
+                ).scalableText(minimumScale: 0.6)
+                Text("to leave").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
             }
         }
     }
@@ -668,24 +572,18 @@ struct DepartureInfo: View {
         HStack(alignment: .top) {
             // Departure time
             VStack(alignment: .leading, spacing: 2) {
-                Text(size.departureLabel)
-                    .font(size.labelFont)
-                    .foregroundStyle(.secondary)
+                Text(size.departureLabel).font(size.labelFont).foregroundStyle(.secondary)
 
                 if connection.isDelayed {
                     HStack(spacing: 4) {
-                        Text(timeFormatter.string(from: connection.departureTime))
-                            .font(size.valueFont)
-                            .foregroundStyle(.orange)
-                            .scalableText(minimumScale: 0.7)
-                        Text("+\(connection.delay)'")
-                            .font(size.delayFont)
-                            .foregroundStyle(.orange)
+                        Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).foregroundStyle(
+                            .orange
+                        ).scalableText(minimumScale: 0.7)
+                        Text("+\(connection.delay)'").font(size.delayFont).foregroundStyle(.orange)
                     }
                 } else {
-                    Text(timeFormatter.string(from: connection.departureTime))
-                        .font(size.valueFont)
-                        .scalableText(minimumScale: 0.7)
+                    Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
+                        minimumScale: 0.7)
                 }
             }
 
@@ -693,12 +591,8 @@ struct DepartureInfo: View {
 
             // Platform
             VStack(alignment: .trailing, spacing: 2) {
-                Text(size.platformLabel)
-                    .font(size.labelFont)
-                    .foregroundStyle(.secondary)
-                Text(connection.platform ?? "–")
-                    .font(size.valueFont)
-                    .scalableText(minimumScale: 0.7)
+                Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
+                Text(connection.platform ?? "–").font(size.valueFont).scalableText(minimumScale: 0.7)
             }
         }
     }
@@ -709,51 +603,33 @@ struct DepartureInfo: View {
 struct EmptyWidgetView: View {
     let size: EmptySize
 
-    enum EmptySize {
-        case small, medium
-    }
+    enum EmptySize { case small, medium }
 
     var body: some View {
         switch size {
         case .small:
             VStack(spacing: 10) {
                 ZStack {
-                    Circle()
-                        .fill(Color.trainBlue.opacity(0.1))
-                        .frame(width: 48, height: 48)
-                    Image(systemName: "tram.fill")
-                        .font(.title3)
-                        .foregroundStyle(Color.trainBlue)
+                    Circle().fill(Color.trainBlue.opacity(0.1)).frame(width: 48, height: 48)
+                    Image(systemName: "tram.fill").font(.title3).foregroundStyle(Color.trainBlue)
                 }
-                Text("Set up route")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .widgetURL(URL(string: "gleis://setup"))
+                Text("Set up route").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(URL(string: "gleis://setup"))
 
         case .medium:
             HStack(spacing: 16) {
                 ZStack {
-                    Circle()
-                        .fill(Color.trainBlue.opacity(0.1))
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "tram.fill")
-                        .font(.title2)
-                        .foregroundStyle(Color.trainBlue)
+                    Circle().fill(Color.trainBlue.opacity(0.1)).frame(width: 56, height: 56)
+                    Image(systemName: "tram.fill").font(.title2).foregroundStyle(Color.trainBlue)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No Route Configured")
-                        .font(.headline)
-                    Text("Tap to set up your commute")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Text("No Route Configured").font(.headline)
+                    Text("Tap to set up your commute").font(.subheadline).foregroundStyle(.secondary)
                 }
 
                 Spacer()
-            }
-            // .padding()
+            } // .padding()
             .widgetURL(URL(string: "gleis://setup"))
         }
     }
@@ -765,15 +641,9 @@ struct EmptyWidgetView: View {
 struct ScalableText: ViewModifier {
     let minimumScaleFactor: CGFloat
 
-    init(minimumScaleFactor: CGFloat = 0.5) {
-        self.minimumScaleFactor = minimumScaleFactor
-    }
+    init(minimumScaleFactor: CGFloat = 0.5) { self.minimumScaleFactor = minimumScaleFactor }
 
-    func body(content: Content) -> some View {
-        content
-            .minimumScaleFactor(minimumScaleFactor)
-            .lineLimit(1)
-    }
+    func body(content: Content) -> some View { content.minimumScaleFactor(minimumScaleFactor).lineLimit(1) }
 }
 
 extension View {
@@ -798,9 +668,7 @@ private func formatCountdown(_ seconds: TimeInterval) -> String {
     let minutes = totalMinutes % 60
 
     if hours > 0 {
-        if minutes == 0 {
-            return "\(hours)h"
-        }
+        if minutes == 0 { return "\(hours)h" }
         return "\(hours)h \(minutes)m"
     }
     return "\(minutes)m"
@@ -832,9 +700,7 @@ extension Color {
         if uppercased.hasPrefix("S") { return Color(red: 0.2, green: 0.55, blue: 0.35) }
 
         // Regional trains
-        if uppercased.hasPrefix("R") || uppercased.hasPrefix("REX") {
-            return Color(red: 0.7, green: 0.1, blue: 0.1)
-        }
+        if uppercased.hasPrefix("R") || uppercased.hasPrefix("REX") { return Color(red: 0.7, green: 0.1, blue: 0.1) }
 
         // Default railway blue
         return trainBlue
@@ -849,48 +715,37 @@ struct GleisWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: SelectTransportIntent.self, provider: GleisProvider()) { entry in
             GleisWidgetEntryView(entry: entry)
-        }
-        .configurationDisplayName("Gleis")
-        .description("Your next train at a glance")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        }.configurationDisplayName("Gleis").description("Your next train at a glance").supportedFamilies([
+            .systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular,
+        ])
     }
 }
 
 // MARK: - GleisWidgetBundle
 
 @main
-struct GleisWidgetBundle: WidgetBundle {
-    var body: some Widget { GleisWidget() }
-}
+struct GleisWidgetBundle: WidgetBundle { var body: some Widget { GleisWidget() } }
 
 // MARK: - Previews
 
-#Preview("Small", as: .systemSmall) {
-    GleisWidget()
-} timeline: {
+#Preview("Small", as: .systemSmall) { GleisWidget() } timeline: {
     GleisEntry(date: Date(), data: .placeholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: .delayedPlaceholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: nil, configuration: SelectTransportIntent())
 }
 
-#Preview("Medium", as: .systemMedium) {
-    GleisWidget()
-} timeline: {
+#Preview("Medium", as: .systemMedium) { GleisWidget() } timeline: {
     GleisEntry(date: Date(), data: .placeholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: .delayedPlaceholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: nil, configuration: SelectTransportIntent())
 }
 
-#Preview("Rectangular", as: .accessoryRectangular) {
-    GleisWidget()
-} timeline: {
+#Preview("Rectangular", as: .accessoryRectangular) { GleisWidget() } timeline: {
     GleisEntry(date: Date(), data: .placeholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: nil, configuration: SelectTransportIntent())
 }
 
-#Preview("Circular", as: .accessoryCircular) {
-    GleisWidget()
-} timeline: {
+#Preview("Circular", as: .accessoryCircular) { GleisWidget() } timeline: {
     GleisEntry(date: Date(), data: .placeholder, configuration: SelectTransportIntent())
     GleisEntry(date: Date(), data: nil, configuration: SelectTransportIntent())
 }

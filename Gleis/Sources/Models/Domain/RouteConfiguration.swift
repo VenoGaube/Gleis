@@ -7,6 +7,7 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var transportType: TransportType
     var startStation: Station?
     var endStation: Station?
+    var isStartStationManuallySelected: Bool
     var walkingTimeMinutes: Int
     var bufferTimeMinutes: Int
     var useDelayInLeaveTime: Bool?
@@ -18,21 +19,24 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var favoriteStations: [Station]
     var stationTravelTimes: [String: Int]
     var stationBufferTimes: [String: Int]
+    var excludedTrainTypes: Set<TrainType>
 
     init(transportType: TransportType) {
-        self.id = UUID()
+        id = UUID()
         self.transportType = transportType
-        self.walkingTimeMinutes = 0
-        self.bufferTimeMinutes = 0
-        self.useDelayInLeaveTime = false
-        self.maxConnections = 25
-        self.notificationSettings = NotificationSettings(transportType: transportType)
-        self.activeDays = Set(Weekday.allCases)
-        self.activeTimeRange = TimeRange()
-        self.recentStations = []
-        self.favoriteStations = []
-        self.stationTravelTimes = [:]
-        self.stationBufferTimes = [:]
+        isStartStationManuallySelected = false
+        walkingTimeMinutes = 0
+        bufferTimeMinutes = 0
+        useDelayInLeaveTime = false
+        maxConnections = 25
+        notificationSettings = NotificationSettings(transportType: transportType)
+        activeDays = Set(Weekday.allCases)
+        activeTimeRange = TimeRange()
+        recentStations = []
+        favoriteStations = []
+        stationTravelTimes = [:]
+        stationBufferTimes = [:]
+        excludedTrainTypes = []
     }
 
     func travelTime(for stationId: String?) -> Int? {
@@ -41,8 +45,11 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     }
 
     mutating func setTravelTime(_ minutes: Int?, for stationId: String) {
-        if let minutes { stationTravelTimes[stationId] = minutes }
-        else { stationTravelTimes.removeValue(forKey: stationId) }
+        if let minutes {
+            stationTravelTimes[stationId] = minutes
+        } else {
+            stationTravelTimes.removeValue(forKey: stationId)
+        }
     }
 
     func bufferTime(for stationId: String?) -> Int? {
@@ -51,8 +58,11 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     }
 
     mutating func setBufferTime(_ minutes: Int?, for stationId: String) {
-        if let minutes { stationBufferTimes[stationId] = minutes }
-        else { stationBufferTimes.removeValue(forKey: stationId) }
+        if let minutes {
+            stationBufferTimes[stationId] = minutes
+        } else {
+            stationBufferTimes.removeValue(forKey: stationId)
+        }
     }
 
     var displayMaxConnections: Int { maxConnections ?? 25 }
@@ -64,8 +74,8 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     }
 
     func leaveTime(for connection: TrainConnection) -> Date {
-        effectiveDepartureTime(for: connection)
-            .addingTimeInterval(-TimeInterval((walkingTimeMinutes + bufferTimeMinutes) * 60))
+        effectiveDepartureTime(for: connection).addingTimeInterval(
+            -TimeInterval((walkingTimeMinutes + bufferTimeMinutes) * 60))
     }
 
     /// Calculates leave time using station-specific travel time and buffer time.
@@ -82,9 +92,7 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
         if recentStations.count > 5 { recentStations.removeLast() }
     }
 
-    func isFavoriteStation(_ station: Station) -> Bool {
-        favoriteStations.contains { $0.id == station.id }
-    }
+    func isFavoriteStation(_ station: Station) -> Bool { favoriteStations.contains { $0.id == station.id } }
 
     mutating func toggleFavoriteStation(_ station: Station) {
         if isFavoriteStation(station) {
@@ -103,9 +111,9 @@ struct NotificationSettings: Codable, Equatable {
     var soundEnabled: Bool
 
     init(transportType: TransportType) {
-        self.isEnabled = true
-        self.soundEnabled = true
-        self.customMessage = transportType == .trainCommute ? "🚂 Time to catch your train!" : "🚇 Time to go!"
+        isEnabled = true
+        soundEnabled = true
+        customMessage = transportType == .trainCommute ? "🚂 Time to catch your train!" : "🚇 Time to go!"
     }
 }
 
@@ -121,19 +129,16 @@ struct TimeRange: Codable, Equatable {
 // MARK: - Weekday
 
 enum Weekday: Int, CaseIterable, Codable, Identifiable {
-    case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
+    case sunday = 1
+    case monday, tuesday, wednesday, thursday, friday, saturday
 
     var id: Int { rawValue }
-    var shortName: String {
-        ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][rawValue - 1]
-    }
+    var shortName: String { ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][rawValue - 1] }
 
     var fullName: String {
         ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][rawValue - 1]
     }
 
     /// Returns weekdays in Monday-first order for UI display
-    static var mondayFirst: [Weekday] {
-        [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]
-    }
+    static var mondayFirst: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday] }
 }

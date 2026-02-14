@@ -19,11 +19,9 @@ struct ConnectionDetailSheet: View {
                     connectionSummary
                     connectionLegs
                 }.padding()
-            }
-            .refreshable { await onRefresh?() }
-            .navigationTitle("Connection Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            }.refreshable { await onRefresh?() }.navigationTitle("Connection Details").navigationBarTitleDisplayMode(
+                .inline
+            ).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
     }
 
@@ -32,16 +30,13 @@ struct ConnectionDetailSheet: View {
             HStack(spacing: 12) {
                 LineBadge(line: connection.lineNumber)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(connection.departureStation.name) to \(connection.arrivalStation.name)")
-                        .font(.subheadline.weight(.semibold))
-                        .scalableText(minimumScale: 0.7)
+                    Text("\(connection.departureStation.name) to \(connection.arrivalStation.name)").font(
+                        .subheadline.weight(.semibold)
+                    ).scalableText(minimumScale: 0.7)
                     Text("\(Int(connection.duration / 60)) min total").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if connection
-                    .transfers >
-                    0
-                {
+                if connection.transfers > 0 {
                     Text("\(connection.transfers) transfers").font(.caption.weight(.semibold)).foregroundStyle(.orange)
                 }
             }
@@ -49,8 +44,9 @@ struct ConnectionDetailSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Depart").font(.caption2).foregroundStyle(.secondary)
                     Text(connection.departureTime, style: .time).font(.headline.monospacedDigit())
-                    if let platform = connection.platform,
-                       !platform.isEmpty { Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary) }
+                    if let platform = connection.platform, !platform.isEmpty {
+                        Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
@@ -61,8 +57,7 @@ struct ConnectionDetailSheet: View {
         }.padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    @ViewBuilder
-    private var connectionLegs: some View {
+    @ViewBuilder private var connectionLegs: some View {
         let legs = displayLegs
         VStack(alignment: .leading, spacing: 0) {
             Text("Route").font(.headline).padding(.bottom, 12)
@@ -77,16 +72,14 @@ struct ConnectionDetailSheet: View {
 
     private var displayLegs: [ConnectionLeg] {
         if connection.legs.isEmpty {
-            return [ConnectionLeg(
-                from: connection.departureStation,
-                to: connection.arrivalStation,
-                departureTime: connection.departureTime,
-                arrivalTime: connection.arrivalTime,
-                platform: connection.platform,
-                lineNumber: connection.lineNumber,
-                isWalking: false,
-                duration: connection.duration
-            )]
+            return [
+                ConnectionLeg(
+                    from: connection.departureStation, to: connection.arrivalStation,
+                    departureTime: connection.departureTime, arrivalTime: connection.arrivalTime,
+                    platform: connection.platform, lineNumber: connection.lineNumber, isWalking: false,
+                    duration: connection.duration
+                ),
+            ]
         }
         return connection.legs
     }
@@ -119,9 +112,7 @@ struct ConnectionLegRow: View {
                 legBadge
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(leg.from.name)
-                            .font(.subheadline.weight(.semibold))
-                            .scalableText(minimumScale: 0.8)
+                        Text(leg.from.name).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
                         Spacer()
                         TimeText(date: leg.departureTime)
                     }
@@ -130,19 +121,15 @@ struct ConnectionLegRow: View {
                             .foregroundStyle(.secondary)
                         Text(leg.isWalking ? "WALK" : leg.lineNumber).font(.caption).foregroundStyle(.secondary)
 
-                        if let stops = leg.stopCount, stops > 0,
-                           !leg.isWalking { Text("\(stops) stops").font(.caption2).foregroundStyle(.blue) }
+                        if let stops = leg.stopCount, stops > 0, !leg.isWalking {
+                            Text("\(stops) stops").font(.caption2).foregroundStyle(.blue)
+                        }
                         if let destination = leg.finalDestination, !leg.isWalking {
-                            Text("→ \(destination)")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                                .scalableText(minimumScale: 0.8)
+                            Text("→ \(destination)").font(.caption).foregroundStyle(.tertiary).scalableText(
+                                minimumScale: 0.8)
                         }
                         Spacer()
-                        if let duration = leg.duration,
-                           !leg
-                               .isWalking
-                        {
+                        if let duration = leg.duration, !leg.isWalking {
                             Text("\(Int(duration / 60)) min").font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -153,9 +140,7 @@ struct ConnectionLegRow: View {
                         }.foregroundStyle(.orange)
                     }
                     HStack {
-                        Text(leg.to.name)
-                            .font(.subheadline.weight(.semibold))
-                            .scalableText(minimumScale: 0.8)
+                        Text(leg.to.name).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
                         Spacer()
                         TimeText(date: leg.arrivalTime)
                     }
@@ -173,14 +158,10 @@ struct ConnectionLegRow: View {
         }
     }
 
-    @ViewBuilder
-    private var legBadge: some View {
+    @ViewBuilder private var legBadge: some View {
         if leg.isWalking {
             Image(systemName: "figure.walk").font(.headline).foregroundStyle(.white).frame(width: 44, height: 36)
-                .background(
-                    Color.gray,
-                    in: RoundedRectangle(cornerRadius: 8)
-                )
+                .background(Color.gray, in: RoundedRectangle(cornerRadius: 8))
         } else {
             LineBadge(line: leg.lineNumber)
         }
@@ -203,12 +184,12 @@ struct TransferRow: View {
                 Rectangle().fill(Color.accentColor).frame(width: 2, height: 12)
             }.frame(width: 20)
             HStack(spacing: 8) {
-                Image(systemName: isTightTransfer ? "exclamationmark.triangle.fill" : "arrow.down")
-                    .font(.caption.weight(.semibold)).foregroundStyle(isTightTransfer ? .red : .orange)
-                Text("Transfer at \(stationName)")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(isTightTransfer ? .red : .primary)
-                    .scalableText(minimumScale: 0.8)
+                Image(systemName: isTightTransfer ? "exclamationmark.triangle.fill" : "arrow.down").font(
+                    .caption.weight(.semibold)
+                ).foregroundStyle(isTightTransfer ? .red : .orange)
+                Text("Transfer at \(stationName)").font(.caption.weight(.medium)).foregroundStyle(
+                    isTightTransfer ? .red : .primary
+                ).scalableText(minimumScale: 0.8)
                 Spacer()
                 if let transferMinutes {
                     Text("\(transferMinutes) min").font(.caption.weight(isTightTransfer ? .semibold : .regular))
@@ -224,7 +205,10 @@ struct TransferRow: View {
 struct TimeText: View {
     let date: Date?
     var body: some View {
-        if let date { Text(date, style: .time).font(.subheadline.monospacedDigit()) }
-        else { Text("--").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
+        if let date {
+            Text(date, style: .time).font(.subheadline.monospacedDigit())
+        } else {
+            Text("--").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+        }
     }
 }

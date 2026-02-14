@@ -10,6 +10,7 @@ struct RouteConfigurationView: View {
     @State private var useDelayInLeaveTime: Bool = false
     @State private var maxConnections: Int = 25
     @State private var activeDays: Set<Weekday> = []
+    @State private var excludedTrainTypes: Set<TrainType> = []
     @State private var showResetConfirm = false
 
     private var config: RouteConfiguration { settingsManager.config(for: transportType) }
@@ -21,30 +22,42 @@ struct RouteConfigurationView: View {
     var body: some View {
         Form {
             Section {
-                Stepper(value: $walkingTime, in: 1...30) {
+                Stepper(value: $walkingTime, in: 1 ... 30) {
                     HStack {
-                        Image(systemName: "figure.walk").foregroundStyle(.blue); Text("Walking: \(walkingTime) min")
+                        Image(systemName: "figure.walk").foregroundStyle(.blue)
+                        Text("Walking: \(walkingTime) min")
                     }
                 }
-                Stepper(value: $bufferTime, in: 0...15) {
+                Stepper(value: $bufferTime, in: 0 ... 15) {
                     HStack {
-                        Image(systemName: "clock.badge.checkmark")
-                            .foregroundStyle(.green); Text("Buffer: \(bufferTime) min")
+                        Image(systemName: "clock.badge.checkmark").foregroundStyle(.green)
+                        Text("Buffer: \(bufferTime) min")
                     }
                 }
                 Toggle(isOn: $useDelayInLeaveTime) {
                     HStack {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.orange); Text("Use delays for leave time")
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Text("Use delays for leave time")
                     }
                 }
-                Stepper(value: $maxConnections, in: 3...50) {
+                Stepper(value: $maxConnections, in: 3 ... 50) {
                     HStack {
-                        Image(systemName: "list.number")
-                            .foregroundStyle(.purple); Text("Show: \(maxConnections) connections")
+                        Image(systemName: "list.number").foregroundStyle(.purple)
+                        Text("Show: \(maxConnections) connections")
                     }
                 }
-            } header: { Text("Timing") } footer: { Text("Example: Train at 08:30 → Leave by \(leaveTimePreview)") }
+            } header: {
+                Text("Timing")
+            } footer: {
+                Text("Example: Train at 08:30 → Leave by \(leaveTimePreview)")
+            }
+            Section {
+                TrainTypeFilterGrid(excludedTrainTypes: $excludedTrainTypes)
+            } header: {
+                Text("Train Types")
+            } footer: {
+                Text("Deselect train types to hide them from results.")
+            }
             Section("Active Days") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                     ForEach(Weekday.mondayFirst) { day in
@@ -54,39 +67,84 @@ struct RouteConfigurationView: View {
                     }
                 }.padding(.vertical, 8)
             }
-            Section { Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
-                "Reset to Defaults?",
-                isPresented: $showResetConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Reset All Settings", role: .destructive) {
-                    Haptics.notification(.warning); settingsManager.resetConfig(for: transportType); loadConfig()
+            Section {
+                Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
+                    "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
+                ) {
+                    Button("Reset All Settings", role: .destructive) {
+                        Haptics.notification(.warning)
+                        settingsManager.resetConfig(for: transportType)
+                        loadConfig()
+                    }
+                } message: {
+                    Text("This will reset all \(transportType.navigationTitle) settings to their default values.")
                 }
-            } message: {
-                Text("This will reset all \(transportType.navigationTitle) settings to their default values.")
-            } }
-        }
-        .navigationTitle(transportType.navigationTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { loadConfig() }
-        .onChange(of: walkingTime) { _, _ in saveConfig() }
-        .onChange(of: bufferTime) { _, _ in saveConfig() }
-        .onChange(of: useDelayInLeaveTime) { _, _ in saveConfig() }
-        .onChange(of: maxConnections) { _, _ in saveConfig() }
-        .onChange(of: activeDays) { _, _ in saveConfig() }
+            }
+        }.navigationTitle(transportType.navigationTitle).navigationBarTitleDisplayMode(.inline).onAppear {
+            loadConfig()
+        }.onChange(of: walkingTime) { _, _ in saveConfig() }.onChange(of: bufferTime) { _, _ in saveConfig() }.onChange(
+            of: useDelayInLeaveTime
+        ) { _, _ in saveConfig() }.onChange(of: maxConnections) { _, _ in saveConfig() }.onChange(of: activeDays) { _, _ in saveConfig() }.onChange(
+            of: excludedTrainTypes
+        ) { _, _ in saveConfig() }
     }
 
     private func loadConfig() {
-        walkingTime = config.walkingTimeMinutes; bufferTime = config.bufferTimeMinutes
-        useDelayInLeaveTime = config.usesDelayInLeaveTime; maxConnections = config.displayMaxConnections
+        walkingTime = config.walkingTimeMinutes
+        bufferTime = config.bufferTimeMinutes
+        useDelayInLeaveTime = config.usesDelayInLeaveTime
+        maxConnections = config.displayMaxConnections
         activeDays = config.activeDays
+        excludedTrainTypes = config.excludedTrainTypes
     }
 
     private func saveConfig() {
         var c = config
-        c.walkingTimeMinutes = walkingTime; c.bufferTimeMinutes = bufferTime
-        c.useDelayInLeaveTime = useDelayInLeaveTime; c.maxConnections = maxConnections; c.activeDays = activeDays
+        c.walkingTimeMinutes = walkingTime
+        c.bufferTimeMinutes = bufferTime
+        c.useDelayInLeaveTime = useDelayInLeaveTime
+        c.maxConnections = maxConnections
+        c.activeDays = activeDays
+        c.excludedTrainTypes = excludedTrainTypes
         settingsManager.updateConfig(c)
+    }
+}
+
+// MARK: - TrainTypeFilterGrid
+
+struct TrainTypeFilterGrid: View {
+    @Binding var excludedTrainTypes: Set<TrainType>
+    @Environment(\.colorScheme) var colorScheme
+
+    private var filterableTypes: [TrainType] {
+        TrainType.allCases.filter { $0 != .other }
+    }
+
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
+            ForEach(filterableTypes) { type in
+                let isEnabled = !excludedTrainTypes.contains(type)
+                Button {
+                    if isEnabled {
+                        excludedTrainTypes.insert(type)
+                    } else {
+                        excludedTrainTypes.remove(type)
+                    }
+                } label: {
+                    Text(type.shortName)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(
+                            isEnabled
+                                ? Color.accentColor
+                                : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2)),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .foregroundStyle(isEnabled ? .white : .secondary)
+                }.buttonStyle(.plain)
+            }
+        }.padding(.vertical, 8)
     }
 }
 
@@ -100,13 +158,11 @@ struct DayToggle: View {
 
     var body: some View {
         Button(action: action) {
-            Text(day.shortName).font(.caption.weight(.semibold)).frame(width: 36, height: 36)
-                .background(
-                    isSelected ? Color
-                        .accentColor : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2)),
-                    in: Circle()
-                )
-                .foregroundStyle(isSelected ? .white : .primary)
+            Text(day.shortName).font(.caption.weight(.semibold)).frame(width: 36, height: 36).background(
+                isSelected
+                    ? Color.accentColor : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2)),
+                in: Circle()
+            ).foregroundStyle(isSelected ? .white : .primary)
         }.buttonStyle(.plain)
     }
 }
@@ -132,22 +188,19 @@ struct NotificationSettingsView: View {
             Section("Sound") {
                 Toggle(isOn: $soundEnabled) {
                     HStack {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .foregroundStyle(isEnabled ? .blue : .gray); Text("Play Sound")
+                        Image(systemName: "speaker.wave.2.fill").foregroundStyle(isEnabled ? .blue : .gray)
+                        Text("Play Sound")
                     }
                 }
             }.disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
             Section("Custom Message") {
-                TextField("Notification message", text: $customMessage, axis: .vertical).lineLimit(2...4)
-            }
-            .disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
+                TextField("Notification message", text: $customMessage, axis: .vertical).lineLimit(2 ... 4)
+            }.disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
+        }.navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline).onAppear { loadSettings() }.onChange(
+            of: isEnabled
+        ) { _, _ in saveSettings() }.onChange(of: soundEnabled) { _, _ in saveSettings() }.onChange(of: customMessage) {
+            _, _ in saveSettings()
         }
-        .navigationTitle("Notifications")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { loadSettings() }
-        .onChange(of: isEnabled) { _, _ in saveSettings() }
-        .onChange(of: soundEnabled) { _, _ in saveSettings() }
-        .onChange(of: customMessage) { _, _ in saveSettings() }
     }
 
     private func loadSettings() {

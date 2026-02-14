@@ -13,25 +13,18 @@ actor ConnectionCache {
         let endStationId: String
     }
 
-    private func cacheKey(for transportType: TransportType) -> String {
-        transportType.rawValue
-    }
+    private func cacheKey(for transportType: TransportType) -> String { transportType.rawValue }
 
     func save(_ connections: [TrainConnection], for transportType: TransportType, from: Station, to: Station) {
         let cached = CachedConnections(
-            connections: connections,
-            timestamp: Date(),
-            startStationId: from.id,
-            endStationId: to.id
+            connections: connections, timestamp: Date(), startStationId: from.id, endStationId: to.id
         )
         cache[cacheKey(for: transportType)] = cached
         persistToDisk(cached, for: transportType)
     }
 
     func load(
-        for transportType: TransportType,
-        from: Station,
-        to: Station
+        for transportType: TransportType, from: Station, to: Station
     ) -> (connections: [TrainConnection], isStale: Bool)? {
         let key = cacheKey(for: transportType)
 
@@ -55,9 +48,7 @@ actor ConnectionCache {
         return nil
     }
 
-    func lastUpdateTime(for transportType: TransportType) -> Date? {
-        cache[cacheKey(for: transportType)]?.timestamp
-    }
+    func lastUpdateTime(for transportType: TransportType) -> Date? { cache[cacheKey(for: transportType)]?.timestamp }
 
     // MARK: - Disk Persistence
 
@@ -76,17 +67,13 @@ actor ConnectionCache {
     }
 
     private func loadFromDisk(for transportType: TransportType) -> CachedConnections? {
-        guard let url = cacheFileURL(for: transportType),
-              let data = try? Data(contentsOf: url),
-              let cached = try? JSONDecoder().decode(CachedConnections.self, from: data) else
-        {
-            return nil
-        }
+        guard let url = cacheFileURL(for: transportType), let data = try? Data(contentsOf: url),
+              let cached = try? JSONDecoder().decode(CachedConnections.self, from: data) else { return nil }
         return cached
     }
 
     private func cacheFileURL(for transportType: TransportType) -> URL? {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("connections_\(transportType.rawValue).json")
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent(
+            "connections_\(transportType.rawValue).json")
     }
 }

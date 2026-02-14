@@ -4,17 +4,22 @@ import Foundation
 
 // MARK: - TransportServiceProtocol
 
-protocol TransportServiceProtocol {
+protocol TransportServiceProtocol: Sendable {
     func fetchConnections(from: Station, to: Station, transportType: TransportType) async throws -> [TrainConnection]
     func fetchConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType,
-        departureTime: Date,
-        count: Int
+        from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
+    ) async throws -> [TrainConnection]
+    func fetchConnectionsFromMidnight(
+        from: Station, to: Station, transportType: TransportType
+    ) async throws -> [TrainConnection]
+    func fetchMoreConnections(
+        from: Station, to: Station, transportType: TransportType, after lastDeparture: Date
     ) async throws -> [TrainConnection]
     func fetchStations(for transportType: TransportType) async throws -> [Station]
     func searchStations(matching query: String, transportType: TransportType) async throws -> [Station]
+    func searchStationsNearby(
+        latitude: Double, longitude: Double, transportType: TransportType
+    ) async throws -> [Station]
     func fetchStationBoard(stationId: String, directionId: String?) async throws -> [StationBoardEntry]
 }
 
@@ -29,6 +34,7 @@ protocol LocationServiceProtocol {
     func stopUpdatingLocation()
     func findNearestStation(from stations: [Station]) -> Station?
     func distance(to station: Station) -> CLLocationDistance?
+    func calculateDistances(to stations: [Station]) -> [(station: Station, distance: CLLocationDistance)]
 }
 
 // MARK: - NotificationServiceProtocol
@@ -36,20 +42,15 @@ protocol LocationServiceProtocol {
 protocol NotificationServiceProtocol {
     func requestAuthorization() async throws -> Bool
     func scheduleNotification(
-        for connection: TrainConnection,
-        config: RouteConfiguration,
-        type: NotificationType,
-        fromStationId: String?
-    ) async throws
+        for connection: TrainConnection, config: RouteConfiguration, type: NotificationType, fromStationId: String?
+    )
+        async throws
     func cancelNotification(id: String)
     func cancelAllNotifications()
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection)
     func cancelAllCommuteNotifications()
     func scheduleCommuteNotification(
-        route: SavedCommuteRoute,
-        day: Weekday,
-        schedule: DaySchedule,
-        direction: CommuteDirection,
+        route: SavedCommuteRoute, day: Weekday, schedule: DaySchedule, direction: CommuteDirection,
         config: RouteConfiguration
     ) async throws
 }
@@ -108,8 +109,21 @@ enum GleisError: LocalizedError {
 // MARK: - LoadingState
 
 enum LoadingState<T> {
-    case idle, loading, loaded(T), error(GleisError)
-    var isLoading: Bool { if case .loading = self { return true }; return false }
-    var isLoaded: Bool { if case .loaded = self { return true }; return false }
-    var value: T? { if case let .loaded(v) = self { return v }; return nil }
+    case idle, loading
+    case loaded(T)
+    case error(GleisError)
+    var isLoading: Bool {
+        if case .loading = self { return true }
+        return false
+    }
+
+    var isLoaded: Bool {
+        if case .loaded = self { return true }
+        return false
+    }
+
+    var value: T? {
+        if case let .loaded(v) = self { return v }
+        return nil
+    }
 }

@@ -13,6 +13,7 @@ struct TransportView: View {
     @State private var endStation: Station?
     @State private var showStartPicker = false
     @State private var showEndPicker = false
+    @State private var isUserSelectingStart = false
     @State private var detailConnection: TrainConnection?
     @State private var isSwapping = false
     @State private var showTravelTimeSheet: Station?
@@ -30,67 +31,75 @@ struct TransportView: View {
         ScrollView {
             VStack(spacing: 20) {
                 HStack(alignment: .center) {
-                    Text(viewModel.transportType.navigationTitle)
-                        .font(.largeTitle.bold())
+                    Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
                     Spacer()
-                    QuickTicketButton()
-                        .font(.title2)
-                        .padding(.trailing, 4)
+                    QuickTicketButton().font(.title2).padding(.trailing, 4)
                 }
 
-                if !networkMonitor.isConnected { OfflineBanner() }
-                else if viewModel.isShowingCachedData { CachedDataBanner(lastUpdated: viewModel.lastUpdated) }
+                if !networkMonitor.isConnected {
+                    OfflineBanner()
+                } else if viewModel.isShowingCachedData {
+                    CachedDataBanner(lastUpdated: viewModel.lastUpdated)
+                }
 
                 RouteHeader(
-                    transportType: viewModel.transportType,
-                    startStation: startStation,
-                    endStation: endStation,
+                    transportType: viewModel.transportType, startStation: startStation, endStation: endStation,
                     travelTimeToStart: viewModel.config.travelTime(for: startStation?.id),
                     travelTimeToEnd: viewModel.config.travelTime(for: endStation?.id),
+                    suggestedTravelTimeToStart: startStation.flatMap {
+                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                    },
+                    suggestedTravelTimeToEnd: endStation.flatMap {
+                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                    },
                     bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
-                    bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id),
-                    onSwap: swapStations,
-                    onStartTap: { showStartPicker = true },
-                    onEndTap: { showEndPicker = true },
-                    onSetTravelTime: { showTravelTimeSheet = $0 },
-                    onSetBufferTime: { showBufferTimeSheet = $0 }
+                    bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
+                    onStartTap: { isUserSelectingStart = true; showStartPicker = true }, onEndTap: { showEndPicker = true },
+                    onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
                 )
+
+                // Train type filter chips
+                if !viewModel.availableTrainTypes.isEmpty {
+                    TrainTypeFilterBar(
+                        availableTypes: viewModel.availableTrainTypes,
+                        excludedTypes: Binding(
+                            get: { viewModel.config.excludedTrainTypes },
+                            set: { newValue in
+                                var c = viewModel.config
+                                c.excludedTrainTypes = newValue
+                                settingsManager.updateConfig(c)
+                            }
+                        )
+                    )
+                }
 
                 // My Journey section - shown separately when pinned
                 if let pinnedJourney = settingsManager.pinnedJourney, !pinnedJourney.shouldAutoUnpin() {
                     MyJourneyCard(
-                        journey: pinnedJourney,
-                        onUnpin: { viewModel.unpinJourney(for: TrainConnection(
-                            id: pinnedJourney.connectionId,
-                            lineNumber: pinnedJourney.lineNumber,
-                            departureTime: pinnedJourney.departureTime,
-                            arrivalTime: pinnedJourney.arrivalTime,
-                            departureStation: pinnedJourney.departureStation,
-                            arrivalStation: pinnedJourney.arrivalStation,
-                            platform: pinnedJourney.platform,
-                            delay: pinnedJourney.delay,
-                            status: .onTime,
-                            transfers: pinnedJourney.transfers,
-                            legs: pinnedJourney.legs
-                        )) }
-                    )
+                        journey: pinnedJourney
+                    ) {
+                        viewModel.unpinJourney(
+                            for: TrainConnection(
+                                id: pinnedJourney.connectionId, lineNumber: pinnedJourney.lineNumber,
+                                trainType: .other, departureTime: pinnedJourney.departureTime,
+                                arrivalTime: pinnedJourney.arrivalTime,
+                                departureStation: pinnedJourney.departureStation,
+                                arrivalStation: pinnedJourney.arrivalStation, platform: pinnedJourney.platform,
+                                delay: pinnedJourney.delay, status: .onTime, transfers: pinnedJourney.transfers,
+                                legs: pinnedJourney.legs
+                            ))
+                    }
                 }
 
                 connectionsSection
-            }
-            .padding()
-        }
-        .background {
-            (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
-                .ignoresSafeArea(edges: .all)
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
-        .refreshable { viewModel.cancelCurrentFetch(); await viewModel.refreshConnections(
-            showFeedback: true,
-            isUserInitiated: true
-        ) }
-        .onAppear {
+            }.padding()
+        }.background {
+            (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
+                edges: .all)
+        }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).refreshable {
+            viewModel.cancelCurrentFetch()
+            await viewModel.refreshConnections(showFeedback: true, isUserInitiated: true)
+        }.onAppear {
             loadSavedStations()
             viewModel.startAutoRefresh()
             // Only fetch on first appearance; subsequent appears (tab switches) preserve state
@@ -98,82 +107,73 @@ struct TransportView: View {
             hasAppearedOnce = true
             viewModel.cancelCurrentFetch()
             Task { await viewModel.refreshConnections(isUserInitiated: true) }
-        }
-        .onReceive(locationService.$currentLocation.first { $0 != nil }) { _ in autoSelectStartStationIfNeeded() }
-        .onDisappear { viewModel.stopAutoRefresh() }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            // When app becomes active after being in background, refresh to filter out past connections
-            if oldPhase != .active, newPhase == .active, hasAppearedOnce {
-                viewModel.cancelCurrentFetch()
-                Task { await viewModel.refreshConnections(isUserInitiated: false) }
-            }
-        }
-        .onChange(of: startStation) { _, newValue in
-            guard !isSwapping else { return }; if let station = newValue { viewModel.addRecentStation(station) }; updateConfig(
-                start: newValue,
-                end: endStation
-            )
-        }
-        .onChange(of: endStation) { _, newValue in
-            guard !isSwapping else { return }; if let station = newValue { viewModel.addRecentStation(station) }; updateConfig(
-                start: startStation,
-                end: newValue
-            )
-        }
-        .sheet(isPresented: $showStartPicker) { stationPicker(title: "From", selection: $startStation) }
-        .sheet(isPresented: $showEndPicker) { stationPicker(title: "To", selection: $endStation) }
-        .sheet(item: $detailConnection) { ConnectionDetailSheet(connection: $0) }
-        .sheet(item: $showTravelTimeSheet) { station in TravelTimeSheet(
-            station: station,
-            currentValue: viewModel.config.travelTime(for: station.id)
-        ) { time in updateTravelTime(time, for: station) } }
-        .sheet(item: $showBufferTimeSheet) { station in BufferTimeSheet(
-            station: station,
-            currentValue: viewModel.config.bufferTime(for: station.id)
-        ) { time in updateBufferTime(time, for: station) } }
-        .overlay(alignment: .bottom) { if let toast = viewModel.toast { ToastView(
-            message: toast.message,
-            type: toast.type
-        ).transition(.move(edge: .bottom).combined(with: .opacity)).padding(.bottom, 20) } }
-        .animation(.spring(response: 0.3), value: viewModel.toast?.message)
-        .alert("Error", isPresented: $viewModel.showError) { Button("OK") { viewModel.showError = false } } message: {
-            Text(viewModel.errorMessage ?? "Unknown error")
-        }
-        .accentTheme(for: viewModel.transportType)
+        }.onReceive(locationService.$currentLocation) { _ in autoSelectStartStationIfNeeded() }
+            .onDisappear { viewModel.stopAutoRefresh() }.onChange(of: scenePhase) { oldPhase, newPhase in
+                // When app becomes active after being in background, refresh to filter out past connections
+                if oldPhase != .active, newPhase == .active, hasAppearedOnce {
+                    viewModel.cancelCurrentFetch()
+                    Task { await viewModel.refreshConnections(isUserInitiated: false) }
+                }
+            }.onChange(of: startStation) { _, newValue in
+                guard !isSwapping else { return }
+                if let station = newValue { viewModel.addRecentStation(station) }
+                let wasManuallySelected = viewModel.config.isStartStationManuallySelected
+                updateConfig(start: newValue, end: endStation, manualStartSelection: isUserSelectingStart)
+                // Show feedback when user first manually overrides auto-selection
+                if isUserSelectingStart, !wasManuallySelected {
+                    viewModel.toastManager.show("Auto-selection paused. Resume in Settings.", type: .info)
+                }
+                isUserSelectingStart = false
+            }.onChange(of: endStation) { _, newValue in
+                guard !isSwapping else { return }
+                if let station = newValue { viewModel.addRecentStation(station) }
+                updateConfig(start: startStation, end: newValue)
+            }.sheet(isPresented: $showStartPicker) { stationPicker(title: "From", selection: $startStation) }.sheet(
+                isPresented: $showEndPicker
+            ) { stationPicker(title: "To", selection: $endStation) }.sheet(item: $detailConnection) {
+                ConnectionDetailSheet(connection: $0)
+            }.sheet(item: $showTravelTimeSheet) { station in
+                TravelTimeSheet(
+                    station: station, currentValue: viewModel.config.travelTime(for: station.id),
+                    suggestedValue: viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: station.id)
+                ) { time in settingsManager.saveTravelTime(time, for: station.id, transportType: viewModel.transportType) }
+            }.sheet(item: $showBufferTimeSheet) { station in
+                BufferTimeSheet(station: station, currentValue: viewModel.config.bufferTime(for: station.id)) { time in
+                    settingsManager.saveBufferTime(time, for: station.id, transportType: viewModel.transportType)
+                }
+            }.toastOverlay(viewModel.toastManager).alert(
+                "Error", isPresented: $viewModel.showError
+            ) {
+                Button("OK") { viewModel.showError = false }
+            } message: {
+                Text(viewModel.errorMessage ?? "Unknown error")
+            }.accentTheme(for: viewModel.transportType)
     }
 
-    @ViewBuilder
-    private var connectionsSection: some View {
+    @ViewBuilder private var connectionsSection: some View {
         switch viewModel.connections {
         case .idle:
             if startStation == nil || endStation == nil {
                 EmptyStateView(
-                    icon: viewModel.transportType.icon,
-                    title: "Select Your Route",
+                    icon: viewModel.transportType.icon, title: "Select Your Route",
                     message: "Tap the stations above to choose your start and destination"
                 ).frame(maxWidth: .infinity).padding(.top, 40)
             }
-        case .loading:
-            SkeletonLoadingView(count: 3).padding(.top, 8)
+        case .loading: SkeletonLoadingView(count: 3).padding(.top, 8)
         case .loaded:
             let displayConnections = Array(viewModel.displayConnections.prefix(viewModel.config.displayMaxConnections))
             if displayConnections.isEmpty {
                 EmptyStateView(
-                    icon: "tram.fill.tunnel",
-                    title: "No Connections",
+                    icon: "tram.fill.tunnel", title: "No Connections",
                     message: "No upcoming connections found for this route",
-                    action: { Task { await viewModel.refreshConnections() } },
-                    actionTitle: "Refresh"
+                    action: { Task { await viewModel.refreshConnections() } }, actionTitle: "Refresh"
                 ).frame(maxWidth: .infinity).padding(.top, 40)
             } else {
                 connectionsList(displayConnections)
             }
         case let .error(error):
             ErrorView(error: error) { Task { await viewModel.refreshConnections() } }.frame(maxWidth: .infinity)
-                .padding(
-                    .top,
-                    40
-                )
+                .padding(.top, 40)
         }
     }
 
@@ -187,10 +187,9 @@ struct TransportView: View {
         return VStack(spacing: 12) {
             if sortedConnections.isEmpty, pinnedId != nil {
                 // All connections filtered out because one is pinned - show helpful message
-                Text("Other connections")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Other connections").font(.caption.weight(.medium)).foregroundStyle(.secondary).frame(
+                    maxWidth: .infinity, alignment: .leading
+                )
             }
 
             ForEach(sortedConnections) { displayConnection in
@@ -205,20 +204,19 @@ struct TransportView: View {
                         Haptics.selection()
                         detailConnection = displayConnection.connection
                     }
-                )
-                .id(displayConnection.id)
-                .overlay(
+                ).id(displayConnection.id).overlay(
                     Group {
                         if highlightConnectionId == displayConnection.id {
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.accentColor, lineWidth: 3)
-                                .animation(.easeInOut(duration: 0.5).repeatCount(3), value: highlightConnectionId)
+                            RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor, lineWidth: 3).animation(
+                                .easeInOut(duration: 0.5).repeatCount(3), value: highlightConnectionId
+                            )
                         }
-                    }
-                )
+                    })
             }
             if viewModel.isLoadingMore {
                 SkeletonLoadingView(count: 1)
+            } else if sortedConnections.count >= viewModel.config.displayMaxConnections {
+                EndOfListFooter(count: sortedConnections.count)
             } else {
                 BottomScrollSentinel(
                     onScrollPastEnd: { Task { await viewModel.loadMoreConnections() } },
@@ -230,14 +228,12 @@ struct TransportView: View {
 
     private func stationPicker(title: String, selection: Binding<Station?>) -> some View {
         StationPickerSheet(
-            title: title,
-            stations: viewModel.stations,
-            recentStations: viewModel.config.recentStations,
+            title: title, stations: viewModel.stations, recentStations: viewModel.config.recentStations,
             favoriteStations: viewModel.config.favoriteStations,
-            nearbyStations: viewModel.nearbyStations,
-            stationDistances: viewModel.stationDistances,
+            nearbyStations: viewModel.nearbyStationService.nearbyStations,
+            stationDistances: viewModel.nearbyStationService.stationDistances,
             searchHandler: { await viewModel.searchStations($0) },
-            onToggleFavorite: toggleFavorite,
+            onToggleFavorite: { settingsManager.toggleFavoriteStation($0, for: viewModel.transportType) },
             selection: selection
         )
     }
@@ -249,26 +245,24 @@ struct TransportView: View {
     }
 
     private func autoSelectStartStationIfNeeded() {
-        guard startStation == nil, settingsManager.appSettings.useLocationForStartStation,
-              let nearest = locationService.findNearestStation(from: viewModel.stations) else { return }
+        // Skip if auto-selection is disabled or user manually selected a station
+        guard settingsManager.appSettings.useLocationForStartStation,
+              !viewModel.config.isStartStationManuallySelected,
+              let nearest = viewModel.nearbyStationService.nearbyStations.first
+                  ?? locationService.findNearestStation(from: viewModel.stations),
+              nearest.id != startStation?.id else { return }
         startStation = nearest
     }
 
-    private func updateConfig(start: Station?, end: Station?) {
+    private func updateConfig(start: Station?, end: Station?, manualStartSelection: Bool = false) {
         var config = viewModel.config
         let oldStart = config.startStation
         let oldEnd = config.endStation
         let changed = oldStart != start || oldEnd != end
-        if changed {
-            viewModel.selectedConnection = nil
-        }
-        config.startStation = start; config.endStation = end
-        settingsManager.updateConfig(config)
-    }
-
-    private func toggleFavorite(_ station: Station) {
-        var config = viewModel.config
-        config.toggleFavoriteStation(station)
+        if changed { viewModel.selectedConnection = nil }
+        config.startStation = start
+        config.endStation = end
+        if manualStartSelection { config.isStartStationManuallySelected = true }
         settingsManager.updateConfig(config)
     }
 
@@ -280,10 +274,12 @@ struct TransportView: View {
         var tempEnd = endStation
         swap(&tempStart, &tempEnd)
 
-        // Smart swap: Ensure closest station is the start if enabled
-        if settingsManager.appSettings.useSmartStationSwap,
-           let unwrappedStart = tempStart,
-           let unwrappedEnd = tempEnd,
+        // Smart swap only applies if NOT already manually overridden
+        // Once user manually swaps, we respect their choice
+        let wasManuallySelected = viewModel.config.isStartStationManuallySelected
+        if !wasManuallySelected,
+           settingsManager.appSettings.useSmartStationSwap,
+           let unwrappedStart = tempStart, let unwrappedEnd = tempEnd,
            let distanceToTempStart = locationService.distance(to: unwrappedStart),
            let distanceToTempEnd = locationService.distance(to: unwrappedEnd),
            distanceToTempEnd < distanceToTempStart
@@ -300,27 +296,20 @@ struct TransportView: View {
 
         Task { @MainActor in
             isSwapping = false
-            updateConfig(start: startStation, end: endStation)
+            // Swap is a manual action, so set the override flag
+            updateConfig(start: startStation, end: endStation, manualStartSelection: true)
+            // Show feedback that auto-selection is now paused
+            if !wasManuallySelected {
+                viewModel.toastManager.show("Auto-selection paused. Resume in Settings.", type: .info)
+            }
         }
     }
 
-    private func updateTravelTime(_ minutes: Int?, for station: Station) {
-        var config = viewModel.config
-        config.setTravelTime(minutes, for: station.id)
-        settingsManager.updateConfig(config)
-    }
-
-    private func updateBufferTime(_ minutes: Int?, for station: Station) {
-        var config = viewModel.config
-        config.setBufferTime(minutes, for: station.id)
-        settingsManager.updateConfig(config)
-    }
 }
 
 #Preview {
     NavigationStack {
-        TransportView(transportType: .trainCommute)
-            .environmentObject(SettingsManager.shared)
-            .environmentObject(LocationService.shared)
+        TransportView(transportType: .trainCommute).environmentObject(SettingsManager.shared).environmentObject(
+            LocationService.shared)
     }
 }

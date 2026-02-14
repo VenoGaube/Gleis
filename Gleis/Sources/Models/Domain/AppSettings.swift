@@ -26,7 +26,7 @@ struct TicketCard: Identifiable, Codable, Equatable {
         self.name = name
         self.frontImageData = frontImageData
         self.backImageData = backImageData
-        self.createdAt = Date()
+        createdAt = Date()
     }
 }
 

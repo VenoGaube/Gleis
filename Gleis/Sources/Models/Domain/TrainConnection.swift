@@ -1,10 +1,110 @@
 import Foundation
 
+// MARK: - TrainType
+
+enum TrainType: String, Codable, CaseIterable, Identifiable, Comparable {
+    case rj, rjx, ice, ic, ec, en, nj // Long-distance
+    case rex, r, d // Regional
+    case s // S-Bahn
+    case u // U-Bahn
+    case bus
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .rj: "Railjet"
+        case .rjx: "Railjet Xpress"
+        case .ice: "ICE"
+        case .ic: "InterCity"
+        case .ec: "EuroCity"
+        case .en: "EuroNight"
+        case .nj: "Nightjet"
+        case .rex: "REX"
+        case .r: "Regional"
+        case .d: "D-Zug"
+        case .s: "S-Bahn"
+        case .u: "U-Bahn"
+        case .bus: "Bus"
+        case .other: "Other"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .rj: "RJ"
+        case .rjx: "RJX"
+        case .ice: "ICE"
+        case .ic: "IC"
+        case .ec: "EC"
+        case .en: "EN"
+        case .nj: "NJ"
+        case .rex: "REX"
+        case .r: "R"
+        case .d: "D"
+        case .s: "S"
+        case .u: "U"
+        case .bus: "Bus"
+        case .other: "?"
+        }
+    }
+
+    /// Derive TrainType from an OebbCategory's short name / display name
+    static func from(category: String?) -> TrainType {
+        guard let raw = category?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() else { return .other }
+        switch raw {
+        case "RJX": return .rjx
+        case "RJ": return .rj
+        case "ICE": return .ice
+        case "IC": return .ic
+        case "EC", "ECE": return .ec
+        case "EN": return .en
+        case "NJ": return .nj
+        case "REX": return .rex
+        case "R": return .r
+        case "D": return .d
+        case "S": return .s
+        case "U": return .u
+        case "BUS": return .bus
+        default:
+            if raw.hasPrefix("S") && raw.dropFirst().allSatisfy(\.isNumber) { return .s }
+            if raw.hasPrefix("U") && raw.dropFirst().allSatisfy(\.isNumber) { return .u }
+            if raw.hasPrefix("RJ") { return .rj }
+            return .other
+        }
+    }
+
+    static func < (lhs: TrainType, rhs: TrainType) -> Bool {
+        lhs.sortOrder < rhs.sortOrder
+    }
+
+    private var sortOrder: Int {
+        switch self {
+        case .rjx: 0
+        case .rj: 1
+        case .ice: 2
+        case .ic: 3
+        case .ec: 4
+        case .en: 5
+        case .nj: 6
+        case .rex: 7
+        case .r: 8
+        case .d: 9
+        case .s: 10
+        case .u: 11
+        case .bus: 12
+        case .other: 13
+        }
+    }
+}
+
 // MARK: - TrainConnection
 
 struct TrainConnection: Identifiable, Codable, Equatable {
     let id: String
     let lineNumber: String
+    let trainType: TrainType
     let departureTime: Date
     let arrivalTime: Date
     let departureStation: Station
@@ -63,6 +163,7 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
     let arrivalTime: Date?
     let platform: String?
     let lineNumber: String
+    let trainType: TrainType
     let isWalking: Bool
     let duration: TimeInterval?
     let finalDestination: String?
@@ -72,20 +173,10 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
     let intermediateStops: [IntermediateStop]
 
     init(
-        id: UUID = UUID(),
-        from: Station,
-        to: Station,
-        departureTime: Date?,
-        arrivalTime: Date?,
-        platform: String?,
-        lineNumber: String,
-        isWalking: Bool,
-        duration: TimeInterval?,
-        finalDestination: String? = nil,
-        platformChanged: Bool = false,
-        stopCount: Int? = nil,
-        delayMinutes: Int? = nil,
-        intermediateStops: [IntermediateStop] = []
+        id: UUID = UUID(), from: Station, to: Station, departureTime: Date?, arrivalTime: Date?, platform: String?,
+        lineNumber: String, trainType: TrainType = .other, isWalking: Bool, duration: TimeInterval?,
+        finalDestination: String? = nil, platformChanged: Bool = false, stopCount: Int? = nil,
+        delayMinutes: Int? = nil, intermediateStops: [IntermediateStop] = []
     ) {
         self.id = id
         self.from = from
@@ -94,6 +185,7 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
         self.arrivalTime = arrivalTime
         self.platform = platform
         self.lineNumber = lineNumber
+        self.trainType = trainType
         self.isWalking = isWalking
         self.duration = duration
         self.finalDestination = finalDestination

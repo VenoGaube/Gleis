@@ -1,16 +1,11 @@
 import Foundation
 
-final class TransportService: TransportServiceProtocol {
+final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
     private let apiClient: OebbAPIClient
-    private let szApiClient: SzAPIClient
 
-    /// Whether to enrich OEBB data with SŽ data for Slovenian trains
-    var enableSzEnrichment = true
-
-    init(apiClient: OebbAPIClient = .shared, szApiClient: SzAPIClient = .shared) {
+    init(apiClient: OebbAPIClient = .shared) {
         self.apiClient = apiClient
-        self.szApiClient = szApiClient
     }
 
     func fetchConnections(from: Station, to: Station, transportType: TransportType) async throws -> [TrainConnection] {
@@ -18,67 +13,37 @@ final class TransportService: TransportServiceProtocol {
     }
 
     func fetchConnectionsFromMidnight(
-        from: Station,
-        to: Station,
-        transportType: TransportType
+        from: Station, to: Station, transportType: TransportType
     ) async throws -> [TrainConnection] {
         try await fetchConnections(
-            from: from,
-            to: to,
-            transportType: transportType,
-            departureTime: Calendar.current.startOfDay(for: Date()),
+            from: from, to: to, transportType: transportType, departureTime: Calendar.current.startOfDay(for: Date()),
             count: 6
         )
     }
 
     func fetchMoreConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType,
-        after lastDeparture: Date
+        from: Station, to: Station, transportType: TransportType, after lastDeparture: Date
     ) async throws -> [TrainConnection] {
         try await fetchConnections(
-            from: from,
-            to: to,
-            transportType: transportType,
-            departureTime: lastDeparture.addingTimeInterval(60),
+            from: from, to: to, transportType: transportType, departureTime: lastDeparture.addingTimeInterval(60),
             count: 6
         )
     }
 
     func fetchConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType,
-        departureTime: Date,
-        count: Int
+        from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
     ) async throws -> [TrainConnection] {
         do {
             let resolvedFrom = try await resolveStation(from, transportType: transportType)
             let resolvedTo = try await resolveStation(to, transportType: transportType)
             let response = try await apiClient.fetchTimetable(
-                from: resolvedFrom.ref,
-                to: resolvedTo.ref,
-                count: count,
-                departure: departureTime
+                from: resolvedFrom.ref, to: resolvedTo.ref, count: count, departure: departureTime
             )
-            var connections = response.connections.map { ConnectionMapper.map(
-                $0,
-                from: resolvedFrom.station,
-                to: resolvedTo.station,
-                transportType: transportType
-            ) }
-
-            // Enrich with SŽ data if enabled and stations are in Slovenia
-            if enableSzEnrichment {
-                connections = await enrichWithSzData(
-                    connections,
-                    from: resolvedFrom.station,
-                    to: resolvedTo.station,
-                    departureTime: departureTime
+            let connections = response.connections.map {
+                ConnectionMapper.map(
+                    $0, from: resolvedFrom.station, to: resolvedTo.station, transportType: transportType
                 )
             }
-
             return connections
         } catch {
             if isCancellation(error) { throw CancellationError() }
@@ -88,10 +53,9 @@ final class TransportService: TransportServiceProtocol {
 
     func fetchStations(for transportType: TransportType) async throws -> [Station] {
         do {
-            return try await apiClient.searchStations(query: "", count: 25).map { ConnectionMapper.mapStation(
-                $0,
-                transportType: transportType
-            ) }
+            return try await apiClient.searchStations(query: "", count: 25).map {
+                ConnectionMapper.mapStation($0, transportType: transportType)
+            }
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -100,10 +64,42 @@ final class TransportService: TransportServiceProtocol {
 
     func searchStations(matching query: String, transportType: TransportType) async throws -> [Station] {
         do {
-            return try await apiClient.searchStations(query: query, count: 25).map { ConnectionMapper.mapStation(
-                $0,
-                transportType: transportType
-            ) }
+            return try await apiClient.searchStations(query: query, count: 25).map {
+                ConnectionMapper.mapStation($0, transportType: transportType)
+            }
+        } catch {
+            if isCancellation(error) { throw CancellationError() }
+            throw mapError(error)
+        }
+    }
+
+    func searchStationsNearby(
+        latitude: Double, longitude: Double, transportType: TransportType
+    ) async throws -> [Station] {
+        do {
+            let nearby = try await apiClient.searchStationsNearbyWithDistance(
+                latitude: latitude, longitude: longitude, count: 15
+            )
+            let mapped = nearby.map { location in
+                let coordinate: Station.Coordinate? =
+                    if let lat = location.latitude, let lon = location.longitude, lat != 0, lon != 0 {
+                        Station.Coordinate(latitude: Double(lat) / 1_000_000, longitude: Double(lon) / 1_000_000)
+                    } else {
+                        nil
+                    }
+
+                return Station(
+                    id: location.id, name: location.name, coordinate: coordinate, transportTypes: [transportType],
+                    lines: [], countryCode: location.countryCode,
+                    nearbyDistanceMeters: location.distanceMeters.map(Double.init),
+                    nearbyDurationSeconds: location.durationSeconds.map(Double.init)
+                )
+            }
+            if !mapped.isEmpty { return mapped }
+
+            return try await apiClient.searchStationsNearby(latitude: latitude, longitude: longitude, count: 15).map {
+                ConnectionMapper.mapStation($0, transportType: transportType)
+            }
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -114,8 +110,7 @@ final class TransportService: TransportServiceProtocol {
         guard let evaId = Int(stationId) else { return [] }
         do {
             let board = try await apiClient.fetchStationBoard(
-                evaId: evaId,
-                directionId: directionId.flatMap { Int($0) }
+                evaId: evaId, directionId: directionId.flatMap { Int($0) }
             )
             return (board.journey ?? []).compactMap { ConnectionMapper.mapStationBoardEntry($0) }
         } catch {
@@ -126,7 +121,10 @@ final class TransportService: TransportServiceProtocol {
 
     // MARK: - Private
 
-    private struct ResolvedStation { let station: Station; let ref: OebbStationRef }
+    private struct ResolvedStation {
+        let station: Station
+        let ref: OebbStationRef
+    }
 
     private func resolveStation(_ station: Station, transportType: TransportType) async throws -> ResolvedStation {
         if let ref = makeStationRef(for: station) { return ResolvedStation(station: station, ref: ref) }
@@ -140,10 +138,8 @@ final class TransportService: TransportServiceProtocol {
     private func makeStationRef(for station: Station) -> OebbStationRef? {
         guard let number = Int(station.id), let coordinate = station.coordinate else { return nil }
         return OebbStationRef(
-            number: number,
-            latitude: Int((coordinate.latitude * 1_000_000).rounded()),
-            longitude: Int((coordinate.longitude * 1_000_000).rounded()),
-            name: station.name
+            number: number, latitude: Int((coordinate.latitude * 1_000_000).rounded()),
+            longitude: Int((coordinate.longitude * 1_000_000).rounded()), name: station.name
         )
     }
 
@@ -155,43 +151,5 @@ final class TransportService: TransportServiceProtocol {
 
     private func isCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
-    }
-
-    // MARK: - SŽ Integration
-
-    /// Enriches OEBB connections with data from the Slovenian Railways API
-    /// Fills in missing platform and delay information where available
-    private func enrichWithSzData(
-        _ connections: [TrainConnection],
-        from: Station,
-        to: Station,
-        departureTime: Date
-    ) async -> [TrainConnection] {
-        // Convert station IDs to SŽ format
-        guard let szFromId = SzDataEnricher.szStationId(fromOebbEsn: from.id),
-              let szToId = SzDataEnricher.szStationId(fromOebbEsn: to.id) else
-        {
-            // Not Slovenian stations, return unchanged
-            return connections
-        }
-
-        do {
-            // Fetch SŽ journey data
-            let szConnections = try await szApiClient.searchJourneys(
-                originId: szFromId,
-                destinationId: szToId,
-                date: departureTime
-            )
-
-            // Enrich each OEBB connection with matching SŽ data
-            return connections.map { oebbConnection in
-                let matchingSzConnection = SzDataEnricher.findMatchingConnection(oebbConnection, in: szConnections)
-                return SzDataEnricher.enrich(oebbConnection, with: matchingSzConnection)
-            }
-        } catch {
-            // SŽ API failure shouldn't break the main flow - return original data
-            print("[SŽ Enrichment] Failed to fetch SŽ data: \(error.localizedDescription)")
-            return connections
-        }
     }
 }

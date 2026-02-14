@@ -17,7 +17,6 @@
 		B008 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008; };
 		B009 /* TransportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009; };
 ttB045 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F045; };
-		B046 /* CameraService2.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046; };
 		B010 /* OebbAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F010; };
 		B011 /* ConnectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011; };
 		B012 /* ColorExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012; };
@@ -92,7 +91,6 @@ ttB045 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04
 		F008 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		F009 /* TransportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportService.swift; sourceTree = "<group>"; };
 ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
-		F046 /* CameraService2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F010 /* OebbAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbAPIClient.swift; sourceTree = "<group>"; };
 		F011 /* ConnectionMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapper.swift; sourceTree = "<group>"; };
 		F012 /* ColorExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorExtensions.swift; sourceTree = "<group>"; };
@@ -290,7 +288,6 @@ ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = 
 				F008 /* NotificationService.swift */,
 				F009 /* TransportService.swift */,
 ttttF045 /* CameraService.swift */,
-				F046 /* CameraService2.swift */,
 				F033 /* WidgetRefreshService.swift */,
 				F042 /* NearbyStationService.swift */,
 				F043 /* StationSearchService.swift */,
@@ -504,7 +501,7 @@ ttttF045 /* CameraService.swift */,
 				B007,
 				B008,
 				B009,
-				B046,
+				B045,
 				B010,
 				B011,
 				B012,
@@ -539,6 +536,7 @@ ttttF045 /* CameraService.swift */,
 				B042,
 				B043,
 				B044,
+ttttB045,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

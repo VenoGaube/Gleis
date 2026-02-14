@@ -28,18 +28,14 @@ final class LocalStorageService: StorageServiceProtocol {
 
     private init() {}
 
-    func save(_ value: some Codable, forKey key: String) throws {
-        try defaults.set(encoder.encode(value), forKey: key)
-    }
+    func save(_ value: some Codable, forKey key: String) throws { try defaults.set(encoder.encode(value), forKey: key) }
 
     func load<T: Codable>(forKey key: String) throws -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }
         return try decoder.decode(T.self, from: data)
     }
 
-    func delete(forKey key: String) throws {
-        defaults.removeObject(forKey: key)
-    }
+    func delete(forKey key: String) throws { defaults.removeObject(forKey: key) }
 }
 
 // MARK: - SettingsManager
@@ -59,23 +55,19 @@ final class SettingsManager: ObservableObject {
 
     private init(storage: StorageServiceProtocol = LocalStorageService.shared) {
         self.storage = storage
-        self.appSettings = (try? storage.load(forKey: StorageKey.appSettings.rawValue)) ?? AppSettings()
-        self
-            .trainCommuteConfig = (try? storage.load(forKey: StorageKey.trainCommuteConfig.rawValue)) ??
-            RouteConfiguration(transportType: .trainCommute)
-        self.scheduledReminders = (try? storage.load(forKey: StorageKey.scheduledReminders.rawValue)) ?? []
-        self
-            .savedCommuteRoute = (try? storage.load(forKey: StorageKey.savedCommuteRoute.rawValue)) ??
-            SavedCommuteRoute()
-        self
-            .archivedSchedulesByStationPair = (try? storage
-                .load(forKey: StorageKey.archivedSchedulesByStationPair.rawValue)) ?? [:]
-        self.pinnedJourney = (try? storage.load(forKey: StorageKey.pinnedJourney.rawValue))
+        appSettings = (try? storage.load(forKey: StorageKey.appSettings.rawValue)) ?? AppSettings()
+        trainCommuteConfig =
+            (try? storage.load(forKey: StorageKey.trainCommuteConfig.rawValue))
+            ?? RouteConfiguration(transportType: .trainCommute)
+        scheduledReminders = (try? storage.load(forKey: StorageKey.scheduledReminders.rawValue)) ?? []
+        savedCommuteRoute =
+            (try? storage.load(forKey: StorageKey.savedCommuteRoute.rawValue)) ?? SavedCommuteRoute()
+        archivedSchedulesByStationPair =
+            (try? storage.load(forKey: StorageKey.archivedSchedulesByStationPair.rawValue)) ?? [:]
+        pinnedJourney = (try? storage.load(forKey: StorageKey.pinnedJourney.rawValue))
     }
 
-    func config(for _: TransportType) -> RouteConfiguration {
-        trainCommuteConfig
-    }
+    func config(for _: TransportType) -> RouteConfiguration { trainCommuteConfig }
 
     func updateConfig(_ config: RouteConfiguration) {
         trainCommuteConfig = config
@@ -133,6 +125,32 @@ final class SettingsManager: ObservableObject {
         unpinJourney()
     }
 
+    // MARK: - Station Favorites & Timing
+
+    func toggleFavoriteStation(_ station: Station, for transportType: TransportType = .trainCommute) {
+        var cfg = config(for: transportType)
+        cfg.toggleFavoriteStation(station)
+        updateConfig(cfg)
+    }
+
+    func saveTravelTime(_ minutes: Int?, for stationId: String, transportType: TransportType = .trainCommute) {
+        var cfg = config(for: transportType)
+        cfg.setTravelTime(minutes, for: stationId)
+        updateConfig(cfg)
+    }
+
+    func saveBufferTime(_ minutes: Int?, for stationId: String, transportType: TransportType = .trainCommute) {
+        var cfg = config(for: transportType)
+        cfg.setBufferTime(minutes, for: stationId)
+        updateConfig(cfg)
+    }
+
+    func addRecentStation(_ station: Station, for transportType: TransportType = .trainCommute) {
+        var cfg = config(for: transportType)
+        cfg.addRecentStation(station)
+        updateConfig(cfg)
+    }
+
     func resetConfig(for type: TransportType) { updateConfig(RouteConfiguration(transportType: type)) }
 
     func updateSavedCommuteRoute(_ route: SavedCommuteRoute) {
@@ -150,15 +168,15 @@ final class SettingsManager: ObservableObject {
 
     /// Archives current schedules for the given station pair
     func archiveSchedulesForCurrentStations() {
-        guard let key = stationPairKey(start: savedCommuteRoute.homeStation, end: savedCommuteRoute.workStation) else { return }
+        guard let key = stationPairKey(start: savedCommuteRoute.homeStation, end: savedCommuteRoute.workStation) else {
+            return
+        }
         // Only archive if there are schedules to save
         guard !savedCommuteRoute.toWorkSchedules.isEmpty || !savedCommuteRoute.toHomeSchedules.isEmpty else { return }
 
         let archived = ArchivedSchedules(
-            toWorkSchedules: savedCommuteRoute.toWorkSchedules,
-            toHomeSchedules: savedCommuteRoute.toHomeSchedules,
-            isEnabled: savedCommuteRoute.isEnabled,
-            notifyFiveMinBefore: savedCommuteRoute.notifyFiveMinBefore,
+            toWorkSchedules: savedCommuteRoute.toWorkSchedules, toHomeSchedules: savedCommuteRoute.toHomeSchedules,
+            isEnabled: savedCommuteRoute.isEnabled, notifyFiveMinBefore: savedCommuteRoute.notifyFiveMinBefore,
             notifyAtLeaveTime: savedCommuteRoute.notifyAtLeaveTime
         )
         archivedSchedulesByStationPair[key] = archived
@@ -196,18 +214,25 @@ final class SettingsManager: ObservableObject {
 
     /// Handles station change - archives old schedules, restores or clears for new pair
     func handleStationChange(oldStart: Station?, oldEnd: Station?, newStart: Station?, newEnd: Station?) {
+        // If nothing actually changed, do nothing
+        guard oldStart?.id != newStart?.id || oldEnd?.id != newEnd?.id else { return }
+
         let oldKey = stationPairKey(start: oldStart, end: oldEnd)
         let newKey = stationPairKey(start: newStart, end: newEnd)
 
-        // If switching to the same pair, do nothing
-        guard oldKey != newKey else { return }
+        // Archive current schedules for the old station pair (only if we had a complete pair)
+        if oldKey != nil { archiveSchedulesForCurrentStations() }
 
-        // Archive current schedules for the old station pair
-        if oldKey != nil {
-            archiveSchedulesForCurrentStations()
+        // Restore archived schedules only if switching between complete pairs
+        // Otherwise just update the stations
+        if oldKey != newKey {
+            restoreSchedulesForStationPair(start: newStart, end: newEnd)
+        } else {
+            // Same archive key but station changed - just update stations without restoring
+            var route = savedCommuteRoute
+            route.homeStation = newStart
+            route.workStation = newEnd
+            updateSavedCommuteRoute(route)
         }
-
-        // Restore or clear schedules for the new station pair
-        restoreSchedulesForStationPair(start: newStart, end: newEnd)
     }
 }

@@ -8,7 +8,8 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
     let transportTypes: [TransportType]
     let lines: [String]
     let countryCode: String?
-    var timeToStation: Int?
+    let nearbyDistanceMeters: Double?
+    let nearbyDurationSeconds: Double?
 
     struct Coordinate: Codable, Equatable, Hashable {
         let latitude: Double
@@ -17,12 +18,8 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
     }
 
     init(
-        id: String,
-        name: String,
-        coordinate: Coordinate?,
-        transportTypes: [TransportType],
-        lines: [String] = [],
-        countryCode: String? = nil
+        id: String, name: String, coordinate: Coordinate?, transportTypes: [TransportType], lines: [String] = [],
+        countryCode: String? = nil, nearbyDistanceMeters: Double? = nil, nearbyDurationSeconds: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -30,6 +27,8 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
         self.transportTypes = transportTypes
         self.lines = lines
         self.countryCode = countryCode
+        self.nearbyDistanceMeters = nearbyDistanceMeters
+        self.nearbyDurationSeconds = nearbyDurationSeconds
     }
 
     var flagEmoji: String? {

@@ -24,7 +24,5 @@ final class NetworkMonitor: ObservableObject {
 
     func clearOfflineFlag() { wasOffline = false }
 
-    deinit {
-        monitor.cancel()
-    }
+    deinit { monitor.cancel() }
 }

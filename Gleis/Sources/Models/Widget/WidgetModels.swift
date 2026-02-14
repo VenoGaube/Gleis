@@ -13,19 +13,13 @@ struct WidgetData: Codable {
 
     static let placeholder = WidgetData(
         transportType: .trainCommute,
-        connections: [WidgetConnection(
-            id: "placeholder",
-            lineNumber: "S1",
-            departureTime: Date().addingTimeInterval(900),
-            arrivalTime: Date().addingTimeInterval(2100),
-            destination: "Destination",
-            platform: "3",
-            transfers: 0,
-            delay: 0,
-            stopCount: 5
-        )],
-        leaveTimes: [Date().addingTimeInterval(600)],
-        updatedAt: Date()
+        connections: [
+            WidgetConnection(
+                id: "placeholder", lineNumber: "S1", departureTime: Date().addingTimeInterval(900),
+                arrivalTime: Date().addingTimeInterval(2100), destination: "Destination", platform: "3", transfers: 0,
+                delay: 0, stopCount: 5
+            ),
+        ], leaveTimes: [Date().addingTimeInterval(600)], updatedAt: Date()
     )
 }
 
@@ -47,17 +41,8 @@ struct WidgetConnection: Codable {
     var isDelayed: Bool { delay > 0 }
 
     init(
-        id: String,
-        lineNumber: String,
-        departureTime: Date,
-        arrivalTime: Date,
-        destination: String,
-        platform: String?,
-        transfers: Int?,
-        delay: Int,
-        stopCount: Int?,
-        hasReminder: Bool = false,
-        isPinned: Bool = false
+        id: String, lineNumber: String, departureTime: Date, arrivalTime: Date, destination: String, platform: String?,
+        transfers: Int?, delay: Int, stopCount: Int?, hasReminder: Bool = false, isPinned: Bool = false
     ) {
         self.id = id
         self.lineNumber = lineNumber

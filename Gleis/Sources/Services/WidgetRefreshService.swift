@@ -23,9 +23,7 @@ final class WidgetRefreshService {
         do {
             // Always fetch fresh, live connection data
             let connections = try await TransportService.shared.fetchConnections(
-                from: startStation,
-                to: endStation,
-                transportType: .trainCommute
+                from: startStation, to: endStation, transportType: .trainCommute
             )
 
             // Filter out past connections before processing
@@ -37,19 +35,12 @@ final class WidgetRefreshService {
             let widgetConnections = await MainActor.run {
                 futureConnections.prefix(3).map { conn -> WidgetConnection in
                     let stopCount = conn.legs.first { !$0.isWalking }?.stopCount
-                    let hasReminder = SettingsManager.shared.isReminderSet(for: conn.id) ||
-                        savedRoute.matchesSchedule(conn) != nil
+                    let hasReminder =
+                        SettingsManager.shared.isReminderSet(for: conn.id) || savedRoute.matchesSchedule(conn) != nil
                     return WidgetConnection(
-                        id: conn.id,
-                        lineNumber: conn.lineNumber,
-                        departureTime: conn.departureTime,
-                        arrivalTime: conn.arrivalTime,
-                        destination: conn.arrivalStation.name,
-                        platform: conn.platform,
-                        transfers: conn.transfers,
-                        delay: conn.delay,
-                        stopCount: stopCount,
-                        hasReminder: hasReminder
+                        id: conn.id, lineNumber: conn.lineNumber, departureTime: conn.departureTime,
+                        arrivalTime: conn.arrivalTime, destination: conn.arrivalStation.name, platform: conn.platform,
+                        transfers: conn.transfers, delay: conn.delay, stopCount: stopCount, hasReminder: hasReminder
                     )
                 }
             }
@@ -61,9 +52,7 @@ final class WidgetRefreshService {
             }
 
             let widgetData = WidgetData(
-                transportType: .trainCommute,
-                connections: Array(widgetConnections),
-                leaveTimes: leaveTimes,
+                transportType: .trainCommute, connections: Array(widgetConnections), leaveTimes: leaveTimes,
                 updatedAt: Date()
             )
 
@@ -83,9 +72,7 @@ final class WidgetRefreshService {
         // Schedule for 15 minutes (minimum allowed by iOS)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
 
-        do {
-            try BGTaskScheduler.shared.submit(request)
-        } catch {
+        do { try BGTaskScheduler.shared.submit(request) } catch {
             print("Failed to schedule background refresh: \(error)")
         }
     }

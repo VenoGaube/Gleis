@@ -12,10 +12,7 @@ final class NotificationService: NotificationServiceProtocol {
     }
 
     func scheduleNotification(
-        for connection: TrainConnection,
-        config: RouteConfiguration,
-        type: NotificationType,
-        fromStationId: String?
+        for connection: TrainConnection, config: RouteConfiguration, type: NotificationType, fromStationId: String?
     ) async throws {
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { throw GleisError.notificationPermissionDenied }
@@ -32,15 +29,11 @@ final class NotificationService: NotificationServiceProtocol {
         guard triggerDate > Date() else { return }
 
         let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute, .second],
-            from: triggerDate
+            [.year, .month, .day, .hour, .minute, .second], from: triggerDate
         )
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        try await center.add(UNNotificationRequest(
-            identifier: "\(connection.id)_\(type)",
-            content: content,
-            trigger: trigger
-        ))
+        try await center.add(
+            UNNotificationRequest(identifier: "\(connection.id)_\(type)", content: content, trigger: trigger))
     }
 
     func cancelNotification(id: String) { center.removePendingNotificationRequests(withIdentifiers: [id]) }
@@ -48,8 +41,7 @@ final class NotificationService: NotificationServiceProtocol {
 
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection) {
         let ids = [
-            "commute_\(direction.rawValue)_\(day.rawValue)_5min",
-            "commute_\(direction.rawValue)_\(day.rawValue)_leave"
+            "commute_\(direction.rawValue)_\(day.rawValue)_5min", "commute_\(direction.rawValue)_\(day.rawValue)_leave",
         ]
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
@@ -62,10 +54,7 @@ final class NotificationService: NotificationServiceProtocol {
     }
 
     func scheduleCommuteNotification(
-        route: SavedCommuteRoute,
-        day: Weekday,
-        schedule: DaySchedule,
-        direction: CommuteDirection,
+        route: SavedCommuteRoute, day: Weekday, schedule: DaySchedule, direction: CommuteDirection,
         config: RouteConfiguration
     ) async throws {
         let settings = await center.notificationSettings()
@@ -79,30 +68,19 @@ final class NotificationService: NotificationServiceProtocol {
 
         // Always schedule both notification types when notifications are enabled
         try await scheduleWeeklyNotification(
-            id: "commute_\(direction.rawValue)_\(day.rawValue)_5min",
-            weekday: day.rawValue,
-            minutes: leaveMinutes - 5,
+            id: "commute_\(direction.rawValue)_\(day.rawValue)_5min", weekday: day.rawValue, minutes: leaveMinutes - 5,
             title: "⏰ 5 Minutes",
-            body: "\(schedule.lineNumber) to \(destination) departs at \(schedule.departureTimeString)",
-            level: .active
+            body: "\(schedule.lineNumber) to \(destination) departs at \(schedule.departureTimeString)", level: .active
         )
         try await scheduleWeeklyNotification(
-            id: "commute_\(direction.rawValue)_\(day.rawValue)_leave",
-            weekday: day.rawValue,
-            minutes: leaveMinutes,
-            title: "🚨 GO!",
-            body: "Catch \(schedule.lineNumber) at \(schedule.departureTimeString) → \(destination)",
+            id: "commute_\(direction.rawValue)_\(day.rawValue)_leave", weekday: day.rawValue, minutes: leaveMinutes,
+            title: "🚨 GO!", body: "Catch \(schedule.lineNumber) at \(schedule.departureTimeString) → \(destination)",
             level: .timeSensitive
         )
     }
 
     private func scheduleWeeklyNotification(
-        id: String,
-        weekday: Int,
-        minutes: Int,
-        title: String,
-        body: String,
-        level: UNNotificationInterruptionLevel
+        id: String, weekday: Int, minutes: Int, title: String, body: String, level: UNNotificationInterruptionLevel
     ) async throws {
         var components = DateComponents()
         components.weekday = weekday
@@ -120,9 +98,7 @@ final class NotificationService: NotificationServiceProtocol {
     }
 
     private func notificationBody(
-        for connection: TrainConnection,
-        config: RouteConfiguration,
-        type: NotificationType
+        for connection: TrainConnection, config: RouteConfiguration, type: NotificationType
     ) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short

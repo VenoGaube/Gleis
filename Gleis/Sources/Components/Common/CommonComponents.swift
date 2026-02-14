@@ -6,15 +6,9 @@ import SwiftUI
 struct ScalableText: ViewModifier {
     let minimumScaleFactor: CGFloat
 
-    init(minimumScaleFactor: CGFloat = 0.5) {
-        self.minimumScaleFactor = minimumScaleFactor
-    }
+    init(minimumScaleFactor: CGFloat = 0.5) { self.minimumScaleFactor = minimumScaleFactor }
 
-    func body(content: Content) -> some View {
-        content
-            .minimumScaleFactor(minimumScaleFactor)
-            .lineLimit(1)
-    }
+    func body(content: Content) -> some View { content.minimumScaleFactor(minimumScaleFactor).lineLimit(1) }
 }
 
 extension View {
@@ -82,20 +76,11 @@ struct CustomTabBar: View {
     @Namespace private var tabAnimation
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(tabs) { tab in
-                tabButton(for: tab)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(
-            Rectangle()
-                .fill(colorScheme == .dark ? Color(.systemBackground) : .white)
-                .shadow(color: .black.opacity(0.08), radius: 12, y: -4)
-                .ignoresSafeArea(edges: .bottom)
-        )
+        HStack(spacing: 0) { ForEach(tabs) { tab in tabButton(for: tab) } }.padding(.horizontal, 16).padding(.top, 16)
+            .padding(.bottom, 16).background(
+                Rectangle().fill(colorScheme == .dark ? Color(.systemBackground) : .white).shadow(
+                    color: .black.opacity(0.08), radius: 12, y: -4
+                ).ignoresSafeArea(edges: .bottom))
     }
 
     private func tabButton(for tab: TabItem) -> some View {
@@ -104,38 +89,28 @@ struct CustomTabBar: View {
         return Button {
             Haptics.impact(.light)
             onTabTap?(tab.id)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                selectedTab = tab.id
-            }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { selectedTab = tab.id }
         } label: {
             VStack(spacing: 4) {
                 ZStack {
                     // Background pill
                     if isSelected {
-                        Capsule()
-                            .fill(accentColor)
-                            .frame(width: 56, height: 32)
-                            .matchedGeometryEffect(id: "tabPill", in: tabAnimation)
-                            .shadow(color: accentColor.opacity(0.4), radius: 8, y: 2)
+                        Capsule().fill(accentColor).frame(width: 56, height: 32).matchedGeometryEffect(
+                            id: "tabPill", in: tabAnimation
+                        ).shadow(color: accentColor.opacity(0.4), radius: 8, y: 2)
                     }
 
-                    Image(systemName: isSelected ? tab.selectedIcon : tab.icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isSelected ? .white : .secondary)
-                        .scaleEffect(isSelected ? 1.0 : 0.9)
-                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isSelected)
-                }
-                .frame(height: 32)
+                    Image(systemName: isSelected ? tab.selectedIcon : tab.icon).font(
+                        .system(size: 18, weight: .semibold)
+                    ).foregroundStyle(isSelected ? .white : .secondary).scaleEffect(isSelected ? 1.0 : 0.9).animation(
+                        .spring(response: 0.25, dampingFraction: 0.7), value: isSelected
+                    )
+                }.frame(height: 32)
 
-                Text(tab.title)
-                    .font(.caption)
-                    .fontWeight(isSelected ? .semibold : .medium)
-                    .foregroundStyle(isSelected ? accentColor : .secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(TabButtonStyle())
+                Text(tab.title).font(.caption).fontWeight(isSelected ? .semibold : .medium).foregroundStyle(
+                    isSelected ? accentColor : .secondary)
+            }.frame(maxWidth: .infinity).contentShape(Rectangle())
+        }.buttonStyle(TabButtonStyle())
     }
 }
 
@@ -143,10 +118,9 @@ struct CustomTabBar: View {
 
 struct TabButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+        configuration.label.scaleEffect(configuration.isPressed ? 0.94 : 1.0).opacity(
+            configuration.isPressed ? 0.85 : 1.0
+        ).animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -157,53 +131,79 @@ struct SwipeableTabView<Content: View>: View {
     let tabCount: Int
     @ViewBuilder let content: () -> Content
 
-    @GestureState private var dragOffset: CGFloat = 0
-    @State private var isDragging = false
+    @State private var dragOffset: CGFloat = 0
+    @State private var swipeDirection: SwipeDirection = .undetermined
+    @State private var blockTaps = false
+
+    private enum SwipeDirection { case undetermined, horizontal, vertical }
+
+    private var swipeAnimation: Animation {
+        .interpolatingSpring(stiffness: 300, damping: 30)
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(spacing: 0) {
-                content()
-                    .frame(width: geometry.size.width)
-            }
-            .frame(width: geometry.size.width, alignment: .leading)
-            .offset(x: -CGFloat(selectedTab) * geometry.size.width + dragOffset)
-            .animation(isDragging ? nil : .spring(response: 0.25, dampingFraction: 0.85), value: selectedTab)
-            .animation(isDragging ? nil : .spring(response: 0.25, dampingFraction: 0.85), value: dragOffset)
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .updating($dragOffset) { value, state, _ in
-                        // Limit drag at edges
-                        let proposedOffset = value.translation.width
-                        if selectedTab == 0, proposedOffset > 0 {
-                            state = proposedOffset * 0.3 // Rubber band effect
-                        } else if selectedTab == tabCount - 1, proposedOffset < 0 {
-                            state = proposedOffset * 0.3
-                        } else {
-                            state = proposedOffset
-                        }
-                    }
-                    .onChanged { _ in
-                        isDragging = true
-                    }
-                    .onEnded { value in
-                        isDragging = false
-                        let threshold = geometry.size.width * 0.20
-                        let predictedEnd = value.predictedEndTranslation.width
+            let screenWidth = geometry.size.width
+            HStack(spacing: 0) { content().frame(width: screenWidth) }
+                .frame(width: screenWidth, alignment: .leading)
+                .offset(x: -CGFloat(selectedTab) * screenWidth + dragOffset)
+                .animation(swipeAnimation, value: selectedTab)
+                .animation(dragOffset == 0 ? swipeAnimation : .interactiveSpring(), value: dragOffset)
+                // Block taps only during/after horizontal swipe to prevent accidental triggers
+                .allowsHitTesting(!blockTaps)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 15, coordinateSpace: .local)
+                        .onChanged { value in
+                            let horizontal = abs(value.translation.width)
+                            let vertical = abs(value.translation.height)
 
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            if predictedEnd < -threshold, selectedTab < tabCount - 1 {
-                                Haptics.impact(.light)
-                                selectedTab += 1
-                            } else if predictedEnd > threshold, selectedTab > 0 {
-                                Haptics.impact(.light)
-                                selectedTab -= 1
+                            // Determine direction once with strict threshold
+                            if swipeDirection == .undetermined {
+                                if horizontal > 20, horizontal > vertical * 2.0 {
+                                    swipeDirection = .horizontal
+                                    blockTaps = true
+                                } else if vertical > 15 {
+                                    swipeDirection = .vertical
+                                }
+                            }
+
+                            // Only track horizontal movement if confirmed horizontal
+                            guard swipeDirection == .horizontal else { return }
+
+                            let offset = value.translation.width
+                            // Rubber band at edges
+                            if (selectedTab == 0 && offset > 0) || (selectedTab == tabCount - 1 && offset < 0) {
+                                dragOffset = offset * 0.25
+                            } else {
+                                dragOffset = offset
                             }
                         }
-                    }
-            )
-        }
-        .clipped()
+                        .onEnded { value in
+                            let wasHorizontal = swipeDirection == .horizontal
+                            dragOffset = 0
+                            swipeDirection = .undetermined
+
+                            if wasHorizontal {
+                                let velocity = value.velocity.width
+                                let translation = value.translation.width
+                                let threshold = screenWidth * 0.2
+
+                                if velocity < -300 || translation < -threshold, selectedTab < tabCount - 1 {
+                                    Haptics.impact(.light)
+                                    selectedTab += 1
+                                } else if velocity > 300 || translation > threshold, selectedTab > 0 {
+                                    Haptics.impact(.light)
+                                    selectedTab -= 1
+                                }
+
+                                // Brief delay before re-enabling taps to prevent tap-through
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                    blockTaps = false
+                                }
+                            }
+                        }
+                )
+        }.clipped()
     }
 }
 
@@ -226,28 +226,16 @@ struct PageHeader: View {
         VStack(spacing: 0) {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                    if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
 
-                    Text(title)
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                    Text(title).font(.largeTitle).fontWeight(.bold)
                 }
 
                 Spacer()
 
-                if let trailingContent {
-                    trailingContent
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-        }
-        .background(colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
+                if let trailingContent { trailingContent }
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
+        }.background(colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
     }
 }
 
@@ -275,21 +263,15 @@ struct SkeletonBox: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2))
-            .frame(width: width, height: height)
-            .overlay(
-                GeometryReader { geo in
-                    LinearGradient(
-                        colors: [.clear, Color.white.opacity(0.3), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: geo.size.width * 0.6)
-                    .offset(x: shimmer ? geo.size.width : -geo.size.width * 0.6)
-                }.mask(RoundedRectangle(cornerRadius: cornerRadius))
-            )
-            .onAppear { withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) { shimmer = true } }
+        RoundedRectangle(cornerRadius: cornerRadius).fill(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2)).frame(
+            width: width, height: height
+        ).overlay(
+            GeometryReader { geo in
+                LinearGradient(
+                    colors: [.clear, Color.white.opacity(0.3), .clear], startPoint: .leading, endPoint: .trailing
+                ).frame(width: geo.size.width * 0.6).offset(x: shimmer ? geo.size.width : -geo.size.width * 0.6)
+            }.mask(RoundedRectangle(cornerRadius: cornerRadius))
+        ).onAppear { withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) { shimmer = true } }
     }
 }
 
@@ -297,9 +279,7 @@ struct SkeletonBox: View {
 
 struct SkeletonLoadingView: View {
     let count: Int
-    var body: some View {
-        VStack(spacing: 12) { ForEach(0..<count, id: \.self) { _ in SkeletonConnectionCard() } }
-    }
+    var body: some View { VStack(spacing: 12) { ForEach(0 ..< count, id: \.self) { _ in SkeletonConnectionCard() } } }
 }
 
 // MARK: - SkeletonConnectionCard
@@ -308,43 +288,65 @@ struct SkeletonConnectionCard: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
+        skeletonContent
+            .background(skeletonBackgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(skeletonBorder)
+    }
+
+    private var skeletonContent: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                SkeletonBox(width: 50, height: 36, cornerRadius: 8)
-                VStack(alignment: .leading, spacing: 6) { SkeletonBox(width: 120, height: 14); SkeletonBox(
-                    width: 80,
-                    height: 10
-                ) }
-                Spacer()
-            }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
+            skeletonHeader
             Divider().padding(.horizontal, 16)
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) { SkeletonBox(width: 50, height: 10); SkeletonBox(
-                    width: 70,
-                    height: 24
-                ) }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) { SkeletonBox(width: 50, height: 10); SkeletonBox(
-                    width: 70,
-                    height: 24
-                ) }
-            }.padding(.horizontal, 16).padding(.vertical, 12)
-            HStack(spacing: 16) {
-                SkeletonBox(width: 56, height: 56, cornerRadius: 28)
-                VStack(alignment: .leading, spacing: 6) { SkeletonBox(width: 60, height: 10); SkeletonBox(
-                    width: 80,
-                    height: 18
-                ) }
-                Spacer()
-                SkeletonBox(width: 44, height: 44, cornerRadius: 22)
-            }.padding(16).background(Color.gray.opacity(colorScheme == .dark ? 0.1 : 0.05))
+            skeletonTimeInfo
+            skeletonFooter
         }
-        .background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(
-            colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15),
-            lineWidth: 1
-        ))
+    }
+
+    private var skeletonHeader: some View {
+        HStack(spacing: 12) {
+            SkeletonBox(width: 50, height: 36, cornerRadius: 8)
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBox(width: 120, height: 14)
+                SkeletonBox(width: 80, height: 10)
+            }
+            Spacer()
+        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
+    }
+
+    private var skeletonTimeInfo: some View {
+        HStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBox(width: 50, height: 10)
+                SkeletonBox(width: 70, height: 24)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                SkeletonBox(width: 50, height: 10)
+                SkeletonBox(width: 70, height: 24)
+            }
+        }.padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var skeletonFooter: some View {
+        HStack(spacing: 16) {
+            SkeletonBox(width: 56, height: 56, cornerRadius: 28)
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBox(width: 60, height: 10)
+                SkeletonBox(width: 80, height: 18)
+            }
+            Spacer()
+            SkeletonBox(width: 44, height: 44, cornerRadius: 22)
+        }.padding(16).background(Color.gray.opacity(colorScheme == .dark ? 0.1 : 0.05))
+    }
+
+    private var skeletonBackgroundColor: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+    }
+
+    private var skeletonBorder: some View {
+        let strokeColor = colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)
+        return RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: 1)
     }
 }
 
@@ -359,12 +361,18 @@ struct ToastView: View {
         case success, error, info
         var icon: String {
             switch self {
-            case .success: return "checkmark.circle.fill"; case .error: return "xmark.circle.fill"; case .info: return "info.circle.fill"
+            case .success: "checkmark.circle.fill"
+            case .error: "xmark.circle.fill"
+            case .info: "info.circle.fill"
             }
         }
 
         var color: Color {
-            switch self { case .success: return .green; case .error: return .red; case .info: return .blue }
+            switch self {
+            case .success: .green
+            case .error: .red
+            case .info: .blue
+            }
         }
     }
 
@@ -372,11 +380,11 @@ struct ToastView: View {
         HStack(spacing: 10) {
             Image(systemName: type.icon).foregroundStyle(type.color)
             Text(message).font(.subheadline.weight(.medium))
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemBackground), in: Capsule())
-        .overlay(Capsule().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1))
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.1), radius: 10, y: 5)
+        }.padding(.horizontal, 16).padding(.vertical, 12).background(
+            colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemBackground), in: Capsule()
+        ).overlay(Capsule().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1)).shadow(
+            color: .black.opacity(colorScheme == .dark ? 0.3 : 0.1), radius: 10, y: 5
+        )
     }
 }
 
@@ -389,8 +397,7 @@ struct OfflineBanner: View {
             Text("No internet connection").font(.subheadline.weight(.medium))
             Spacer()
         }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 10).background(
-            Color.orange,
-            in: RoundedRectangle(cornerRadius: 10)
+            Color.orange, in: RoundedRectangle(cornerRadius: 10)
         )
     }
 }
@@ -419,8 +426,7 @@ struct CachedDataBanner: View {
             Spacer()
             Text("Pull to refresh").font(.caption).opacity(0.8)
         }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 10).background(
-            Color.blue.opacity(0.85),
-            in: RoundedRectangle(cornerRadius: 10)
+            Color.blue.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)
         )
     }
 }
@@ -439,24 +445,20 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 24) {
             ZStack {
-                RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 180, height: 8)
-                    .offset(y: 40)
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)).frame(
-                        width: 120,
-                        height: 60
-                    ).offset(y: 10)
+                RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 180, height: 8).offset(
+                    y: 40)
+                RoundedRectangle(cornerRadius: 8).fill(
+                    colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)
+                ).frame(width: 120, height: 60).offset(y: 10)
                 ZStack {
                     Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.25 : 0.15)).frame(
-                        width: 80,
-                        height: 80
+                        width: 80, height: 80
                     )
                     Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.08)).frame(
-                        width: 110,
-                        height: 110
+                        width: 110, height: 110
                     ).scaleEffect(animate ? 1.1 : 1.0)
-                    Image(systemName: icon).font(.system(size: 36)).foregroundStyle(Color.accentColor)
-                        .offset(x: animate ? 2 : -2)
+                    Image(systemName: icon).font(.system(size: 36)).foregroundStyle(Color.accentColor).offset(
+                        x: animate ? 2 : -2)
                 }.offset(y: -20)
             }.frame(height: 120)
             VStack(spacing: 8) {
@@ -464,15 +466,18 @@ struct EmptyStateView: View {
                 Text(message).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             if let action, let actionTitle {
-                Button { Haptics.impact(.light); action() } label: {
-                    Text(actionTitle).font(.subheadline.weight(.semibold)).padding(
-                        .horizontal,
-                        24
-                    ).padding(.vertical, 12)
+                Button {
+                    Haptics.impact(.light)
+                    action()
+                } label: {
+                    Text(actionTitle).font(.subheadline.weight(.semibold)).padding(.horizontal, 24).padding(
+                        .vertical, 12
+                    )
                 }.buttonStyle(.borderedProminent)
             }
-        }.padding(32)
-            .onAppear { withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { animate = true } }
+        }.padding(32).onAppear {
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { animate = true }
+        }
     }
 }
 
@@ -502,16 +507,16 @@ struct ErrorView: View {
             VStack(spacing: 8) {
                 Text(error.errorDescription ?? "Something went wrong").font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                if let suggestion = error
-                    .recoverySuggestion
-                {
+                if let suggestion = error.recoverySuggestion {
                     Text(suggestion).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
-            Button { Haptics.notification(.warning); onRetry() } label: { Label(
-                "Try Again",
-                systemImage: "arrow.clockwise"
-            ) }.buttonStyle(.borderedProminent)
+            Button {
+                Haptics.notification(.warning)
+                onRetry()
+            } label: {
+                Label("Try Again", systemImage: "arrow.clockwise")
+            }.buttonStyle(.borderedProminent)
         }.padding(32)
     }
 }
@@ -524,6 +529,8 @@ struct RouteHeader: View {
     let endStation: Station?
     let travelTimeToStart: Int?
     let travelTimeToEnd: Int?
+    let suggestedTravelTimeToStart: Int?
+    let suggestedTravelTimeToEnd: Int?
     let bufferTimeToStart: Int?
     let bufferTimeToEnd: Int?
     let onSwap: () -> Void
@@ -539,42 +546,44 @@ struct RouteHeader: View {
         VStack(spacing: 16) {
             HStack(spacing: 12) {
                 StationButton(
-                    label: "From",
-                    station: startStation,
-                    icon: "location.circle.fill",
-                    color: .green,
-                    action: { Haptics.selection(); onStartTap() }
-                )
-                .layoutPriority(1)
+                    label: "From", station: startStation, icon: "location.circle.fill", color: .green
+                ) {
+                    Haptics.selection()
+                    onStartTap()
+                }.layoutPriority(1)
                 Button {
-                    Haptics.impact(.light); withAnimation(.spring(response: 0.3)) { swapRotation += 180 }; onSwap()
+                    Haptics.impact(.light)
+                    withAnimation(.spring(response: 0.3)) { swapRotation += 180 }
+                    onSwap()
                 } label: {
                     Image(systemName: "arrow.left.arrow.right").font(.body.weight(.semibold)).foregroundStyle(.white)
-                        .frame(
-                            width: 36,
-                            height: 36
-                        ).background(Color.accentColor, in: Circle()).rotationEffect(.degrees(swapRotation))
+                        .frame(width: 36, height: 36).background(Color.accentColor, in: Circle()).rotationEffect(
+                            .degrees(swapRotation))
                 }.buttonStyle(.plain)
                 StationButton(
-                    label: "To",
-                    station: endStation,
-                    icon: "flag.circle.fill",
-                    color: .red,
-                    action: { Haptics.selection(); onEndTap() }
-                )
-                .layoutPriority(1)
+                    label: "To", station: endStation, icon: "flag.circle.fill", color: .red
+                ) {
+                    Haptics.selection()
+                    onEndTap()
+                }.layoutPriority(1)
             }
             HStack(spacing: 12) {
                 if let station = startStation {
                     if let time = travelTimeToStart {
-                        Button { onSetTravelTime(station) } label: {
+                        Button {
+                            onSetTravelTime(station)
+                        } label: {
                             Label("\(time) min", systemImage: "figure.walk").font(.caption).foregroundStyle(.blue)
                         }
+                    } else if let suggested = suggestedTravelTimeToStart {
+                        suggestedTravelTimeHintButton(for: station, suggested: suggested)
                     } else {
                         travelTimeHintButton(for: station)
                     }
                     if let buffer = bufferTimeToStart {
-                        Button { onSetBufferTime(station) } label: {
+                        Button {
+                            onSetBufferTime(station)
+                        } label: {
                             Label("\(buffer) min buffer", systemImage: "clock.badge.checkmark").font(.caption)
                                 .foregroundStyle(.orange)
                         }
@@ -584,31 +593,43 @@ struct RouteHeader: View {
                 }
                 Spacer()
             }
+        }.padding(16).background(colorScheme == .dark ? Color(.secondarySystemBackground) : .white).clipShape(
+            RoundedRectangle(cornerRadius: 20)
+        ).overlay(
+            RoundedRectangle(cornerRadius: 20).stroke(
+                colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1
+            )
+        ).shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 8, y: 4).onAppear {
+            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true }
         }
-        .padding(16)
-        .background(colorScheme == .dark ? Color(.secondarySystemBackground) : .white)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(
-            colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear,
-            lineWidth: 1
-        ))
-        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 8, y: 4)
-        .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true } }
     }
 
     private func travelTimeHintButton(for station: Station) -> some View {
-        Button { onSetTravelTime(station) } label: {
-            Label("Set travel time", systemImage: "plus.circle.fill")
-                .font(.caption).foregroundStyle(.blue)
-                .opacity(pulseHint ? 0.6 : 1)
+        Button {
+            onSetTravelTime(station)
+        } label: {
+            Label("Set travel time", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
+                pulseHint ? 0.6 : 1)
+        }
+    }
+
+    private func suggestedTravelTimeHintButton(for station: Station, suggested: Int) -> some View {
+        Button {
+            onSetTravelTime(station)
+        } label: {
+            Label("Suggested \(suggested) min", systemImage: "sparkles")
+                .font(.caption)
+                .foregroundStyle(.blue)
+                .opacity(pulseHint ? 0.7 : 1)
         }
     }
 
     private func bufferTimeHintButton(for station: Station) -> some View {
-        Button { onSetBufferTime(station) } label: {
-            Label("Set buffer", systemImage: "plus.circle.fill")
-                .font(.caption).foregroundStyle(.orange)
-                .opacity(pulseHint ? 0.6 : 1)
+        Button {
+            onSetBufferTime(station)
+        } label: {
+            Label("Set buffer", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.orange).opacity(
+                pulseHint ? 0.6 : 1)
         }
     }
 }
@@ -628,34 +649,22 @@ struct StationButton: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 4) {
-                    Image(systemName: icon).foregroundStyle(color); Text(label).foregroundStyle(.secondary)
-                }
-                .font(.caption)
-                Text(station?.name ?? "Select")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(station == nil ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(
+                    Image(systemName: icon).foregroundStyle(color)
+                    Text(label).foregroundStyle(.secondary)
+                }.font(.caption)
+                Text(station?.name ?? "Select").font(.subheadline.weight(.medium)).foregroundStyle(
+                    station == nil ? .secondary : .primary
+                ).lineLimit(1).truncationMode(.tail)
+            }.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).padding(12).background(
                 colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.1),
                 in: RoundedRectangle(cornerRadius: 12)
-            )
-            .accessibilityLabel("\(label) station: \(station?.name ?? "Not selected")")
-        }
-        .buttonStyle(.plain)
-        .onLongPressGesture(minimumDuration: 0.5) {
+            ).accessibilityLabel("\(label) station: \(station?.name ?? "Not selected")")
+        }.buttonStyle(.plain).onLongPressGesture(minimumDuration: 0.5) {
             guard station != nil else { return }
             Haptics.impact(.light)
             showFullName = true
-        }
-        .popover(isPresented: $showFullName, arrowEdge: .bottom) {
-            Text(station?.name ?? "")
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+        }.popover(isPresented: $showFullName, arrowEdge: .bottom) {
+            Text(station?.name ?? "").font(.subheadline.weight(.medium)).padding(.horizontal, 16).padding(.vertical, 12)
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -673,26 +682,73 @@ struct BottomScrollSentinel: View {
 
     var body: some View {
         GeometryReader { proxy in
-            Color.clear
-                .onChange(of: proxy.frame(in: .global).minY) { _, minY in
-                    guard !isLoading, !hasTriggered else { return }
-                    let screenHeight = UIScreen.main.bounds.height
-                    // Trigger when sentinel top is pulled above 85% of screen height
-                    // This means user has scrolled past the content end
-                    let triggerThreshold = screenHeight * 0.85
-                    if minY < triggerThreshold {
-                        hasTriggered = true
-                        onScrollPastEnd()
-                    }
+            Color.clear.onChange(of: proxy.frame(in: .global).minY) { _, minY in
+                guard !isLoading, !hasTriggered else { return }
+                let screenHeight = UIScreen.main.bounds.height
+                // Trigger when sentinel top is pulled above 85% of screen height
+                // This means user has scrolled past the content end
+                let triggerThreshold = screenHeight * 0.85
+                if minY < triggerThreshold {
+                    hasTriggered = true
+                    onScrollPastEnd()
                 }
-        }
-        .frame(height: 60)
-        .onChange(of: isLoading) { wasLoading, nowLoading in
+            }
+        }.frame(height: 60).onChange(of: isLoading) { wasLoading, nowLoading in
             // Reset trigger state when loading completes so user can trigger again
-            if wasLoading, !nowLoading {
-                hasTriggered = false
+            if wasLoading, !nowLoading { hasTriggered = false }
+        }
+    }
+}
+
+// MARK: - TrainTypeFilterBar
+
+struct TrainTypeFilterBar: View {
+    let availableTypes: [TrainType]
+    @Binding var excludedTypes: Set<TrainType>
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(availableTypes) { type in
+                    let isEnabled = !excludedTypes.contains(type)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if isEnabled {
+                                excludedTypes.insert(type)
+                            } else {
+                                excludedTypes.remove(type)
+                            }
+                        }
+                    } label: {
+                        Text(type.shortName)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                isEnabled
+                                    ? Color.accentColor
+                                    : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(isEnabled ? .white : .secondary)
+                    }.buttonStyle(.plain)
+                }
             }
         }
+    }
+}
+
+// MARK: - EndOfListFooter
+
+struct EndOfListFooter: View {
+    let count: Int
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Capsule().frame(width: 40, height: 4).foregroundStyle(.quaternary)
+            Text("Showing \(count) connections").font(.caption).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity).padding(.vertical, 12)
     }
 }
 
@@ -701,38 +757,53 @@ struct BottomScrollSentinel: View {
 struct TravelTimeSheet: View {
     let station: Station
     let currentValue: Int?
+    let suggestedValue: Int?
     let onSave: (Int?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var minutes: Int = 10
 
-    init(station: Station, currentValue: Int? = nil, onSave: @escaping (Int?) -> Void) {
+    init(station: Station, currentValue: Int? = nil, suggestedValue: Int? = nil, onSave: @escaping (Int?) -> Void) {
         self.station = station
         self.currentValue = currentValue
+        self.suggestedValue = suggestedValue
         self.onSave = onSave
-        _minutes = State(initialValue: currentValue ?? 10)
+        _minutes = State(initialValue: currentValue ?? suggestedValue ?? 10)
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                if let suggestedValue {
+                    Section("Suggested") {
+                        HStack {
+                            Label("\(suggestedValue) min from current location", systemImage: "sparkles")
+                            Spacer()
+                            Button("Use") { minutes = suggestedValue }
+                        }
+                    }
+                }
                 Section {
-                    Stepper(value: $minutes, in: 1...60) {
+                    Stepper(value: $minutes, in: 1 ... 60) {
                         HStack {
                             Image(systemName: "figure.walk").foregroundStyle(.blue)
                             Text("\(minutes) min")
                         }
                     }
-                } header: { Text("Travel time to \(station.name)") } footer: {
+                } header: {
+                    Text("Travel time to \(station.name)")
+                } footer: {
                     Text("How long it takes you to reach this station from home/work.")
                 }
-            }
-            .navigationTitle("Travel Time")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+            }.navigationTitle("Travel Time").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { onSave(minutes); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(minutes)
+                        dismiss()
+                    }
+                }
             }
-        }.presentationDetents([.height(220)])
+        }.presentationDetents([suggestedValue == nil ? .height(220) : .height(280)])
     }
 }
 
@@ -756,21 +827,25 @@ struct BufferTimeSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Stepper(value: $minutes, in: 0...30) {
+                    Stepper(value: $minutes, in: 0 ... 30) {
                         HStack {
                             Image(systemName: "clock.badge.checkmark").foregroundStyle(.orange)
                             Text("\(minutes) min")
                         }
                     }
-                } header: { Text("Buffer time for \(station.name)") } footer: {
+                } header: {
+                    Text("Buffer time for \(station.name)")
+                } footer: {
                     Text("Extra time before departure to account for delays, queues, or finding your platform.")
                 }
-            }
-            .navigationTitle("Buffer Time")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+            }.navigationTitle("Buffer Time").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { onSave(minutes); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(minutes)
+                        dismiss()
+                    }
+                }
             }
         }.presentationDetents([.height(220)])
     }

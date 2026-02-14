@@ -1,5 +1,5 @@
-# SwiftFormat Configuration - Best Practices
-# This configuration enforces modern Swift formatting conventions
+# SwiftFormat Configuration - Minimal, Non-Intrusive
+# Only fix obvious formatting issues, preserve developer intent
 
 # ============================================
 # SWIFTFORMAT VERSION
@@ -15,57 +15,35 @@
 # INDENTATION & SPACING
 # ============================================
 --indent 4
---indentcase false
 --tabwidth 4
 --xcodeindentation enabled
---smarttabs enabled
---ifdef indent
 
 # ============================================
-# LINE BREAKS & WRAPPING
+# LINE WRAPPING (Preserve existing)
 # ============================================
---maxwidth 120
---wraparguments before-first
---wrapparameters before-first
---wrapcollections before-first
---closingparen balanced
+--maxwidth none
 
 # ============================================
 # BRACES
 # ============================================
 --allman false
 --elseposition same-line
---guardelse same-line
 --emptybraces no-space
 
 # ============================================
-# SEMICOLONS & COMMAS
+# SEMICOLONS
 # ============================================
 --semicolons inline
---commas inline
 
 # ============================================
-# OPERATORS
-# ============================================
---operatorfunc spaced
---nospaceoperators ..<,...
---ranges spaced
-
-# ============================================
-# SPACING & WHITESPACE
+# SPACING
 # ============================================
 --trimwhitespace always
 
 # ============================================
-# RETURN & VOID
+# SELF (Minimal changes)
 # ============================================
---voidtype void
-
-# ============================================
-# SELF
-# ============================================
---self init-only
---selfrequired @autoclosure,@escaping
+--self remove
 
 # ============================================
 # IMPORTS
@@ -78,70 +56,16 @@
 --header strip
 
 # ============================================
-# ATTRIBUTES
+# MINIMAL RULES (Only non-controversial fixes)
 # ============================================
---typeattributes prev-line
---varattributes preserve
 
-# ============================================
-# MARKS
-# ============================================
---marktypes always
---markextensions always
---extensionacl on-extension
---groupedextension MARK: %c + %t
-
-# ============================================
-# MODIFIERS
-# ============================================
---modifierorder override,public,internal,fileprivate,private,static,class,final,required,convenience,lazy,dynamic,mutating,nonmutating,optional,indirect,infix,prefix,postfix
-
-# ============================================
-# ENABLED RULES
-# ============================================
---enable sortImports
---enable extensionAccessControl
---enable markTypes
-
-# Redundancy removal
---enable redundantSelf
---enable redundantType
---enable redundantInit
---enable redundantGet
---enable redundantPattern
---enable redundantLet
---enable redundantLetError
---enable redundantObjc
---enable redundantFileprivate
---enable redundantBackticks
---enable redundantBreak
+# Enable only safe, obvious fixes
+--enable redundantReturn
 --enable redundantNilInit
 --enable redundantVoidReturnType
---enable redundantExtensionACL
---enable redundantRawValues
-
-# Modernization
---enable preferKeyPath
-
-# Safety
---enable strongifiedSelf
---enable typeSugar
-
-# Readability
+--enable duplicateImports
 --enable consecutiveBlankLines
 --enable consecutiveSpaces
---enable duplicateImports
---enable blankLinesAroundMark
---enable blankLinesAtEndOfScope
---enable blankLinesAtStartOfScope
---enable blankLinesBetweenScopes
 --enable linebreakAtEndOfFile
 --enable isEmpty
 --enable void
---enable enumNamespaces
---enable hoistPatternLet
---enable wrapMultilineStatementBraces
---enable blockComments
-
-# Unused code
---enable unusedArguments

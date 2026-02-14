@@ -29,12 +29,10 @@ struct GleisApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(selectedTab: $selectedTab, deepLinkConnectionId: $deepLinkConnectionId)
-                .onOpenURL { url in
-                    handleDeepLink(url)
-                }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
+            ContentView(selectedTab: $selectedTab, deepLinkConnectionId: $deepLinkConnectionId).onOpenURL { url in
+                handleDeepLink(url)
+            }
+        }.onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
                 // Force widget refresh when app becomes active (e.g., after unlocking phone)
@@ -42,8 +40,7 @@ struct GleisApp: App {
             case .background:
                 // Schedule background refresh for fresh widget data
                 WidgetRefreshService.shared.scheduleBackgroundRefresh()
-            default:
-                break
+            default: break
             }
         }
     }
@@ -59,12 +56,9 @@ struct GleisApp: App {
         case "connection", "commute":
             selectedTab = 0
             deepLinkConnectionId = params["id"]
-        case "repeat":
-            selectedTab = 1
-        case "settings":
-            selectedTab = 2
-        default:
-            break
+        case "repeat": selectedTab = 1
+        case "settings": selectedTab = 2
+        default: break
         }
     }
 }
@@ -91,11 +85,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func userNotificationCenter(
-        _: UNUserNotificationCenter,
-        willPresent _: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
-    }
+        _: UNUserNotificationCenter, willPresent _: UNNotification
+    ) async -> UNNotificationPresentationOptions { [.banner, .sound, .badge] }
 
     func userNotificationCenter(_: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         print("Notification tapped: \(response.notification.request.content.categoryIdentifier)")
@@ -104,11 +95,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Background Tasks
 
     private func registerBackgroundTasks() {
-        BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: WidgetRefreshService.taskIdentifier,
-            using: nil
-        ) { task in
-            self.handleWidgetRefresh(task: task as! BGAppRefreshTask)
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: WidgetRefreshService.taskIdentifier, using: nil) {
+            task in self.handleWidgetRefresh(task: task as! BGAppRefreshTask)
         }
     }
 
@@ -116,13 +104,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Schedule the next refresh before handling this one
         WidgetRefreshService.shared.scheduleBackgroundRefresh()
 
-        let refreshTask = Task {
-            await WidgetRefreshService.shared.refreshWidgetData()
-        }
+        let refreshTask = Task { await WidgetRefreshService.shared.refreshWidgetData() }
 
-        task.expirationHandler = {
-            refreshTask.cancel()
-        }
+        task.expirationHandler = { refreshTask.cancel() }
 
         Task {
             await refreshTask.value

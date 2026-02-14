@@ -43,28 +43,15 @@ extension Color {
 }
 
 extension View {
-    func accentTheme(for _: TransportType) -> some View {
-        tint(.trainBlue)
-    }
+    func accentTheme(for _: TransportType) -> some View { tint(.trainBlue) }
 
     func cardStyle(colorScheme: ColorScheme) -> some View {
-        background(
-            colorScheme == .dark
-                ? Color(.secondarySystemBackground)
-                : Color(.systemBackground)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(
-            color: colorScheme == .dark ? .clear : .black.opacity(0.06),
-            radius: 8, y: 4
-        )
-        .overlay(
+        background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)).clipShape(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    colorScheme == .dark ? Color.white.opacity(0.08) : Color.clear,
-                    lineWidth: 1
-                )
-        )
+        ).shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 4).overlay(
+            RoundedRectangle(cornerRadius: 16).stroke(
+                colorScheme == .dark ? Color.white.opacity(0.08) : Color.clear, lineWidth: 1
+            ))
     }
 }
 
@@ -74,17 +61,8 @@ struct AdaptiveBackground: ViewModifier {
     @Environment(\.colorScheme) var colorScheme
 
     func body(content: Content) -> some View {
-        content
-            .background(
-                colorScheme == .dark
-                    ? Color(.systemBackground)
-                    : Color(.systemGroupedBackground)
-            )
+        content.background(colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
     }
 }
 
-extension View {
-    func adaptiveBackground() -> some View {
-        modifier(AdaptiveBackground())
-    }
-}
+extension View { func adaptiveBackground() -> some View { modifier(AdaptiveBackground()) } }

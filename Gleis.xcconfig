@@ -1,0 +1,111 @@
+// ============================================
+// Xcode Build Configuration
+// Synced with: .vscode/settings.json, .swiftlint.yml, .swiftformat
+// ============================================
+
+// ============================================
+// SWIFT VERSION (from .swiftformat)
+// ============================================
+SWIFT_VERSION = 5.9
+
+// ============================================
+// SWIFT COMPILER - WARNINGS
+// Equivalent to SwiftLint rules
+// ============================================
+
+// Treat warnings as errors (set to YES for strict mode)
+SWIFT_TREAT_WARNINGS_AS_ERRORS = NO
+
+// Enable all standard warnings
+GCC_WARN_UNUSED_VARIABLE = YES
+GCC_WARN_UNUSED_FUNCTION = YES
+GCC_WARN_UNUSED_LABEL = YES
+GCC_WARN_UNUSED_PARAMETER = YES
+GCC_WARN_UNUSED_VALUE = YES
+
+// Additional Swift warnings via compiler flags
+// -warn-long-function-bodies=200 : Warn if function body takes >200ms to type-check
+// -warn-long-expression-type-checking=100 : Warn if expression takes >100ms
+OTHER_SWIFT_FLAGS = $(inherited) -Xfrontend -warn-long-function-bodies=200 -Xfrontend -warn-long-expression-type-checking=100
+
+// ============================================
+// CLANG WARNINGS (for Obj-C bridging headers)
+// ============================================
+CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES
+CLANG_WARN_EMPTY_BODY = YES
+CLANG_WARN_BOOL_CONVERSION = YES
+CLANG_WARN_CONSTANT_CONVERSION = YES
+CLANG_WARN_ENUM_CONVERSION = YES
+CLANG_WARN_INT_CONVERSION = YES
+CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES
+CLANG_WARN_INFINITE_RECURSION = YES
+CLANG_WARN_STRICT_PROTOTYPES = YES
+CLANG_WARN_COMMA = YES
+CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE
+CLANG_WARN_UNREACHABLE_CODE = YES
+CLANG_WARN_RANGE_LOOP_ANALYSIS = YES
+CLANG_WARN_SUSPICIOUS_MOVE = YES
+CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES
+CLANG_WARN_OBJC_LITERAL_CONVERSION = YES
+CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES
+
+// ============================================
+// GCC WARNINGS
+// ============================================
+GCC_WARN_64_TO_32_BIT_CONVERSION = YES
+GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR
+GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE
+GCC_WARN_SHADOW = YES
+GCC_WARN_SIGN_COMPARE = YES
+GCC_WARN_UNDECLARED_SELECTOR = YES
+GCC_NO_COMMON_BLOCKS = YES
+
+// ============================================
+// STATIC ANALYZER (matches SwiftLint analyzer_rules)
+// ============================================
+CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES
+CLANG_ANALYZER_NONNULL = YES
+CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE
+
+// ============================================
+// SWIFT STRICT CONCURRENCY
+// ============================================
+// Options: minimal, targeted, complete
+SWIFT_STRICT_CONCURRENCY = targeted
+
+// ============================================
+// CODE SIGNING
+// ============================================
+CODE_SIGN_STYLE = Automatic
+
+// ============================================
+// PERFORMANCE
+// ============================================
+ENABLE_STRICT_OBJC_MSGSEND = YES
+
+// ============================================
+// DEBUG SETTINGS
+// ============================================
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+ENABLE_TESTABILITY = YES
+
+// ============================================
+// EXCLUDED PATHS (matches .swiftlint.yml)
+// Note: Cant directly exclude in xcconfig,
+// use .xcodeignore or Build Phase scripts
+// ============================================
+
+// ============================================
+// RUN SCRIPTS - Add these as Build Phases:
+// ============================================
+//
+// SwiftLint (Run Script Phase):
+// if which swiftlint >/dev/null; then
+//   swiftlint
+// fi
+//
+// SwiftFormat Check (Run Script Phase):
+// if which swiftformat >/dev/null; then
+//   swiftformat . --lint
+// fi
+// ============================================

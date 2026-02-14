@@ -54,7 +54,7 @@ struct OebbTimetableResponse: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.connections = (try? container.decodeIfPresent([OebbConnection].self, forKey: .connections)) ?? []
+        connections = (try? container.decodeIfPresent([OebbConnection].self, forKey: .connections)) ?? []
     }
 }
 
@@ -68,18 +68,16 @@ struct OebbConnection: Decodable {
     let switches: Int?
     let duration: Int?
 
-    enum CodingKeys: String, CodingKey {
-        case id, from, to, sections, switches, duration
-    }
+    enum CodingKeys: String, CodingKey { case id, from, to, sections, switches, duration }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(String.self, forKey: .id)
-        self.from = try container.decode(OebbConnectionStop.self, forKey: .from)
-        self.to = try container.decode(OebbConnectionStop.self, forKey: .to)
-        self.sections = try? container.decodeIfPresent([OebbSection].self, forKey: .sections)
-        self.switches = OebbDecoding.intIfPresent(container, forKey: .switches)
-        self.duration = OebbDecoding.intIfPresent(container, forKey: .duration)
+        id = try container.decode(String.self, forKey: .id)
+        from = try container.decode(OebbConnectionStop.self, forKey: .from)
+        to = try container.decode(OebbConnectionStop.self, forKey: .to)
+        sections = try? container.decodeIfPresent([OebbSection].self, forKey: .sections)
+        switches = OebbDecoding.intIfPresent(container, forKey: .switches)
+        duration = OebbDecoding.intIfPresent(container, forKey: .duration)
     }
 }
 
@@ -94,19 +92,17 @@ struct OebbSection: Decodable {
     let hasRealtime: Bool?
     let stops: [OebbConnectionStop]?
 
-    enum CodingKeys: String, CodingKey {
-        case from, to, duration, category, type, hasRealtime, stops
-    }
+    enum CodingKeys: String, CodingKey { case from, to, duration, category, type, hasRealtime, stops }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.from = try container.decode(OebbConnectionStop.self, forKey: .from)
-        self.to = try container.decode(OebbConnectionStop.self, forKey: .to)
-        self.duration = OebbDecoding.intIfPresent(container, forKey: .duration)
-        self.category = try container.decodeIfPresent(OebbCategory.self, forKey: .category)
-        self.type = try container.decodeIfPresent(String.self, forKey: .type)
-        self.hasRealtime = OebbDecoding.boolIfPresent(container, forKey: .hasRealtime)
-        self.stops = try? container.decodeIfPresent([OebbConnectionStop].self, forKey: .stops)
+        from = try container.decode(OebbConnectionStop.self, forKey: .from)
+        to = try container.decode(OebbConnectionStop.self, forKey: .to)
+        duration = OebbDecoding.intIfPresent(container, forKey: .duration)
+        category = try container.decodeIfPresent(OebbCategory.self, forKey: .category)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        hasRealtime = OebbDecoding.boolIfPresent(container, forKey: .hasRealtime)
+        stops = try? container.decodeIfPresent([OebbConnectionStop].self, forKey: .stops)
     }
 
     var stopCount: Int? {
@@ -152,22 +148,21 @@ struct OebbConnectionStop: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.name = try container.decodeIfPresent(String.self, forKey: .name)
-        self.esn = OebbDecoding.intIfPresent(container, forKey: .esn)
-        self.departure = try container.decodeIfPresent(String.self, forKey: .departure)
-        self.arrival = try container.decodeIfPresent(String.self, forKey: .arrival)
-        self.departureRealtime = try container.decodeIfPresent(String.self, forKey: .departureRealtime)
-        self.arrivalRealtime = try container.decodeIfPresent(String.self, forKey: .arrivalRealtime)
-        self.departureDelay = OebbDecoding.intIfPresent(container, forKey: .departureDelay)
-        self.arrivalDelay = OebbDecoding.intIfPresent(container, forKey: .arrivalDelay)
-        self.departurePlatform = try container.decodeIfPresent(String.self, forKey: .departurePlatform)
-        self.arrivalPlatform = try container.decodeIfPresent(String.self, forKey: .arrivalPlatform)
-        self.departurePlatformDeviation = try container.decodeIfPresent(
-            String.self,
-            forKey: .departurePlatformDeviation
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        esn = OebbDecoding.intIfPresent(container, forKey: .esn)
+        departure = try container.decodeIfPresent(String.self, forKey: .departure)
+        arrival = try container.decodeIfPresent(String.self, forKey: .arrival)
+        departureRealtime = try container.decodeIfPresent(String.self, forKey: .departureRealtime)
+        arrivalRealtime = try container.decodeIfPresent(String.self, forKey: .arrivalRealtime)
+        departureDelay = OebbDecoding.intIfPresent(container, forKey: .departureDelay)
+        arrivalDelay = OebbDecoding.intIfPresent(container, forKey: .arrivalDelay)
+        departurePlatform = try container.decodeIfPresent(String.self, forKey: .departurePlatform)
+        arrivalPlatform = try container.decodeIfPresent(String.self, forKey: .arrivalPlatform)
+        departurePlatformDeviation = try container.decodeIfPresent(
+            String.self, forKey: .departurePlatformDeviation
         )
-        self.arrivalPlatformDeviation = try container.decodeIfPresent(String.self, forKey: .arrivalPlatformDeviation)
-        self.cancelled = OebbDecoding.boolIfPresent(container, forKey: .cancelled)
+        arrivalPlatformDeviation = try container.decodeIfPresent(String.self, forKey: .arrivalPlatformDeviation)
+        cancelled = OebbDecoding.boolIfPresent(container, forKey: .cancelled)
     }
 }
 
@@ -196,6 +191,47 @@ struct OebbStationBoardJourney: Decodable {
     let rta: OebbRealtimeInfo?
 }
 
+// MARK: - OebbGateResponse
+
+struct OebbGateResponse: Decodable {
+    let svcResL: [OebbGateServiceResult]?
+    let err: String?
+}
+
+struct OebbGateServiceResult: Decodable {
+    let meth: String?
+    let res: OebbGateServicePayload?
+    let err: String?
+}
+
+struct OebbGateServicePayload: Decodable {
+    let locL: [OebbGateLocation]?
+}
+
+struct OebbGateLocation: Decodable {
+    let extId: String?
+    let name: String?
+    let crd: OebbGateCoordinate?
+    let dist: Int?
+    let dur: Int?
+    let countryCodeL: [String]?
+}
+
+struct OebbGateCoordinate: Decodable {
+    let x: Int?
+    let y: Int?
+}
+
+struct OebbNearbyLocation {
+    let id: String
+    let name: String
+    let latitude: Int?
+    let longitude: Int?
+    let distanceMeters: Int?
+    let durationSeconds: Int?
+    let countryCode: String?
+}
+
 // MARK: - OebbRealtimeInfo
 
 struct OebbRealtimeInfo: Decodable {
@@ -212,15 +248,10 @@ struct OebbJourneyDetails: Decodable {
     let svcResL: [OebbSvcRes]?
 
     func stopCount(from fromEsn: Int, to toEsn: Int) -> Int {
-        if let svcRes = svcResL?.first,
-           let jny = svcRes.res?.jny,
-           let stopL = jny.stopL
-        {
+        if let svcRes = svcResL?.first, let jny = svcRes.res?.jny, let stopL = jny.stopL {
             let fromIdx = stopL.firstIndex { $0.extId == String(fromEsn) || $0.locX != nil }
             let toIdx = stopL.lastIndex { $0.extId == String(toEsn) || $0.locX != nil }
-            if let from = fromIdx, let to = toIdx, to > from {
-                return to - from - 1
-            }
+            if let from = fromIdx, let to = toIdx, to > from { return to - from - 1 }
             return max(0, stopL.count - 2)
         }
         guard let stops, stops.count > 2 else { return 0 }
@@ -242,11 +273,18 @@ struct OebbJny: Decodable { let stopL: [OebbStopL]? }
 
 // MARK: - OebbStopL
 
-struct OebbStopL: Decodable { let locX: Int?; let extId: String?; let name: String? }
+struct OebbStopL: Decodable {
+    let locX: Int?
+    let extId: String?
+    let name: String?
+}
 
 // MARK: - OebbJourneyStop
 
-struct OebbJourneyStop: Decodable { let name: String?; let esn: Int? }
+struct OebbJourneyStop: Decodable {
+    let name: String?
+    let esn: Int?
+}
 
 // MARK: - OebbDecoding
 

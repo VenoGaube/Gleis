@@ -14,13 +14,13 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     var skippedDates: [Date]
 
     init() {
-        self.id = UUID()
-        self.isEnabled = false
-        self.toWorkSchedules = [:]
-        self.toHomeSchedules = [:]
-        self.notifyFiveMinBefore = true
-        self.notifyAtLeaveTime = true
-        self.skippedDates = []
+        id = UUID()
+        isEnabled = false
+        toWorkSchedules = [:]
+        toHomeSchedules = [:]
+        notifyFiveMinBefore = true
+        notifyAtLeaveTime = true
+        skippedDates = []
     }
 
     var isConfigured: Bool { homeStation != nil && workStation != nil }
@@ -30,45 +30,49 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         direction == .toWork ? toWorkSchedules[day] : toHomeSchedules[day]
     }
 
-    func fromStation(for direction: CommuteDirection) -> Station? {
-        direction == .toWork ? homeStation : workStation
-    }
+    func fromStation(for direction: CommuteDirection) -> Station? { direction == .toWork ? homeStation : workStation }
 
-    func toStation(for direction: CommuteDirection) -> Station? {
-        direction == .toWork ? workStation : homeStation
-    }
+    func toStation(for direction: CommuteDirection) -> Station? { direction == .toWork ? workStation : homeStation }
 
     mutating func setSchedule(_ schedule: DaySchedule, for day: Weekday, direction: CommuteDirection) {
-        if direction == .toWork { toWorkSchedules[day] = schedule }
-        else { toHomeSchedules[day] = schedule }
+        if direction == .toWork { toWorkSchedules[day] = schedule } else { toHomeSchedules[day] = schedule }
     }
 
     mutating func removeSchedule(for day: Weekday, direction: CommuteDirection) {
-        if direction == .toWork { toWorkSchedules.removeValue(forKey: day) }
-        else { toHomeSchedules.removeValue(forKey: day) }
+        if direction == .toWork {
+            toWorkSchedules.removeValue(forKey: day)
+        } else {
+            toHomeSchedules.removeValue(forKey: day)
+        }
     }
 
     func matchesSchedule(_ connection: TrainConnection) -> CommuteDirection? {
         let calendar = Calendar.current
         let connectionDay = calendar.startOfDay(for: connection.departureTime)
         if skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return nil }
-        guard let weekday = Weekday(rawValue: calendar.component(.weekday, from: connection.departureTime)) else { return nil }
+        guard let weekday = Weekday(rawValue: calendar.component(.weekday, from: connection.departureTime)) else {
+            return nil
+        }
 
         let connHour = calendar.component(.hour, from: connection.departureTime)
         let connMinute = calendar.component(.minute, from: connection.departureTime)
 
         if let schedule = toWorkSchedules[weekday], schedule.departureHour == connHour,
-           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber { return .toWork }
+           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
+        {
+            return .toWork
+        }
         if let schedule = toHomeSchedules[weekday], schedule.departureHour == connHour,
-           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber { return .toHome }
+           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
+        {
+            return .toHome
+        }
         return nil
     }
 
     mutating func skipDate(_ date: Date) {
         let day = Calendar.current.startOfDay(for: date)
-        if !skippedDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: day) }) {
-            skippedDates.append(day)
-        }
+        if !skippedDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: day) }) { skippedDates.append(day) }
     }
 
     mutating func pruneOldSkippedDates() {

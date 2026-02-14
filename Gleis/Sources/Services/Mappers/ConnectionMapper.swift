@@ -2,62 +2,62 @@ import Foundation
 
 enum ConnectionMapper {
     static func map(
-        _ connection: OebbConnection,
-        from: Station,
-        to: Station,
-        transportType: TransportType
+        _ connection: OebbConnection, from: Station, to: Station, transportType: TransportType
     ) -> TrainConnection {
         let sections = connection.sections ?? []
         let departureTime = parseDate(connection.from.departure) ?? parseDate(sections.first?.from.departure) ?? Date()
-        let arrivalTime = parseDate(connection.to.arrival) ?? parseDate(sections.last?.to.arrival) ?? departureTime
-            .addingTimeInterval(TimeInterval((connection.duration ?? 0) / 1000))
-        let platform = connection.from.departurePlatformDeviation ?? connection.from.departurePlatform ?? sections
-            .first?.from.departurePlatformDeviation ?? sections.first?.from.departurePlatform
+        let arrivalTime =
+            parseDate(connection.to.arrival) ?? parseDate(sections.last?.to.arrival)
+            ?? departureTime.addingTimeInterval(TimeInterval((connection.duration ?? 0) / 1000))
+        let platform =
+            connection.from.departurePlatformDeviation ?? connection.from.departurePlatform ?? sections.first?.from
+                .departurePlatformDeviation ?? sections.first?.from.departurePlatform
         let lineInfo = lineInfo(for: primaryCategory(in: connection))
         let delayMinutes = delayMinutes(for: connection)
-        let status = connectionCancelled(connection) ? ConnectionStatus
-            .cancelled : (delayMinutes > 0 ? .delayed : .onTime)
+        let status =
+            connectionCancelled(connection) ? ConnectionStatus.cancelled : (delayMinutes > 0 ? .delayed : .onTime)
         let transferSections = sections.filter { $0.category != nil && !isWalkingCategory($0.category) }
         let transfers = connection.switches ?? max(0, transferSections.count - 1)
 
         return TrainConnection(
-            id: connection.id, lineNumber: lineInfo.number,
-            departureTime: departureTime, arrivalTime: arrivalTime,
-            departureStation: from, arrivalStation: to, platform: platform,
-            delay: delayMinutes, status: status, transfers: transfers,
+            id: connection.id, lineNumber: lineInfo.number, trainType: lineInfo.trainType,
+            departureTime: departureTime, arrivalTime: arrivalTime, departureStation: from, arrivalStation: to,
+            platform: platform, delay: delayMinutes, status: status, transfers: transfers,
             legs: mapLegs(
-                sections,
-                transportType: transportType,
-                fallbackFrom: from,
-                fallbackTo: to,
-                fallbackLineNumber: lineInfo.number,
-                fallbackPlatform: platform,
-                fallbackDeparture: departureTime,
+                sections, transportType: transportType, fallbackFrom: from, fallbackTo: to,
+                fallbackLineNumber: lineInfo.number, fallbackPlatform: platform, fallbackDeparture: departureTime,
                 fallbackArrival: arrivalTime
             )
         )
     }
 
     static func mapStation(_ station: OebbStation, transportType: TransportType) -> Station {
-        let name = station.name?.isEmpty == false ? station
-            .name! : (station.meta?.isEmpty == false ? station.meta! : "Unknown Station")
+        let name =
+            station.name?.isEmpty == false
+                ? station.name! : (station.meta?.isEmpty == false ? station.meta! : "Unknown Station")
+
+        // Only create coordinate if both latitude and longitude are non-zero
+        // OEBB API returns 0,0 for stations without coordinate data (e.g., some non-Austrian stations)
+        let coordinate: Station.Coordinate? =
+            if station.latitude != 0, station.longitude != 0 {
+                Station.Coordinate(
+                    latitude: Double(station.latitude) / 1_000_000, longitude: Double(station.longitude) / 1_000_000
+                )
+            } else {
+                nil
+            }
+
         return Station(
-            id: String(station.number), name: name,
-            coordinate: Station.Coordinate(
-                latitude: Double(station.latitude) / 1_000_000,
-                longitude: Double(station.longitude) / 1_000_000
-            ),
-            transportTypes: [transportType], lines: []
+            id: String(station.number), name: name, coordinate: coordinate, transportTypes: [transportType], lines: []
         )
     }
 
     static func mapStationBoardEntry(_ journey: OebbStationBoardJourney) -> StationBoardEntry? {
         guard let time = journey.ti, let product = journey.pr else { return nil }
         return StationBoardEntry(
-            id: journey.id ?? UUID().uuidString, scheduledTime: time, actualTime: journey.rt?.dlt,
-            product: product, destination: journey.lastStop ?? journey.st ?? "",
-            platform: journey.tr, platformChanged: journey.trChg ?? false,
-            delayMinutes: journey.rt?.dlm.flatMap { Int($0) } ?? 0,
+            id: journey.id ?? UUID().uuidString, scheduledTime: time, actualTime: journey.rt?.dlt, product: product,
+            destination: journey.lastStop ?? journey.st ?? "", platform: journey.tr,
+            platformChanged: journey.trChg ?? false, delayMinutes: journey.rt?.dlm.flatMap { Int($0) } ?? 0,
             isCancelled: journey.rt?.status?.lowercased().contains("ausfall") == true
         )
     }
@@ -66,22 +66,22 @@ enum ConnectionMapper {
 
     private static func primaryCategory(in connection: OebbConnection) -> OebbCategory? {
         let sections = connection.sections ?? []
-        return sections.first { !isWalkingCategory($0.category) && $0.category != nil }?.category ?? sections.first?
-            .category
+        return sections.first { !isWalkingCategory($0.category) && $0.category != nil }?.category
+            ?? sections.first?.category
     }
 
-    private static func lineInfo(for category: OebbCategory?) -> (number: String, isWalking: Bool) {
-        guard let category else { return ("CONNECTION", false) }
-        if isWalkingCategory(category) { return ("WALK", true) }
+    private static func lineInfo(for category: OebbCategory?) -> (number: String, trainType: TrainType, isWalking: Bool) {
+        guard let category else { return ("CONNECTION", .other, false) }
+        if isWalkingCategory(category) { return ("WALK", .other, true) }
 
         let name = category.shortName ?? category.displayName ?? category.name
         let number = category.number
-        let lineNumber: String = if let number, !number.isEmpty {
-            number.rangeOfCharacter(from: .letters) != nil ? number : (name.map { "\($0) \(number)" } ?? number)
-        } else {
-            name ?? "Connection"
-        }
-        return (lineNumber.uppercased(), false)
+        let trainType = TrainType.from(category: name)
+        let lineNumber: String =
+            if let number, !number.isEmpty {
+                number.rangeOfCharacter(from: .letters) != nil ? number : (name.map { "\($0) \(number)" } ?? number)
+            } else { name ?? "Connection" }
+        return (lineNumber.uppercased(), trainType, false)
     }
 
     private static func isWalkingCategory(_ category: OebbCategory?) -> Bool {
@@ -91,27 +91,18 @@ enum ConnectionMapper {
     }
 
     private static func mapLegs(
-        _ sections: [OebbSection],
-        transportType: TransportType,
-        fallbackFrom: Station,
-        fallbackTo: Station,
-        fallbackLineNumber: String,
-        fallbackPlatform: String?,
-        fallbackDeparture: Date?,
-        fallbackArrival: Date?
+        _ sections: [OebbSection], transportType: TransportType, fallbackFrom: Station, fallbackTo: Station,
+        fallbackLineNumber: String, fallbackPlatform: String?, fallbackDeparture: Date?, fallbackArrival: Date?
     ) -> [ConnectionLeg] {
         if sections.isEmpty {
-            return [ConnectionLeg(
-                from: fallbackFrom,
-                to: fallbackTo,
-                departureTime: fallbackDeparture,
-                arrivalTime: fallbackArrival,
-                platform: fallbackPlatform,
-                lineNumber: fallbackLineNumber,
-                isWalking: false,
-                duration: fallbackDeparture.flatMap { dep in fallbackArrival.map { $0.timeIntervalSince(dep) } },
-                finalDestination: fallbackTo.name
-            )]
+            return [
+                ConnectionLeg(
+                    from: fallbackFrom, to: fallbackTo, departureTime: fallbackDeparture, arrivalTime: fallbackArrival,
+                    platform: fallbackPlatform, lineNumber: fallbackLineNumber, isWalking: false,
+                    duration: fallbackDeparture.flatMap { dep in fallbackArrival.map { $0.timeIntervalSince(dep) } },
+                    finalDestination: fallbackTo.name
+                ),
+            ]
         }
         return sections.map { section in
             let fromStation = mapStop(section.from, fallbackName: fallbackFrom.name, transportType: transportType)
@@ -124,13 +115,11 @@ enum ConnectionMapper {
                 departureTime: parseDate(section.from.departureRealtime) ?? parseDate(section.from.departure),
                 arrivalTime: parseDate(section.to.arrivalRealtime) ?? parseDate(section.to.arrival),
                 platform: section.from.departurePlatformDeviation ?? section.from.departurePlatform,
-                lineNumber: info.number, isWalking: info.isWalking,
+                lineNumber: info.number, trainType: info.trainType, isWalking: info.isWalking,
                 duration: section.duration.map { TimeInterval($0) / 1000 },
                 finalDestination: info.isWalking ? nil : toStation.name,
-                platformChanged: section.from.departurePlatformDeviation != nil,
-                stopCount: section.stopCount,
-                delayMinutes: legDelay.map { max(0, $0) },
-                intermediateStops: intermediateStops
+                platformChanged: section.from.departurePlatformDeviation != nil, stopCount: section.stopCount,
+                delayMinutes: legDelay.map { max(0, $0) }, intermediateStops: intermediateStops
             )
         }
     }
@@ -141,21 +130,15 @@ enum ConnectionMapper {
         return stops.dropFirst().dropLast().compactMap { stop -> IntermediateStop? in
             guard let name = stop.name, !name.isEmpty else { return nil }
             return IntermediateStop(
-                id: stop.esn.map(String.init) ?? UUID().uuidString,
-                name: name,
-                arrivalTime: parseDate(stop.arrival),
-                departureTime: parseDate(stop.departure),
-                arrivalDelay: stop.arrivalDelay,
-                departureDelay: stop.departureDelay,
-                platform: stop.arrivalPlatform
+                id: stop.esn.map(String.init) ?? UUID().uuidString, name: name, arrivalTime: parseDate(stop.arrival),
+                departureTime: parseDate(stop.departure), arrivalDelay: stop.arrivalDelay,
+                departureDelay: stop.departureDelay, platform: stop.arrivalPlatform
             )
         }
     }
 
     private static func mapStop(
-        _ stop: OebbConnectionStop,
-        fallbackName: String,
-        transportType: TransportType
+        _ stop: OebbConnectionStop, fallbackName: String, transportType: TransportType
     ) -> Station {
         let name = stop.name?.isEmpty == false ? stop.name! : fallbackName
         let id = stop.esn.map(String.init) ?? fallbackName.lowercased().replacingOccurrences(of: " ", with: "_")

@@ -21,9 +21,9 @@ struct DisplayConnection: Identifiable {
         self.leaveTime = leaveTime
         self.isSelected = isSelected
         self.isPinned = isPinned
-        self.timeRemaining = leaveTime.timeIntervalSince(currentTime)
-        self.urgencyColor = Self.calculateUrgencyColor(timeRemaining: timeRemaining)
-        self.progress = Self.calculateProgress(timeRemaining: timeRemaining)
+        timeRemaining = leaveTime.timeIntervalSince(currentTime)
+        urgencyColor = Self.calculateUrgencyColor(timeRemaining: timeRemaining)
+        progress = Self.calculateProgress(timeRemaining: timeRemaining)
     }
 
     /// Update time-based properties with current time (called by centralized timer)
