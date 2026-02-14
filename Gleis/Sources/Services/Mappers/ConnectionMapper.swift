@@ -52,16 +52,6 @@ enum ConnectionMapper {
         )
     }
 
-    static func mapStationBoardEntry(_ journey: OebbStationBoardJourney) -> StationBoardEntry? {
-        guard let time = journey.ti, let product = journey.pr else { return nil }
-        return StationBoardEntry(
-            id: journey.id ?? UUID().uuidString, scheduledTime: time, actualTime: journey.rt?.dlt, product: product,
-            destination: journey.lastStop ?? journey.st ?? "", platform: journey.tr,
-            platformChanged: journey.trChg ?? false, delayMinutes: journey.rt?.dlm.flatMap { Int($0) } ?? 0,
-            isCancelled: journey.rt?.status?.lowercased().contains("ausfall") == true
-        )
-    }
-
     // MARK: - Private Helpers
 
     private static func primaryCategory(in connection: OebbConnection) -> OebbCategory? {

@@ -860,32 +860,6 @@ struct ModernCardScanButton: View {
     }
 }
 
-// MARK: - CardScanButton
-
-struct CardScanButton: View {
-    let image: UIImage?
-    let side: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            if let image {
-                Image(uiImage: image).resizable().aspectRatio(1.586, contentMode: .fill).frame(height: 200).clipShape(
-                    RoundedRectangle(cornerRadius: 12)
-                ).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor, lineWidth: 2))
-            } else {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
-                    .foregroundStyle(.secondary).aspectRatio(1.586, contentMode: .fill).frame(height: 200).overlay {
-                        VStack(spacing: 8) {
-                            Image(systemName: "camera.fill").font(.title)
-                            Text("Tap to scan \(side)").font(.subheadline)
-                        }.foregroundStyle(.secondary)
-                    }
-            }
-        }.buttonStyle(.plain).padding(.horizontal)
-    }
-}
-
 // MARK: - CameraCaptureView
 
 struct CameraCaptureView: View {

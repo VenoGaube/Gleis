@@ -406,32 +406,6 @@ struct RouteVisualizer: View {
     }
 }
 
-// MARK: - CompactStationButton
-
-struct CompactStationButton: View {
-    let label: String
-    let station: Station?
-    let color: Color
-    let onTap: () -> Void
-    @Environment(\.colorScheme) var colorScheme
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Text(label).font(.caption2.weight(.bold)).foregroundStyle(.white).frame(width: 18, height: 18)
-                    .background(color, in: Circle())
-                Text(station?.name ?? "Select").font(.subheadline).foregroundStyle(
-                    station == nil ? .secondary : .primary
-                ).scalableText(minimumScale: 0.8)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(10).background(
-                colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.1),
-                in: RoundedRectangle(cornerRadius: 8)
-            )
-        }.buttonStyle(.plain).accessibilityLabel("Station \(label): \(station?.name ?? "Not selected")")
-            .accessibilityHint("Tap to select station \(label)")
-    }
-}
-
 // MARK: - DayScheduleRow
 
 struct DayScheduleRow: View {

@@ -166,31 +166,6 @@ struct OebbConnectionStop: Decodable {
     }
 }
 
-// MARK: - OebbStationBoard
-
-struct OebbStationBoard: Decodable {
-    let stationName: String?
-    let stationEvaId: String?
-    let boardType: String?
-    let journey: [OebbStationBoardJourney]?
-}
-
-// MARK: - OebbStationBoardJourney
-
-struct OebbStationBoardJourney: Decodable {
-    let id: String?
-    let ti: String?
-    let da: String?
-    let pr: String?
-    let st: String?
-    let lastStop: String?
-    let ati: String?
-    let tr: String?
-    let trChg: Bool?
-    let rt: OebbRealtimeInfo?
-    let rta: OebbRealtimeInfo?
-}
-
 // MARK: - OebbGateResponse
 
 struct OebbGateResponse: Decodable {
@@ -230,60 +205,6 @@ struct OebbNearbyLocation {
     let distanceMeters: Int?
     let durationSeconds: Int?
     let countryCode: String?
-}
-
-// MARK: - OebbRealtimeInfo
-
-struct OebbRealtimeInfo: Decodable {
-    let status: String?
-    let dlm: String?
-    let dlt: String?
-    let dld: String?
-}
-
-// MARK: - OebbJourneyDetails
-
-struct OebbJourneyDetails: Decodable {
-    let stops: [OebbJourneyStop]?
-    let svcResL: [OebbSvcRes]?
-
-    func stopCount(from fromEsn: Int, to toEsn: Int) -> Int {
-        if let svcRes = svcResL?.first, let jny = svcRes.res?.jny, let stopL = jny.stopL {
-            let fromIdx = stopL.firstIndex { $0.extId == String(fromEsn) || $0.locX != nil }
-            let toIdx = stopL.lastIndex { $0.extId == String(toEsn) || $0.locX != nil }
-            if let from = fromIdx, let to = toIdx, to > from { return to - from - 1 }
-            return max(0, stopL.count - 2)
-        }
-        guard let stops, stops.count > 2 else { return 0 }
-        return stops.count - 2
-    }
-}
-
-// MARK: - OebbSvcRes
-
-struct OebbSvcRes: Decodable { let res: OebbRes? }
-
-// MARK: - OebbRes
-
-struct OebbRes: Decodable { let jny: OebbJny? }
-
-// MARK: - OebbJny
-
-struct OebbJny: Decodable { let stopL: [OebbStopL]? }
-
-// MARK: - OebbStopL
-
-struct OebbStopL: Decodable {
-    let locX: Int?
-    let extId: String?
-    let name: String?
-}
-
-// MARK: - OebbJourneyStop
-
-struct OebbJourneyStop: Decodable {
-    let name: String?
-    let esn: Int?
 }
 
 // MARK: - OebbDecoding

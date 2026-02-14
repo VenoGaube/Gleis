@@ -20,7 +20,6 @@ protocol TransportServiceProtocol: Sendable {
     func searchStationsNearby(
         latitude: Double, longitude: Double, transportType: TransportType
     ) async throws -> [Station]
-    func fetchStationBoard(stationId: String, directionId: String?) async throws -> [StationBoardEntry]
 }
 
 // MARK: - LocationServiceProtocol

@@ -38,14 +38,6 @@ extension Color {
     static func urgencyRedFallback(_ colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? Color(red: 1.0, green: 0.3, blue: 0.3) : .red
     }
-
-    static func urgencyOrangeFallback(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(red: 1.0, green: 0.6, blue: 0.2) : .orange
-    }
-
-    static func urgencyGreenFallback(_ colorScheme: ColorScheme) -> Color {
-        colorScheme == .dark ? Color(red: 0.3, green: 0.8, blue: 0.4) : .green
-    }
 }
 
 // MARK: - TabItem
@@ -121,121 +113,6 @@ struct TabButtonStyle: ButtonStyle {
         configuration.label.scaleEffect(configuration.isPressed ? 0.94 : 1.0).opacity(
             configuration.isPressed ? 0.85 : 1.0
         ).animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
-    }
-}
-
-// MARK: - SwipeableTabView
-
-struct SwipeableTabView<Content: View>: View {
-    @Binding var selectedTab: Int
-    let tabCount: Int
-    @ViewBuilder let content: () -> Content
-
-    @State private var dragOffset: CGFloat = 0
-    @State private var swipeDirection: SwipeDirection = .undetermined
-    @State private var blockTaps = false
-
-    private enum SwipeDirection { case undetermined, horizontal, vertical }
-
-    private var swipeAnimation: Animation {
-        .interpolatingSpring(stiffness: 300, damping: 30)
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let screenWidth = geometry.size.width
-            HStack(spacing: 0) { content().frame(width: screenWidth) }
-                .frame(width: screenWidth, alignment: .leading)
-                .offset(x: -CGFloat(selectedTab) * screenWidth + dragOffset)
-                .animation(swipeAnimation, value: selectedTab)
-                .animation(dragOffset == 0 ? swipeAnimation : .interactiveSpring(), value: dragOffset)
-                // Block taps only during/after horizontal swipe to prevent accidental triggers
-                .allowsHitTesting(!blockTaps)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 15, coordinateSpace: .local)
-                        .onChanged { value in
-                            let horizontal = abs(value.translation.width)
-                            let vertical = abs(value.translation.height)
-
-                            // Determine direction once with strict threshold
-                            if swipeDirection == .undetermined {
-                                if horizontal > 20, horizontal > vertical * 2.0 {
-                                    swipeDirection = .horizontal
-                                    blockTaps = true
-                                } else if vertical > 15 {
-                                    swipeDirection = .vertical
-                                }
-                            }
-
-                            // Only track horizontal movement if confirmed horizontal
-                            guard swipeDirection == .horizontal else { return }
-
-                            let offset = value.translation.width
-                            // Rubber band at edges
-                            if (selectedTab == 0 && offset > 0) || (selectedTab == tabCount - 1 && offset < 0) {
-                                dragOffset = offset * 0.25
-                            } else {
-                                dragOffset = offset
-                            }
-                        }
-                        .onEnded { value in
-                            let wasHorizontal = swipeDirection == .horizontal
-                            dragOffset = 0
-                            swipeDirection = .undetermined
-
-                            if wasHorizontal {
-                                let velocity = value.velocity.width
-                                let translation = value.translation.width
-                                let threshold = screenWidth * 0.2
-
-                                if velocity < -300 || translation < -threshold, selectedTab < tabCount - 1 {
-                                    Haptics.impact(.light)
-                                    selectedTab += 1
-                                } else if velocity > 300 || translation > threshold, selectedTab > 0 {
-                                    Haptics.impact(.light)
-                                    selectedTab -= 1
-                                }
-
-                                // Brief delay before re-enabling taps to prevent tap-through
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                    blockTaps = false
-                                }
-                            }
-                        }
-                )
-        }.clipped()
-    }
-}
-
-// MARK: - PageHeader
-
-struct PageHeader: View {
-    let title: String
-    let subtitle: String?
-    let trailingContent: AnyView?
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    init(title: String, subtitle: String? = nil, trailingContent: AnyView? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-        self.trailingContent = trailingContent
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
-
-                    Text(title).font(.largeTitle).fontWeight(.bold)
-                }
-
-                Spacer()
-
-                if let trailingContent { trailingContent }
-            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
-        }.background(colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
     }
 }
 

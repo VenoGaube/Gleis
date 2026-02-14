@@ -91,9 +91,4 @@ final class NearbyStationService: ObservableObject {
         }
         stationDistances = updated
     }
-
-    func updateDistances(forAll stations: [Station]) {
-        let calculated = locationService.calculateDistances(to: stations)
-        stationDistances = Dictionary(uniqueKeysWithValues: calculated.map { ($0.station.id, $0.distance) })
-    }
 }

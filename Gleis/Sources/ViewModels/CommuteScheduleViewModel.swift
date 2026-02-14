@@ -129,13 +129,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         save()
     }
 
-    func clearAllSchedules() {
-        route.toWorkSchedules = [:]
-        route.toHomeSchedules = [:]
-        notificationService.cancelAllCommuteNotifications()
-        save()
-    }
-
     // MARK: - Notifications
 
     func rescheduleAllNotifications() {
@@ -153,10 +146,6 @@ final class CommuteScheduleViewModel: ObservableObject {
                 )
             }
         }
-    }
-
-    func cancelNotificationsForSchedule(day: Weekday, direction: CommuteDirection) {
-        notificationService.cancelCommuteNotification(day: day, direction: direction)
     }
 
     // MARK: - Private

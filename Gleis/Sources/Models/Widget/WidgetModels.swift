@@ -66,16 +66,6 @@ enum AppGroupStorage {
 
     static var sharedDefaults: UserDefaults? { UserDefaults(suiteName: suiteName) }
 
-    static func saveWidgetData(_ data: WidgetData) {
-        guard let defaults = sharedDefaults, let encoded = try? JSONEncoder().encode(data) else { return }
-        defaults.set(encoded, forKey: widgetDataKey)
-    }
-
-    static func loadWidgetData() -> WidgetData? {
-        guard let defaults = sharedDefaults, let data = defaults.data(forKey: widgetDataKey) else { return nil }
-        return try? JSONDecoder().decode(WidgetData.self, from: data)
-    }
-
     static func saveWidgetData(for type: TransportType, data: WidgetData) {
         guard let defaults = sharedDefaults, let encoded = try? JSONEncoder().encode(data) else { return }
         defaults.set(encoded, forKey: "\(widgetDataKey)_\(type.rawValue)")

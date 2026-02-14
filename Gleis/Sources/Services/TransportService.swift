@@ -106,19 +106,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func fetchStationBoard(stationId: String, directionId: String? = nil) async throws -> [StationBoardEntry] {
-        guard let evaId = Int(stationId) else { return [] }
-        do {
-            let board = try await apiClient.fetchStationBoard(
-                evaId: evaId, directionId: directionId.flatMap { Int($0) }
-            )
-            return (board.journey ?? []).compactMap { ConnectionMapper.mapStationBoardEntry($0) }
-        } catch {
-            if isCancellation(error) { throw CancellationError() }
-            return []
-        }
-    }
-
     // MARK: - Private
 
     private struct ResolvedStation {

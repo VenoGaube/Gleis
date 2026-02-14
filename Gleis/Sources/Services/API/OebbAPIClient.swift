@@ -124,39 +124,6 @@ actor OebbAPIClient {
         )
     }
 
-    func fetchStationBoard(evaId: Int, directionId: Int? = nil, date: Date = Date()) async throws -> OebbStationBoard {
-        let df = DateFormatter()
-        df.dateFormat = "HH:mm"
-        let time = df.string(from: date)
-        df.dateFormat = "dd.MM.yyyy"
-        let dateStr = df.string(from: date)
-
-        var components = URLComponents(string: "http://fahrplan.oebb.at/bin/stboard.exe/dn")!
-        var queryItems = [
-            URLQueryItem(name: "L", value: "vs_scotty.vs_liveticker"),
-            URLQueryItem(name: "evaId", value: String(evaId)), URLQueryItem(name: "boardType", value: "dep"),
-            URLQueryItem(name: "time", value: time), URLQueryItem(name: "productsFilter", value: "1111111111111111"),
-            URLQueryItem(name: "additionalTime", value: "0"), URLQueryItem(name: "maxJourneys", value: "50"),
-            URLQueryItem(name: "outputMode", value: "tickerDataOnly"), URLQueryItem(name: "start", value: "yes"),
-            URLQueryItem(name: "selectDate", value: "period"), URLQueryItem(name: "dateBegin", value: dateStr),
-            URLQueryItem(name: "dateEnd", value: dateStr),
-        ]
-        if let dirId = directionId { queryItems.append(URLQueryItem(name: "dirInput", value: String(dirId))) }
-        components.queryItems = queryItems
-
-        guard let url = components.url else { throw GleisError.networkError("Invalid URL") }
-        let (data, _) = try await urlSession.data(from: url)
-        guard var text = String(data: data, encoding: .isoLatin1) ?? String(data: data, encoding: .utf8) else {
-            throw GleisError.apiError("Invalid encoding")
-        }
-        text = text.replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\r", with: "")
-        guard let startRange = text.range(of: "="),
-              let endRange = text.range(of: ";SLs.", options: .backwards) ?? text.range(of: ";", options: .backwards) else { throw GleisError.apiError("Invalid format") }
-        let jsonStr = String(text[startRange.upperBound ..< endRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-        guard let jsonData = jsonStr.data(using: .utf8) else { throw GleisError.apiError("Invalid JSON") }
-        return try decoder.decode(OebbStationBoard.self, from: jsonData)
-    }
-
     // MARK: - Private Helpers
 
     private func performAuthorized<T: Decodable>(

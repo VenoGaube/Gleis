@@ -3,10 +3,8 @@ import Foundation
 // MARK: - AppSettings
 
 struct AppSettings: Codable {
-    var locationPermissionGranted: Bool = false
     var useLocationForStartStation: Bool = true
     var useSmartStationSwap: Bool = true
-    var allowManualOverride: Bool = true
     var hasCompletedOnboarding: Bool = false
     var ticketCards: [TicketCard] = []
     var selectedTicketId: UUID?
@@ -28,20 +26,4 @@ struct TicketCard: Identifiable, Codable, Equatable {
         self.backImageData = backImageData
         createdAt = Date()
     }
-}
-
-// MARK: - StationBoardEntry
-
-struct StationBoardEntry: Identifiable {
-    let id: String
-    let scheduledTime: String
-    let actualTime: String?
-    let product: String
-    let destination: String
-    let platform: String?
-    let platformChanged: Bool
-    let delayMinutes: Int
-    let isCancelled: Bool
-
-    var isDelayed: Bool { delayMinutes > 0 }
 }
