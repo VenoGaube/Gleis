@@ -1,9 +1,12 @@
+import CoreLocation
 import SwiftUI
 
 // MARK: - CommuteScheduleView
 
 struct CommuteScheduleView: View {
     @StateObject private var viewModel: CommuteScheduleViewModel
+    @EnvironmentObject private var settingsManager: SettingsManager
+    @EnvironmentObject private var locationService: LocationService
     @State private var showStationAPicker = false
     @State private var showStationBPicker = false
     @State private var selectedDay: Weekday?
@@ -13,6 +16,14 @@ struct CommuteScheduleView: View {
     @State private var pulseHint = false
     @State private var showCopySheet: Weekday?
     @Environment(\.colorScheme) var colorScheme
+
+    private var autoPreferredStationIds: Set<String> {
+        Set(settingsManager.appSettings.autoSelectionPreferences.areaPreferences.map(\.stationId))
+    }
+
+    private var autoExcludedStationIds: Set<String> {
+        settingsManager.appSettings.autoSelectionPreferences.excludedStationIds
+    }
 
     init(transportType: TransportType = .trainCommute) {
         _viewModel = StateObject(wrappedValue: CommuteScheduleViewModel(transportType: transportType))
@@ -55,6 +66,12 @@ struct CommuteScheduleView: View {
                     favoriteStations: viewModel.favoriteStations,
                     nearbyStations: viewModel.nearbyStationService.nearbyStations,
                     stationDistances: viewModel.nearbyStationService.stationDistances,
+                    autoSelection: StationPickerAutoSelectionOptions(
+                        preferredStationIds: autoPreferredStationIds,
+                        excludedStationIds: autoExcludedStationIds,
+                        onSetPreferred: setPreferredAutoStation,
+                        onToggleExcluded: toggleAutoExcludedStation
+                    ),
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
@@ -68,6 +85,12 @@ struct CommuteScheduleView: View {
                     favoriteStations: viewModel.favoriteStations,
                     nearbyStations: viewModel.nearbyStationService.nearbyStations,
                     stationDistances: viewModel.nearbyStationService.stationDistances,
+                    autoSelection: StationPickerAutoSelectionOptions(
+                        preferredStationIds: autoPreferredStationIds,
+                        excludedStationIds: autoExcludedStationIds,
+                        onSetPreferred: setPreferredAutoStation,
+                        onToggleExcluded: toggleAutoExcludedStation
+                    ),
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
@@ -110,6 +133,24 @@ struct CommuteScheduleView: View {
                     onCopied: { message in viewModel.toastManager.show(message, type: .success) }
                 )
             }.toastOverlay(viewModel.toastManager)
+    }
+
+    private func setPreferredAutoStation(_ station: Station) {
+        guard let location = locationService.currentLocation else {
+            viewModel.toastManager.show("Location unavailable. Try again while location is active.", type: .info)
+            return
+        }
+
+        settingsManager.setPreferredAutoSelectionStation(station, at: location)
+        viewModel.toastManager.show("Will prefer \(station.name) for auto-select near this area.", type: .success)
+    }
+
+    private func toggleAutoExcludedStation(_ station: Station) {
+        let isNowExcluded = settingsManager.toggleAutoSelectionExclusion(for: station)
+        let message = isNowExcluded
+            ? "\(station.name) will no longer be auto-selected."
+            : "\(station.name) can now be auto-selected."
+        viewModel.toastManager.show(message, type: .info)
     }
 
     private var stationsSection: some View {

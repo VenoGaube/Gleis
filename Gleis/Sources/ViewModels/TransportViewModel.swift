@@ -59,7 +59,7 @@ final class TransportViewModel: ObservableObject {
 
         Task {
             await loadStations()
-            await nearbyStationService.refreshIfNeeded(transportType: transportType)
+            await nearbyStationService.refreshIfNeeded(transportType: transportType, knownStations: stations)
         }
         observeConfigChanges()
         observeLocationChanges()
@@ -91,7 +91,12 @@ final class TransportViewModel: ObservableObject {
         locationService.$currentLocation.dropFirst().debounce(for: .seconds(1), scheduler: RunLoop.main).sink {
             [weak self] _ in
             guard let self else { return }
-            Task { await self.nearbyStationService.refreshIfNeeded(transportType: self.transportType) }
+            Task {
+                await self.nearbyStationService.refreshIfNeeded(
+                    transportType: self.transportType,
+                    knownStations: self.stations
+                )
+            }
         }.store(in: &cancellables)
     }
 
@@ -99,7 +104,10 @@ final class TransportViewModel: ObservableObject {
         guard !isLoadingStations else { return }
         isLoadingStations = true
         defer { isLoadingStations = false }
-        do { stations = try await transportService.fetchStations(for: transportType) } catch {
+        do {
+            stations = try await transportService.fetchStations(for: transportType)
+            nearbyStationService.updateDistances(for: stations)
+        } catch {
             if !(error is CancellationError) { handleError(error) }
         }
     }

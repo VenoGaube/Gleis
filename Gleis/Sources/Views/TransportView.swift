@@ -23,9 +23,47 @@ struct TransportView: View {
     let highlightConnectionId: String?
     private let commuteDirectionService = CommuteDirectionService.shared
 
+    private var isLocationAuthorized: Bool {
+        switch locationService.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            true
+        default:
+            false
+        }
+    }
+
     private var isAutoSelectionEnabled: Bool {
         settingsManager.appSettings.useLocationForStartStation
+            && isLocationAuthorized
             && !viewModel.config.isStartStationManuallySelected
+    }
+
+    private var autoSelectionStatusMessage: String? {
+        guard !isAutoSelectionEnabled else { return nil }
+
+        if viewModel.config.isStartStationManuallySelected {
+            return "Auto paused: station selected manually"
+        }
+        if !settingsManager.appSettings.useLocationForStartStation {
+            return "Auto disabled in settings"
+        }
+
+        switch locationService.authorizationStatus {
+        case .notDetermined:
+            return "Allow location access to enable Auto"
+        case .denied, .restricted:
+            return "Location permission denied"
+        default:
+            return "Auto unavailable"
+        }
+    }
+
+    private var autoPreferredStationIds: Set<String> {
+        Set(settingsManager.appSettings.autoSelectionPreferences.areaPreferences.map(\.stationId))
+    }
+
+    private var autoExcludedStationIds: Set<String> {
+        settingsManager.appSettings.autoSelectionPreferences.excludedStationIds
     }
 
     init(transportType: TransportType, highlightConnectionId: String? = nil) {
@@ -60,7 +98,9 @@ struct TransportView: View {
                     },
                     bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
                     bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
-                    isAutoSelectionEnabled: isAutoSelectionEnabled, onToggleAutoSelection: toggleAutoSelection,
+                    isAutoSelectionEnabled: isAutoSelectionEnabled,
+                    autoSelectionStatusMessage: autoSelectionStatusMessage,
+                    onToggleAutoSelection: toggleAutoSelection,
                     onStartTap: { isUserSelectingStart = true; showStartPicker = true }, onEndTap: { showEndPicker = true },
                     onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
                 )
@@ -229,6 +269,12 @@ struct TransportView: View {
             favoriteStations: viewModel.config.favoriteStations,
             nearbyStations: viewModel.nearbyStationService.nearbyStations,
             stationDistances: viewModel.nearbyStationService.stationDistances,
+            autoSelection: StationPickerAutoSelectionOptions(
+                preferredStationIds: autoPreferredStationIds,
+                excludedStationIds: autoExcludedStationIds,
+                onSetPreferred: setPreferredAutoStation,
+                onToggleExcluded: toggleAutoExcludedStation
+            ),
             searchHandler: { await viewModel.searchStations($0) },
             onToggleFavorite: { settingsManager.toggleFavoriteStation($0, for: viewModel.transportType) },
             selection: selection
@@ -251,6 +297,11 @@ struct TransportView: View {
     }
 
     private func applyCommuteDirectionIfNeeded() -> Bool {
+        guard settingsManager.appSettings.useSmartStationSwap else {
+            commuteDirectionService.reset()
+            return false
+        }
+
         let route = settingsManager.savedCommuteRoute
         guard let home = route.homeStation, let work = route.workStation, home.id != work.id else {
             commuteDirectionService.reset()
@@ -293,12 +344,67 @@ struct TransportView: View {
     }
 
     private func autoSelectNearestStartStationIfNeeded() {
+        if let preferred = preferredAutoStationCandidate() {
+            guard preferred.id != startStation?.id else { return }
+            startStation = preferred
+            return
+        }
+
         let destinationId = endStation?.id
+        let excludedIds = autoExcludedStationIds
         let nearest =
-            viewModel.nearbyStationService.nearbyStations.first { $0.id != destinationId }
-            ?? locationService.calculateDistances(to: viewModel.stations).first { $0.station.id != destinationId }?.station
+            viewModel.nearbyStationService.nearbyStations.first {
+                $0.id != destinationId && !excludedIds.contains($0.id)
+            }
+            ?? locationService.calculateDistances(to: viewModel.stations).first {
+                $0.station.id != destinationId && !excludedIds.contains($0.station.id)
+            }?.station
         guard let nearest, nearest.id != startStation?.id else { return }
         startStation = nearest
+    }
+
+    private func preferredAutoStationCandidate() -> Station? {
+        guard let location = locationService.currentLocation else { return nil }
+        guard let preferredId = settingsManager.appSettings.autoSelectionPreferences.preferredStationId(near: location),
+              !autoExcludedStationIds.contains(preferredId),
+              preferredId != endStation?.id
+        else { return nil }
+
+        if let station = viewModel.nearbyStationService.nearbyStations.first(where: { $0.id == preferredId }) {
+            return station
+        }
+        if let station = viewModel.stations.first(where: { $0.id == preferredId }) { return station }
+        if startStation?.id == preferredId { return startStation }
+        if endStation?.id == preferredId { return endStation }
+        return nil
+    }
+
+    private func setPreferredAutoStation(_ station: Station) {
+        guard let location = locationService.currentLocation else {
+            viewModel.toastManager.show("Location unavailable. Try again while location is active.", type: .info)
+            return
+        }
+
+        settingsManager.setPreferredAutoSelectionStation(station, at: location)
+
+        if isAutoSelectionEnabled {
+            applyAutoStationSelectionIfNeeded(force: true)
+        }
+
+        viewModel.toastManager.show("Will prefer \(station.name) for auto-select near this area.", type: .success)
+    }
+
+    private func toggleAutoExcludedStation(_ station: Station) {
+        let isNowExcluded = settingsManager.toggleAutoSelectionExclusion(for: station)
+
+        if isAutoSelectionEnabled {
+            applyAutoStationSelectionIfNeeded(force: true)
+        }
+
+        let message = isNowExcluded
+            ? "\(station.name) will no longer be auto-selected."
+            : "\(station.name) can now be auto-selected."
+        viewModel.toastManager.show(message, type: .info)
     }
 
     private func toggleAutoSelection() {

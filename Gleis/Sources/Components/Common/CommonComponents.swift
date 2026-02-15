@@ -412,6 +412,7 @@ struct RouteHeader: View {
     let bufferTimeToEnd: Int?
     let onSwap: () -> Void
     let isAutoSelectionEnabled: Bool
+    let autoSelectionStatusMessage: String?
     let onToggleAutoSelection: () -> Void
     let onStartTap: () -> Void
     let onEndTap: () -> Void
@@ -470,20 +471,30 @@ struct RouteHeader: View {
                         bufferTimeHintButton(for: station)
                     }
                 }
-                Button {
-                    Haptics.selection()
-                    onToggleAutoSelection()
-                } label: {
-                    Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(colorScheme == .dark ? 0.18 : 0.12),
-                            in: Capsule()
-                        )
-                }.buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        Haptics.selection()
+                        onToggleAutoSelection()
+                    } label: {
+                        Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(colorScheme == .dark ? 0.18 : 0.12),
+                                in: Capsule()
+                            )
+                    }.buttonStyle(.plain)
+
+                    if let autoSelectionStatusMessage {
+                        Text(autoSelectionStatusMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer()
             }
         }.padding(16).background(colorScheme == .dark ? Color(.secondarySystemBackground) : .white).clipShape(

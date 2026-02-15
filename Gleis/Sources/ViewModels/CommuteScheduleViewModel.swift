@@ -62,8 +62,9 @@ final class CommuteScheduleViewModel: ObservableObject {
         route = settingsManager.savedCommuteRoute
         do {
             stations = try await transportService.fetchStations(for: transportType)
+            nearbyStationService.updateDistances(for: stations)
         } catch {}
-        await nearbyStationService.refreshIfNeeded(transportType: transportType)
+        await nearbyStationService.refreshIfNeeded(transportType: transportType, knownStations: stations)
         locationService.startUpdatingLocation()
         observeLocationChanges()
     }
@@ -156,7 +157,12 @@ final class CommuteScheduleViewModel: ObservableObject {
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                Task { await self.nearbyStationService.refreshIfNeeded(transportType: self.transportType) }
+                Task {
+                    await self.nearbyStationService.refreshIfNeeded(
+                        transportType: self.transportType,
+                        knownStations: self.stations
+                    )
+                }
             }
             .store(in: &cancellables)
     }

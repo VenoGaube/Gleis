@@ -132,16 +132,32 @@ struct MyJourneyCard: View {
                 )
 
                 // Show transfer indicator between legs
-                if legIndex < legs.count - 1 {
-                    let nextLeg = legs[legIndex + 1]
-                    let transferMinutes = calculateTransferTime(from: leg, to: nextLeg)
-                    JourneyTransferRow(
-                        stationName: leg.to.name, transferMinutes: transferMinutes, nextLineNumber: nextLeg.lineNumber,
-                        nextLineColors: nextLeg.lineColors, nextPlatform: nextLeg.platform,
-                        lineColor: nextLeg.isWalking
-                            ? .gray : Color.lineColor(for: nextLeg.lineNumber, apiColors: nextLeg.lineColors),
-                        isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false
-                    )
+                if legIndex < legs.count - 1, !(leg.isWalking && legIndex > 0) {
+                    if let transition = ConnectionTransferPlanner.context(after: legIndex, legs: legs) {
+                        let walkDurationMinutes = ConnectionTransferPlanner.walkingDurationMinutes(for: transition.walkingLegs)
+                        let transferMinutes = walkDurationMinutes
+                            ?? ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg)
+                        TransferRow(
+                            stationName: leg.to.name,
+                            transferMinutes: transferMinutes,
+                            walkDurationMinutes: walkDurationMinutes,
+                            nextLineNumber: transition.targetLeg.lineNumber,
+                            nextLineColors: transition.targetLeg.lineColors,
+                            currentPlatform: leg.arrivalPlatform ?? leg.platform,
+                            nextPlatform: transition.targetLeg.platform,
+                            incomingDelayMinutes: leg.delayMinutes,
+                            nextDepartureTime: transition.targetLeg.departureTime,
+                            lineColor: transition.nextLegIsWalking
+                                ? .gray : Color.lineColor(
+                                    for: transition.targetLeg.lineNumber,
+                                    apiColors: transition.targetLeg.lineColors
+                                ),
+                            isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
+                            involvesWalking: transition.involvesWalking,
+                            nextLegIsWalking: transition.nextLegIsWalking,
+                            hasUpcomingTransitLeg: transition.hasUpcomingTransitLeg
+                        )
+                    }
                 }
             }
         }.padding(.horizontal, 16).padding(.bottom, 16)
@@ -154,11 +170,6 @@ struct MyJourneyCard: View {
             lineColors: journey.lineColors, isWalking: false,
             duration: journey.arrivalTime.timeIntervalSince(journey.departureTime)
         )
-    }
-
-    private func calculateTransferTime(from leg: ConnectionLeg, to nextLeg: ConnectionLeg) -> Int? {
-        guard let arrival = leg.arrivalTime, let departure = nextLeg.departureTime else { return nil }
-        return max(0, Int(departure.timeIntervalSince(arrival) / 60))
     }
 }
 
@@ -177,6 +188,27 @@ private struct JourneyLegSection: View {
     private var legLineColor: Color {
         leg.isWalking ? .gray : Color.lineColor(for: leg.lineNumber, apiColors: leg.lineColors)
     }
+    private var hasDeparted: Bool { leg.departureTime.map { now >= $0 } ?? false }
+    private var hasArrived: Bool { leg.arrivalTime.map { now >= $0 } ?? false }
+    private var passedIntermediateStops: [IntermediateStop] {
+        leg.intermediateStops.filter { $0.arrivalTime.map { now >= $0 } ?? false }
+    }
+    private var upcomingIntermediateStops: [IntermediateStop] {
+        leg.intermediateStops.filter { !($0.arrivalTime.map { now >= $0 } ?? false) }
+    }
+    private var visibleIntermediateStops: [IntermediateStop] {
+        guard !leg.isWalking else { return [] }
+        if hasArrived { return [] }
+        if hasDeparted {
+            let maxVisibleUpcomingStops = 3
+            return Array(upcomingIntermediateStops.prefix(maxVisibleUpcomingStops))
+        }
+        return leg.intermediateStops
+    }
+    private var hiddenUpcomingStopsCount: Int {
+        guard hasDeparted, !hasArrived else { return 0 }
+        return max(0, upcomingIntermediateStops.count - visibleIntermediateStops.count)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -192,12 +224,26 @@ private struct JourneyLegSection: View {
 
             // Intermediate stops
             if !leg.isWalking {
-                ForEach(leg.intermediateStops) { stop in
+                if hasDeparted, !passedIntermediateStops.isEmpty {
+                    JourneyCollapsedStopsRow(
+                        text: "\(passedIntermediateStops.count) stops passed", systemImage: "checkmark.circle.fill",
+                        lineColor: legLineColor
+                    )
+                }
+
+                ForEach(visibleIntermediateStops) { stop in
                     JourneyStopRow(
                         name: stop.name, time: stop.arrivalTime, platform: nil, delay: stop.arrivalDelay,
                         lineNumber: nil, lineColors: nil, isEndpoint: false,
                         isPassed: stop.arrivalTime.map { now >= $0 } ?? false, showTopConnector: true,
                         showBottomConnector: true, lineColor: legLineColor
+                    )
+                }
+
+                if hiddenUpcomingStopsCount > 0 {
+                    JourneyCollapsedStopsRow(
+                        text: "\(hiddenUpcomingStopsCount) more stops", systemImage: "ellipsis.circle",
+                        lineColor: legLineColor
                     )
                 }
             }
@@ -213,6 +259,35 @@ private struct JourneyLegSection: View {
                 )
             }
         }
+    }
+}
+
+// MARK: - JourneyCollapsedStopsRow
+
+private struct JourneyCollapsedStopsRow: View {
+    let text: String
+    let systemImage: String
+    let lineColor: Color
+
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(spacing: 0) {
+                Rectangle().fill(lineColor.opacity(0.25)).frame(width: 2, height: 8)
+                Circle().fill(
+                    colorScheme == .dark ? lineColor.opacity(0.3) : lineColor.opacity(0.16)
+                ).frame(width: 6, height: 6)
+                Rectangle().fill(lineColor.opacity(0.25)).frame(width: 2, height: 8)
+            }.frame(width: 20)
+
+            Label(text, systemImage: systemImage)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+        }.padding(.vertical, 1)
     }
 }
 
@@ -295,84 +370,6 @@ private struct JourneyStopRow: View {
                 ).background(Color.secondary.opacity(0.1), in: Capsule())
             }
         }.padding(.vertical, isEndpoint ? 4 : 1)
-    }
-}
-
-// MARK: - JourneyTransferRow
-
-private struct JourneyTransferRow: View {
-    let stationName: String
-    let transferMinutes: Int?
-    let nextLineNumber: String
-    let nextLineColors: TrainLineColors?
-    let nextPlatform: String?
-    let lineColor: Color
-    let isPassed: Bool
-
-    @Environment(\.colorScheme) var colorScheme
-
-    private var isTightTransfer: Bool { transferMinutes.map { $0 < 5 } ?? false }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Timeline indicator with transfer symbol
-            VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 8)
-
-                ZStack {
-                    Circle().stroke(isTightTransfer ? Color.red : Color.orange, lineWidth: 2).frame(
-                        width: 16, height: 16
-                    )
-
-                    Image(systemName: "arrow.triangle.swap").font(.system(size: 8, weight: .bold)).foregroundStyle(
-                        isTightTransfer ? .red : .orange)
-                }
-
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 8)
-            }.frame(width: 20)
-
-            // Transfer info
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: isTightTransfer ? "exclamationmark.triangle.fill" : "arrow.left.arrow.right")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(isTightTransfer ? .red : .orange)
-
-                    Text("Transfer at \(stationName)").font(.caption.weight(.medium)).foregroundStyle(
-                        isTightTransfer ? .red : (isPassed ? .secondary : .primary)
-                    ).lineLimit(1)
-
-                    Spacer()
-
-                    if let transferMinutes {
-                        Text("\(transferMinutes) min").font(.caption.weight(isTightTransfer ? .semibold : .regular))
-                            .foregroundStyle(isTightTransfer ? .red : .secondary)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Text("Change to").font(.caption2).foregroundStyle(.secondary)
-
-                    let style = Color.lineBadgeStyle(for: nextLineNumber, apiColors: nextLineColors)
-                    Text(nextLineNumber)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(style.foreground)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(style.background, in: RoundedRectangle(cornerRadius: 3))
-                        .overlay {
-                            if let border = style.border {
-                                RoundedRectangle(cornerRadius: 3).stroke(border.opacity(0.7), lineWidth: 1)
-                            }
-                        }
-
-                    if let platform = nextPlatform {
-                        Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }.padding(.vertical, 8).padding(.horizontal, 10).background(
-                RoundedRectangle(cornerRadius: 8).fill(
-                    (isTightTransfer ? Color.red : Color.orange).opacity(colorScheme == .dark ? 0.15 : 0.1)))
-        }.padding(.vertical, 4)
     }
 }
 

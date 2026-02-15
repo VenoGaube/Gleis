@@ -296,3 +296,73 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
         self.intermediateStops = intermediateStops
     }
 }
+
+// MARK: - ConnectionTransferPlanner
+
+struct ConnectionTransferPlanner {
+    struct Context {
+        let nextLeg: ConnectionLeg
+        let targetLeg: ConnectionLeg
+        let walkingLegs: [ConnectionLeg]
+        let nextLegIsWalking: Bool
+
+        var hasUpcomingTransitLeg: Bool { !targetLeg.isWalking }
+        var involvesWalking: Bool { !walkingLegs.isEmpty }
+    }
+
+    static func context(after index: Int, legs: [ConnectionLeg]) -> Context? {
+        guard index >= 0, index + 1 < legs.count else { return nil }
+
+        let nextLeg = legs[index + 1]
+        let walkingStartIndex = legs[index].isWalking ? index : index + 1
+        let walkingLegs = consecutiveWalkingLegs(startingAt: walkingStartIndex, in: legs)
+
+        var targetIndex = index + 1
+        while targetIndex < legs.count, legs[targetIndex].isWalking {
+            targetIndex += 1
+        }
+
+        let targetLeg = targetIndex < legs.count ? legs[targetIndex] : legs[legs.count - 1]
+        return Context(nextLeg: nextLeg, targetLeg: targetLeg, walkingLegs: walkingLegs, nextLegIsWalking: nextLeg.isWalking)
+    }
+
+    static func transferMinutes(from currentLeg: ConnectionLeg, to targetLeg: ConnectionLeg) -> Int? {
+        guard let arrival = currentLeg.arrivalTime, let departure = targetLeg.departureTime else { return nil }
+        return max(0, Int(departure.timeIntervalSince(arrival) / 60))
+    }
+
+    static func walkingDurationMinutes(for leg: ConnectionLeg) -> Int? {
+        guard leg.isWalking else { return nil }
+        if let duration = leg.duration {
+            return max(1, Int(ceil(duration / 60)))
+        }
+        guard let departure = leg.departureTime, let arrival = leg.arrivalTime else { return nil }
+        return max(1, Int(ceil(arrival.timeIntervalSince(departure) / 60)))
+    }
+
+    static func walkingDurationMinutes(for legs: [ConnectionLeg]) -> Int? {
+        var total = 0
+        var hasDuration = false
+
+        for leg in legs {
+            guard let minutes = walkingDurationMinutes(for: leg) else { continue }
+            total += minutes
+            hasDuration = true
+        }
+
+        return hasDuration ? max(1, total) : nil
+    }
+
+    private static func consecutiveWalkingLegs(startingAt index: Int, in legs: [ConnectionLeg]) -> [ConnectionLeg] {
+        guard index >= 0, index < legs.count else { return [] }
+        var result: [ConnectionLeg] = []
+        var currentIndex = index
+
+        while currentIndex < legs.count, legs[currentIndex].isWalking {
+            result.append(legs[currentIndex])
+            currentIndex += 1
+        }
+
+        return result
+    }
+}

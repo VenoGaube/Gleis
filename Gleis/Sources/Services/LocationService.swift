@@ -106,7 +106,7 @@ final class LocationService: NSObject, LocationServiceProtocol, ObservableObject
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        locationManager.distanceFilter = 50 // Only update when user moves >50 meters
+        locationManager.distanceFilter = 50 // Avoid excessive updates while still tracking commute relevance
         authorizationStatus = locationManager.authorizationStatus
     }
 
@@ -187,6 +187,7 @@ extension LocationService: CLLocationManagerDelegate {
             let config = settingsManager.trainCommuteConfig
 
             guard settingsManager.appSettings.useLocationForStartStation,
+                  settingsManager.appSettings.useSmartStationSwap,
                   !config.isStartStationManuallySelected
             else { return }
 
@@ -212,6 +213,31 @@ extension LocationService: CLLocationManagerDelegate {
                   let distanceToEnd = distance(to: end)
             else { return }
 
+            let excluded = settingsManager.appSettings.autoSelectionPreferences.excludedStationIds
+            if excluded.contains(start.id), !excluded.contains(end.id) {
+                var updatedConfig = config
+                updatedConfig.startStation = end
+                updatedConfig.endStation = start
+                settingsManager.updateConfig(updatedConfig)
+                print("🔄 Background auto-swap: Reordered away from excluded auto-start station")
+                return
+            }
+            if excluded.contains(end.id) { return }
+
+            if let preferredId = preferredStationIdForCurrentLocation(
+                preferences: settingsManager.appSettings.autoSelectionPreferences
+            ) {
+                if preferredId == end.id, preferredId != start.id {
+                    var updatedConfig = config
+                    updatedConfig.startStation = end
+                    updatedConfig.endStation = start
+                    settingsManager.updateConfig(updatedConfig)
+                    print("🔄 Background auto-swap: Applied preferred auto-start station")
+                    return
+                }
+                if preferredId == start.id { return }
+            }
+
             // If end station is closer than start, swap them
             if distanceToEnd < distanceToStart {
                 var updatedConfig = config
@@ -223,6 +249,7 @@ extension LocationService: CLLocationManagerDelegate {
         }
     }
 
+    @MainActor
     private func preferredCommuteDirection(
         route: SavedCommuteRoute,
         currentStart: Station?,
@@ -249,9 +276,13 @@ extension LocationService: CLLocationManagerDelegate {
         )
 
         guard let start = route.fromStation(for: direction), let end = route.toStation(for: direction) else { return nil }
+
+        let excluded = SettingsManager.shared.appSettings.autoSelectionPreferences.excludedStationIds
+        if excluded.contains(start.id) { return nil }
         return (start, end)
     }
 
+    @MainActor
     private func shouldUseSavedCommuteDirection(
         home: Station,
         work: Station,
@@ -262,6 +293,14 @@ extension LocationService: CLLocationManagerDelegate {
         if currentIds.isEmpty { return true }
         let commuteIds: Set<String> = [home.id, work.id]
         return currentIds.isSubset(of: commuteIds)
+    }
+
+    @MainActor
+    private func preferredStationIdForCurrentLocation(preferences: AutoSelectionPreferences) -> String? {
+        guard let location = currentLocation else { return nil }
+        let preferredId = preferences.preferredStationId(near: location)
+        guard let preferredId, !preferences.excludedStationIds.contains(preferredId) else { return nil }
+        return preferredId
     }
 
     func locationManager(_: CLLocationManager, didFailWithError _: Error) {}
