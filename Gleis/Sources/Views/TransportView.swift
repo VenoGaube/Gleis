@@ -21,6 +21,12 @@ struct TransportView: View {
     @State private var hasAppearedOnce = false
 
     let highlightConnectionId: String?
+    private let commuteDirectionService = CommuteDirectionService.shared
+
+    private var isAutoSelectionEnabled: Bool {
+        settingsManager.appSettings.useLocationForStartStation
+            && !viewModel.config.isStartStationManuallySelected
+    }
 
     init(transportType: TransportType, highlightConnectionId: String? = nil) {
         _viewModel = StateObject(wrappedValue: TransportViewModel(transportType: transportType))
@@ -54,6 +60,7 @@ struct TransportView: View {
                     },
                     bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
                     bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
+                    isAutoSelectionEnabled: isAutoSelectionEnabled, onToggleAutoSelection: toggleAutoSelection,
                     onStartTap: { isUserSelectingStart = true; showStartPicker = true }, onEndTap: { showEndPicker = true },
                     onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
                 )
@@ -98,7 +105,7 @@ struct TransportView: View {
             hasAppearedOnce = true
             viewModel.cancelCurrentFetch()
             Task { await viewModel.refreshConnections(isUserInitiated: true) }
-        }.onReceive(locationService.$currentLocation) { _ in autoSelectStartStationIfNeeded() }
+        }.onReceive(locationService.$currentLocation) { _ in applyAutoStationSelectionIfNeeded() }
             .onDisappear { viewModel.stopAutoRefresh() }.onChange(of: scenePhase) { oldPhase, newPhase in
                 // When app becomes active after being in background, refresh to filter out past connections
                 if oldPhase != .active, newPhase == .active, hasAppearedOnce {
@@ -112,7 +119,7 @@ struct TransportView: View {
                 updateConfig(start: newValue, end: endStation, manualStartSelection: isUserSelectingStart)
                 // Show feedback when user first manually overrides auto-selection
                 if isUserSelectingStart, !wasManuallySelected {
-                    viewModel.toastManager.show("Auto-selection paused. Resume in Settings.", type: .info)
+                    viewModel.toastManager.show("Auto-selection paused. Tap Auto Off to resume.", type: .info)
                 }
                 isUserSelectingStart = false
             }.onChange(of: endStation) { _, newValue in
@@ -232,16 +239,99 @@ struct TransportView: View {
         startStation = viewModel.config.startStation
         endStation = viewModel.config.endStation
         if settingsManager.appSettings.useLocationForStartStation { locationService.startUpdatingLocation() }
+        applyAutoStationSelectionIfNeeded()
     }
 
-    private func autoSelectStartStationIfNeeded() {
-        // Skip if auto-selection is disabled or user manually selected a station
-        guard settingsManager.appSettings.useLocationForStartStation,
-              !viewModel.config.isStartStationManuallySelected,
-              let nearest = viewModel.nearbyStationService.nearbyStations.first
-                  ?? locationService.findNearestStation(from: viewModel.stations),
-              nearest.id != startStation?.id else { return }
+    private func applyAutoStationSelectionIfNeeded(force: Bool = false) {
+        guard settingsManager.appSettings.useLocationForStartStation else { return }
+        guard force || !viewModel.config.isStartStationManuallySelected else { return }
+
+        if applyCommuteDirectionIfNeeded() { return }
+        autoSelectNearestStartStationIfNeeded()
+    }
+
+    private func applyCommuteDirectionIfNeeded() -> Bool {
+        let route = settingsManager.savedCommuteRoute
+        guard let home = route.homeStation, let work = route.workStation, home.id != work.id else {
+            commuteDirectionService.reset()
+            return false
+        }
+        guard shouldUseSavedCommuteDirection(home: home, work: work) else {
+            commuteDirectionService.reset()
+            return false
+        }
+        guard let distanceToHome = locationService.distance(to: home),
+              let distanceToWork = locationService.distance(to: work)
+        else { return true }
+
+        let direction = commuteDirectionService.resolveDirection(
+            home: home,
+            work: work,
+            distanceToHome: distanceToHome,
+            distanceToWork: distanceToWork,
+            currentStart: startStation,
+            currentEnd: endStation
+        )
+
+        guard let preferredStart = route.fromStation(for: direction),
+              let preferredEnd = route.toStation(for: direction)
+        else { return false }
+
+        guard preferredStart.id != startStation?.id || preferredEnd.id != endStation?.id else { return true }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            startStation = preferredStart
+            endStation = preferredEnd
+        }
+        return true
+    }
+
+    private func shouldUseSavedCommuteDirection(home: Station, work: Station) -> Bool {
+        let selectedIds = Set([startStation?.id, endStation?.id].compactMap { $0 })
+        if selectedIds.isEmpty { return true }
+        let commuteIds: Set<String> = [home.id, work.id]
+        return selectedIds.isSubset(of: commuteIds)
+    }
+
+    private func autoSelectNearestStartStationIfNeeded() {
+        let destinationId = endStation?.id
+        let nearest =
+            viewModel.nearbyStationService.nearbyStations.first { $0.id != destinationId }
+            ?? locationService.calculateDistances(to: viewModel.stations).first { $0.station.id != destinationId }?.station
+        guard let nearest, nearest.id != startStation?.id else { return }
         startStation = nearest
+    }
+
+    private func toggleAutoSelection() {
+        if isAutoSelectionEnabled {
+            var config = viewModel.config
+            config.isStartStationManuallySelected = true
+            settingsManager.updateConfig(config)
+            commuteDirectionService.reset()
+            viewModel.toastManager.show("Auto-selection paused.", type: .info)
+            return
+        }
+
+        var settings = settingsManager.appSettings
+        if !settings.useLocationForStartStation {
+            settings.useLocationForStartStation = true
+            settingsManager.updateAppSettings(settings)
+        }
+
+        var config = viewModel.config
+        config.isStartStationManuallySelected = false
+        settingsManager.updateConfig(config)
+
+        switch locationService.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            locationService.startUpdatingLocation()
+            applyAutoStationSelectionIfNeeded(force: true)
+            viewModel.toastManager.show("Auto-selection resumed.", type: .success)
+        case .notDetermined:
+            locationService.requestAuthorization()
+            viewModel.toastManager.show("Allow location access to finish enabling Auto.", type: .info)
+        default:
+            viewModel.toastManager.show("Enable location permission in Settings to use Auto.", type: .info)
+        }
     }
 
     private func updateConfig(start: Station?, end: Station?, manualStartSelection: Bool = false) {
@@ -290,7 +380,7 @@ struct TransportView: View {
             updateConfig(start: startStation, end: endStation, manualStartSelection: true)
             // Show feedback that auto-selection is now paused
             if !wasManuallySelected {
-                viewModel.toastManager.show("Auto-selection paused. Resume in Settings.", type: .info)
+                viewModel.toastManager.show("Auto-selection paused. Tap Auto Off to resume.", type: .info)
             }
         }
     }

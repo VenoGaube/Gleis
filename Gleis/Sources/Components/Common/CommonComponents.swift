@@ -411,6 +411,8 @@ struct RouteHeader: View {
     let bufferTimeToStart: Int?
     let bufferTimeToEnd: Int?
     let onSwap: () -> Void
+    let isAutoSelectionEnabled: Bool
+    let onToggleAutoSelection: () -> Void
     let onStartTap: () -> Void
     let onEndTap: () -> Void
     let onSetTravelTime: (Station) -> Void
@@ -468,6 +470,20 @@ struct RouteHeader: View {
                         bufferTimeHintButton(for: station)
                     }
                 }
+                Button {
+                    Haptics.selection()
+                    onToggleAutoSelection()
+                } label: {
+                    Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(colorScheme == .dark ? 0.18 : 0.12),
+                            in: Capsule()
+                        )
+                }.buttonStyle(.plain)
                 Spacer()
             }
         }.padding(16).background(colorScheme == .dark ? Color(.secondarySystemBackground) : .white).clipShape(
@@ -479,6 +495,10 @@ struct RouteHeader: View {
         ).shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 8, y: 4).onAppear {
             withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true }
         }
+    }
+
+    private var autoIndicatorIcon: String {
+        isAutoSelectionEnabled ? "location.fill" : "location.slash.fill"
     }
 
     private func travelTimeHintButton(for station: Station) -> some View {
