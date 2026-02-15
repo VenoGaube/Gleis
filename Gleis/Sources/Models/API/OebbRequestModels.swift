@@ -104,3 +104,53 @@ struct OebbGateRequest: Encodable {
         let x: Int
     }
 }
+
+struct OebbGateTripSearchRequest: Encodable {
+    let id: String
+    let ver: String
+    let lang: String
+    let auth: Auth
+    let client: Client
+    let formatted: Bool
+    let ext: String
+    let svcReqL: [ServiceRequest]
+
+    struct Auth: Encodable {
+        let type: String
+        let aid: String
+    }
+
+    struct Client: Encodable {
+        let id: String
+        let type: String
+        let name: String
+        let l: String
+        let v: Int
+    }
+
+    struct ServiceRequest: Encodable {
+        let meth: String
+        let req: TripSearch
+        let id: String?
+    }
+
+    struct TripSearch: Encodable {
+        let depLocL: [LocationRef]
+        let arrLocL: [LocationRef]
+        let minChgTime: String
+        let liveSearch: Bool
+        let maxChg: String
+        let outFrwd: Bool
+        let outTime: String
+        let outDate: String
+        let getPasslist: Bool
+        let getTariff: Bool
+        let getPolyline: Bool
+        let numF: Int
+    }
+
+    struct LocationRef: Encodable {
+        let lid: String
+        let name: String
+    }
+}

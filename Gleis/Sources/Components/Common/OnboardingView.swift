@@ -429,12 +429,12 @@ struct InteractiveJourneySetupView: View {
 
         return [
             TrainConnection(
-                id: UUID().uuidString, lineNumber: "S1", trainType: .s, departureTime: departure1,
+                id: UUID().uuidString, lineNumber: "S1", trainType: .s, lineColors: nil, departureTime: departure1,
                 arrivalTime: departure1.addingTimeInterval(1200), departureStation: origin, arrivalStation: destination,
                 platform: "3", delay: 0, status: .onTime, transfers: 0, legs: []
             ),
             TrainConnection(
-                id: UUID().uuidString, lineNumber: "S2", trainType: .s, departureTime: departure2,
+                id: UUID().uuidString, lineNumber: "S2", trainType: .s, lineColors: nil, departureTime: departure2,
                 arrivalTime: departure2.addingTimeInterval(1500), departureStation: origin, arrivalStation: destination,
                 platform: "5", delay: 2, status: .delayed, transfers: 0, legs: []
             ),

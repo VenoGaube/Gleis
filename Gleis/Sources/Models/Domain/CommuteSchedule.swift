@@ -4,22 +4,16 @@ import Foundation
 
 struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     let id: UUID
-    var isEnabled: Bool
     var homeStation: Station?
     var workStation: Station?
     var toWorkSchedules: [Weekday: DaySchedule]
     var toHomeSchedules: [Weekday: DaySchedule]
-    var notifyFiveMinBefore: Bool
-    var notifyAtLeaveTime: Bool
     var skippedDates: [Date]
 
     init() {
         id = UUID()
-        isEnabled = false
         toWorkSchedules = [:]
         toHomeSchedules = [:]
-        notifyFiveMinBefore = true
-        notifyAtLeaveTime = true
         skippedDates = []
     }
 
@@ -85,6 +79,7 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
 
 struct DaySchedule: Codable, Equatable {
     var lineNumber: String
+    var lineColors: TrainLineColors?
     var departureHour: Int
     var departureMinute: Int
     var connectionId: String?

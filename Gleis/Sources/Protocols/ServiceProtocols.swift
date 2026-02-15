@@ -1,4 +1,3 @@
-import Combine
 import CoreLocation
 import Foundation
 
@@ -27,7 +26,6 @@ protocol TransportServiceProtocol: Sendable {
 protocol LocationServiceProtocol {
     var currentLocation: CLLocation? { get }
     var authorizationStatus: CLAuthorizationStatus { get }
-    var locationPublisher: AnyPublisher<CLLocation?, Never> { get }
     func requestAuthorization()
     func startUpdatingLocation()
     func stopUpdatingLocation()
@@ -45,7 +43,6 @@ protocol NotificationServiceProtocol {
     )
         async throws
     func cancelNotification(id: String)
-    func cancelAllNotifications()
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection)
     func cancelAllCommuteNotifications()
     func scheduleCommuteNotification(

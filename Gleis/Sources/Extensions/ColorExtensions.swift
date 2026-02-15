@@ -1,5 +1,11 @@
 import SwiftUI
 
+struct LineBadgeStyle {
+    let background: Color
+    let foreground: Color
+    let border: Color?
+}
+
 extension Color {
     // Brand colors
     static let trainBlue = Color(red: 0.0, green: 0.48, blue: 0.85)
@@ -34,6 +40,46 @@ extension Color {
         case _ where upper.hasPrefix("R"): return regionalTrain // Catches R, REX, RJ, RJX
         default: return trainBlue
         }
+    }
+
+    static func lineColor(for line: String, apiColors: TrainLineColors?) -> Color {
+        lineBadgeStyle(for: line, apiColors: apiColors).background
+    }
+
+    static func lineTextColor(for line: String, apiColors: TrainLineColors?) -> Color {
+        lineBadgeStyle(for: line, apiColors: apiColors).foreground
+    }
+
+    static func lineBadgeStyle(for line: String, apiColors: TrainLineColors?) -> LineBadgeStyle {
+        let fallbackBackground = lineColor(for: line)
+        guard let apiColors else { return LineBadgeStyle(background: fallbackBackground, foreground: .white, border: nil) }
+
+        // Prefer the accent/bar color so the full badge background is the train color (not white API backgrounds).
+        let backgroundHex = apiColors.accentHex ?? apiColors.backgroundHex
+        let background = color(fromHex: backgroundHex) ?? fallbackBackground
+        return LineBadgeStyle(background: background, foreground: .white, border: nil)
+    }
+
+    private static func color(fromHex hex: String?) -> Color? {
+        guard let hex, let components = rgbComponents(forHex: hex) else { return nil }
+        return Color(
+            red: Double(components.red) / 255,
+            green: Double(components.green) / 255,
+            blue: Double(components.blue) / 255
+        )
+    }
+
+    private static func rgbComponents(forHex hex: String) -> (red: Int, green: Int, blue: Int)? {
+        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("#") { raw.removeFirst() }
+        if raw.count == 3 {
+            raw = raw.map { "\($0)\($0)" }.joined()
+        }
+        guard raw.count == 6 || raw.count == 8 else { return nil }
+
+        let rgb = raw.count == 8 ? String(raw.dropFirst(2)) : raw
+        guard let value = Int(rgb, radix: 16) else { return nil }
+        return (red: (value >> 16) & 0xFF, green: (value >> 8) & 0xFF, blue: value & 0xFF)
     }
 
     // Dark mode adaptive colors

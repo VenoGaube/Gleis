@@ -496,13 +496,19 @@ struct DayScheduleRow: View {
     }
 
     private func trainLineRow(_ s: DaySchedule) -> some View {
-        HStack(spacing: 8) {
+        let style = Color.lineBadgeStyle(for: s.lineNumber, apiColors: s.lineColors)
+        return HStack(spacing: 8) {
             Text(s.lineNumber)
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(style.foreground)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.lineColor(for: s.lineNumber), in: Capsule())
+                .background(style.background, in: Capsule())
+                .overlay {
+                    if let border = style.border {
+                        Capsule().stroke(border.opacity(0.7), lineWidth: 1)
+                    }
+                }
 
             Text(s.departureTimeString)
                 .font(.body.weight(.medium))
@@ -664,10 +670,19 @@ struct CopyScheduleSheet: View {
                     Text("Copy \(sourceDay.fullName)'s Schedule").font(.title3.weight(.semibold))
 
                     if let schedule = sourceSchedule {
+                        let style = Color.lineBadgeStyle(for: schedule.lineNumber, apiColors: schedule.lineColors)
                         HStack(spacing: 8) {
-                            Text(schedule.lineNumber).font(.subheadline.weight(.bold)).foregroundStyle(.white).padding(
-                                .horizontal, 10
-                            ).padding(.vertical, 5).background(Color.lineColor(for: schedule.lineNumber), in: Capsule())
+                            Text(schedule.lineNumber)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(style.foreground)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(style.background, in: Capsule())
+                                .overlay {
+                                    if let border = style.border {
+                                        Capsule().stroke(border.opacity(0.7), lineWidth: 1)
+                                    }
+                                }
 
                             Text(schedule.departureTimeString).font(.body.weight(.medium))
                         }.padding(.horizontal, 16).padding(.vertical, 10).background(
@@ -877,7 +892,8 @@ struct DayTrainPicker: View {
 
         let cal = Calendar.current
         let schedule = DaySchedule(
-            lineNumber: conn.lineNumber, departureHour: cal.component(.hour, from: conn.departureTime),
+            lineNumber: conn.lineNumber, lineColors: conn.lineColors,
+            departureHour: cal.component(.hour, from: conn.departureTime),
             departureMinute: cal.component(.minute, from: conn.departureTime), connectionId: conn.id,
             isDailyRepeat: false, transfers: conn.transfers
         )
@@ -931,15 +947,24 @@ struct TrainSelectionRow: View {
     let onDetail: () -> Void
 
     var body: some View {
+        let style = Color.lineBadgeStyle(for: connection.lineNumber, apiColors: connection.lineColors)
         HStack(spacing: 14) {
             Button(action: onSelect) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle").font(.title).foregroundStyle(
                     isSelected ? .blue : .secondary)
             }.buttonStyle(.plain)
-            Text(connection.lineNumber).font(.subheadline.weight(.bold)).foregroundStyle(.white).frame(minWidth: 50)
-                .padding(.horizontal, 12).padding(.vertical, 8).background(
-                    Color.lineColor(for: connection.lineNumber), in: RoundedRectangle(cornerRadius: 8)
-                )
+            Text(connection.lineNumber)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(style.foreground)
+                .frame(minWidth: 50)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(style.background, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    if let border = style.border {
+                        RoundedRectangle(cornerRadius: 8).stroke(border.opacity(0.7), lineWidth: 1)
+                    }
+                }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(connection.departureTime, style: .time).font(.title3.weight(.medium))
@@ -948,16 +973,17 @@ struct TrainSelectionRow: View {
                 }
                 HStack(spacing: 10) {
                     Text("\(Int(connection.duration / 60)) min").font(.subheadline).foregroundStyle(.secondary)
+                    if let stops = connection.totalStopCount, stops > 0 {
+                        Text("\(stops) stops").font(.subheadline).foregroundStyle(.blue)
+                    }
                     if connection.transfers > 0 {
                         Text("\(connection.transfers)×").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
                     }
                 }
             }
             Spacer()
-            if connection.transfers > 0 {
-                Button(action: onDetail) { Image(systemName: "info.circle").font(.title3).foregroundStyle(.blue) }
-                    .buttonStyle(.plain)
-            }
+            Button(action: onDetail) { Image(systemName: "info.circle").font(.title3).foregroundStyle(.blue) }
+                .buttonStyle(.plain)
         }.padding(.vertical, 10).contentShape(Rectangle()).onTapGesture { onSelect() }
     }
 }

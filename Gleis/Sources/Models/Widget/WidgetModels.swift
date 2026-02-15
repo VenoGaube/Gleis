@@ -28,6 +28,7 @@ struct WidgetData: Codable {
 struct WidgetConnection: Codable {
     let id: String
     let lineNumber: String
+    let lineColors: TrainLineColors?
     let departureTime: Date
     let arrivalTime: Date
     let destination: String
@@ -41,11 +42,13 @@ struct WidgetConnection: Codable {
     var isDelayed: Bool { delay > 0 }
 
     init(
-        id: String, lineNumber: String, departureTime: Date, arrivalTime: Date, destination: String, platform: String?,
-        transfers: Int?, delay: Int, stopCount: Int?, hasReminder: Bool = false, isPinned: Bool = false
+        id: String, lineNumber: String, lineColors: TrainLineColors? = nil, departureTime: Date, arrivalTime: Date,
+        destination: String, platform: String?, transfers: Int?, delay: Int, stopCount: Int?,
+        hasReminder: Bool = false, isPinned: Bool = false
     ) {
         self.id = id
         self.lineNumber = lineNumber
+        self.lineColors = lineColors
         self.departureTime = departureTime
         self.arrivalTime = arrivalTime
         self.destination = destination

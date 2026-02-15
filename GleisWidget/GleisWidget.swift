@@ -225,7 +225,7 @@ struct SmallWidgetView: View {
 
             VStack(spacing: 0) {
                 // Top: Line badge (centered)
-                LineBadge(line: conn.lineNumber, size: .small).padding(.top, 12)
+                LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small).padding(.top, 12)
 
                 Spacer(minLength: 0)
 
@@ -271,7 +271,7 @@ struct MediumWidgetView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     // Header: Line + Destination
                     HStack(spacing: 8) {
-                        LineBadge(line: conn.lineNumber, size: .medium)
+                        LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(conn.destination).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
@@ -450,6 +450,7 @@ struct RectangularWidgetView: View {
 
 struct LineBadge: View {
     let line: String
+    let lineColors: TrainLineColors?
     let size: BadgeSize
 
     enum BadgeSize {
@@ -477,10 +478,21 @@ struct LineBadge: View {
         }
     }
 
+    init(line: String, lineColors: TrainLineColors? = nil, size: BadgeSize) {
+        self.line = line
+        self.lineColors = lineColors
+        self.size = size
+    }
+
     var body: some View {
-        Text(line).font(size.font).foregroundStyle(.white).scalableText(minimumScale: 0.7).padding(
-            .vertical, size.verticalPadding
-        ).padding(.horizontal, size.horizontalPadding).background(Color.lineColor(for: line), in: Capsule())
+        let style = Color.lineBadgeStyle(for: line, apiColors: lineColors)
+        return Text(line)
+            .font(size.font)
+            .foregroundStyle(style.foreground)
+            .scalableText(minimumScale: 0.7)
+            .padding(.vertical, size.verticalPadding)
+            .padding(.horizontal, size.horizontalPadding)
+            .background(style.background, in: Capsule())
     }
 }
 
@@ -683,6 +695,11 @@ private func urgencyColor(_ remaining: TimeInterval) -> Color {
 
 // MARK: - Color Extension
 
+private struct LineBadgeStyle {
+    let background: Color
+    let foreground: Color
+}
+
 extension Color {
     static let trainBlue = Color(red: 0.0, green: 0.48, blue: 0.85)
 
@@ -704,6 +721,35 @@ extension Color {
 
         // Default railway blue
         return trainBlue
+    }
+
+    fileprivate static func lineBadgeStyle(for line: String, apiColors: TrainLineColors?) -> LineBadgeStyle {
+        let fallbackBackground = lineColor(for: line)
+        guard let apiColors else { return LineBadgeStyle(background: fallbackBackground, foreground: .white) }
+        let backgroundHex = apiColors.accentHex ?? apiColors.backgroundHex
+        let background = color(fromHex: backgroundHex) ?? fallbackBackground
+        return LineBadgeStyle(background: background, foreground: .white)
+    }
+
+    private static func color(fromHex hex: String?) -> Color? {
+        guard let hex, let components = rgbComponents(forHex: hex) else { return nil }
+        return Color(
+            red: Double(components.red) / 255,
+            green: Double(components.green) / 255,
+            blue: Double(components.blue) / 255
+        )
+    }
+
+    private static func rgbComponents(forHex hex: String) -> (red: Int, green: Int, blue: Int)? {
+        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("#") { raw.removeFirst() }
+        if raw.count == 3 {
+            raw = raw.map { "\($0)\($0)" }.joined()
+        }
+        guard raw.count == 6 || raw.count == 8 else { return nil }
+        let rgb = raw.count == 8 ? String(raw.dropFirst(2)) : raw
+        guard let value = Int(rgb, radix: 16) else { return nil }
+        return (red: (value >> 16) & 0xFF, green: (value >> 8) & 0xFF, blue: value & 0xFF)
     }
 }
 

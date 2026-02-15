@@ -12,8 +12,6 @@ final class LocationService: NSObject, LocationServiceProtocol, ObservableObject
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
     @Published private(set) var isUpdatingLocation = false
 
-    var locationPublisher: AnyPublisher<CLLocation?, Never> { $currentLocation.eraseToAnyPublisher() }
-
     private let locationManager = CLLocationManager()
 
     override private init() {

@@ -589,6 +589,7 @@ struct TrainTypeFilterBar: View {
             HStack(spacing: 8) {
                 ForEach(availableTypes) { type in
                     let isEnabled = !excludedTypes.contains(type)
+                    let style = Color.lineBadgeStyle(for: type.shortName, apiColors: type.colors)
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             if isEnabled {
@@ -604,11 +605,16 @@ struct TrainTypeFilterBar: View {
                             .padding(.vertical, 6)
                             .background(
                                 isEnabled
-                                    ? Color.accentColor
+                                    ? style.background
                                     : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)),
                                 in: Capsule()
                             )
-                            .foregroundStyle(isEnabled ? .white : .secondary)
+                            .foregroundStyle(isEnabled ? style.foreground : .secondary)
+                            .overlay {
+                                if isEnabled, let border = style.border {
+                                    Capsule().stroke(border.opacity(0.7), lineWidth: 1)
+                                }
+                            }
                     }.buttonStyle(.plain)
                 }
             }

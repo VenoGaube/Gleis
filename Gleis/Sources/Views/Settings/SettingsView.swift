@@ -317,7 +317,6 @@ struct SettingsView: View {
     }
 
     private var activeRepeatSchedules: [(day: Weekday, direction: CommuteDirection, schedule: DaySchedule)] {
-        guard settingsManager.savedCommuteRoute.isEnabled else { return [] }
         var results: [(Weekday, CommuteDirection, DaySchedule)] = []
         for day in Weekday.mondayFirst {
             if let s = settingsManager.savedCommuteRoute.toWorkSchedules[day] { results.append((day, .toWork, s)) }

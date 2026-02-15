@@ -1,6 +1,16 @@
 import Foundation
 
 enum ConnectionMapper {
+    private static let parseDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    private static let parseDateLock = NSLock()
+
     static func map(
         _ connection: OebbConnection, from: Station, to: Station, transportType: TransportType
     ) -> TrainConnection {
@@ -21,12 +31,13 @@ enum ConnectionMapper {
 
         return TrainConnection(
             id: connection.id, lineNumber: lineInfo.number, trainType: lineInfo.trainType,
+            lineColors: lineInfo.lineColors,
             departureTime: departureTime, arrivalTime: arrivalTime, departureStation: from, arrivalStation: to,
             platform: platform, delay: delayMinutes, status: status, transfers: transfers,
             legs: mapLegs(
                 sections, transportType: transportType, fallbackFrom: from, fallbackTo: to,
-                fallbackLineNumber: lineInfo.number, fallbackPlatform: platform, fallbackDeparture: departureTime,
-                fallbackArrival: arrivalTime
+                fallbackLineNumber: lineInfo.number, fallbackLineColors: lineInfo.lineColors,
+                fallbackPlatform: platform, fallbackDeparture: departureTime, fallbackArrival: arrivalTime
             )
         )
     }
@@ -52,6 +63,56 @@ enum ConnectionMapper {
         )
     }
 
+    static func enrichConnection(_ connection: TrainConnection, detail: OebbConnectionDetailResponse) -> TrainConnection {
+        guard !connection.legs.isEmpty, !detail.sections.isEmpty else { return connection }
+
+        var enrichedLegs = connection.legs
+        var usedDetailIndices = Set<Int>()
+        var fallbackDetailCursor = 0
+
+        for legIndex in enrichedLegs.indices where !enrichedLegs[legIndex].isWalking {
+            let leg = enrichedLegs[legIndex]
+            guard let detailIndex = findMatchingDetailSectionIndex(
+                for: leg,
+                detailSections: detail.sections,
+                usedDetailIndices: &usedDetailIndices,
+                fallbackCursor: &fallbackDetailCursor
+            ) else { continue }
+
+            let detailSection = detail.sections[detailIndex]
+            let mappedStops = mapIntermediateStops(
+                detailSection.intermediatePoints,
+                connectionId: connection.id,
+                fromName: leg.from.name,
+                toName: leg.to.name
+            )
+            let resolvedStops = mappedStops.isEmpty ? leg.intermediateStops : mappedStops
+            let resolvedStopCount: Int? = {
+                if !resolvedStops.isEmpty { return resolvedStops.count }
+                // If detail section matched but has no intermediate points, this is a known 0-halt leg.
+                return 0
+            }()
+
+            enrichedLegs[legIndex] = ConnectionLeg(
+                id: leg.id, from: leg.from, to: leg.to, departureTime: leg.departureTime, arrivalTime: leg.arrivalTime,
+                platform: leg.platform, arrivalPlatform: leg.arrivalPlatform, lineNumber: leg.lineNumber,
+                trainType: leg.trainType, lineColors: leg.lineColors, isWalking: leg.isWalking, duration: leg.duration,
+                finalDestination: leg.finalDestination, platformChanged: leg.platformChanged,
+                stopCount: resolvedStopCount, delayMinutes: leg.delayMinutes,
+                intermediateStops: resolvedStops
+            )
+        }
+
+        return TrainConnection(
+            id: connection.id, lineNumber: connection.lineNumber, trainType: connection.trainType,
+            lineColors: connection.lineColors,
+            departureTime: connection.departureTime, arrivalTime: connection.arrivalTime,
+            departureStation: connection.departureStation, arrivalStation: connection.arrivalStation,
+            platform: connection.platform, delay: connection.delay, status: connection.status,
+            transfers: connection.transfers, legs: enrichedLegs
+        )
+    }
+
     // MARK: - Private Helpers
 
     private static func primaryCategory(in connection: OebbConnection) -> OebbCategory? {
@@ -60,18 +121,21 @@ enum ConnectionMapper {
             ?? sections.first?.category
     }
 
-    private static func lineInfo(for category: OebbCategory?) -> (number: String, trainType: TrainType, isWalking: Bool) {
-        guard let category else { return ("CONNECTION", .other, false) }
-        if isWalkingCategory(category) { return ("WALK", .other, true) }
+    private static func lineInfo(
+        for category: OebbCategory?
+    ) -> (number: String, trainType: TrainType, lineColors: TrainLineColors?, isWalking: Bool) {
+        guard let category else { return ("CONNECTION", .other, nil, false) }
+        if isWalkingCategory(category) { return ("WALK", .other, nil, true) }
 
         let name = category.shortName ?? category.displayName ?? category.name
         let number = category.number
-        let trainType = TrainType.from(category: name)
         let lineNumber: String =
             if let number, !number.isEmpty {
                 number.rangeOfCharacter(from: .letters) != nil ? number : (name.map { "\($0) \(number)" } ?? number)
             } else { name ?? "Connection" }
-        return (lineNumber.uppercased(), trainType, false)
+        let normalizedLineNumber = lineNumber.uppercased()
+        let trainType = TrainType.from(category: category, fallbackLineNumber: normalizedLineNumber)
+        return (normalizedLineNumber, trainType, category.lineColors ?? trainType.colors, false)
     }
 
     private static func isWalkingCategory(_ category: OebbCategory?) -> Bool {
@@ -82,13 +146,15 @@ enum ConnectionMapper {
 
     private static func mapLegs(
         _ sections: [OebbSection], transportType: TransportType, fallbackFrom: Station, fallbackTo: Station,
-        fallbackLineNumber: String, fallbackPlatform: String?, fallbackDeparture: Date?, fallbackArrival: Date?
+        fallbackLineNumber: String, fallbackLineColors: TrainLineColors?, fallbackPlatform: String?,
+        fallbackDeparture: Date?, fallbackArrival: Date?
     ) -> [ConnectionLeg] {
         if sections.isEmpty {
             return [
                 ConnectionLeg(
                     from: fallbackFrom, to: fallbackTo, departureTime: fallbackDeparture, arrivalTime: fallbackArrival,
-                    platform: fallbackPlatform, lineNumber: fallbackLineNumber, isWalking: false,
+                    platform: fallbackPlatform, lineNumber: fallbackLineNumber, lineColors: fallbackLineColors,
+                    isWalking: false,
                     duration: fallbackDeparture.flatMap { dep in fallbackArrival.map { $0.timeIntervalSince(dep) } },
                     finalDestination: fallbackTo.name
                 ),
@@ -97,34 +163,224 @@ enum ConnectionMapper {
         return sections.map { section in
             let fromStation = mapStop(section.from, fallbackName: fallbackFrom.name, transportType: transportType)
             let toStation = mapStop(section.to, fallbackName: fallbackTo.name, transportType: transportType)
+            let departurePlatform = section.from.departurePlatformDeviation ?? section.from.departurePlatform
+            let arrivalPlatform = section.to.arrivalPlatformDeviation ?? section.to.arrivalPlatform
             let info = lineInfo(for: section.category)
             let legDelay = section.from.departureDelay ?? section.to.arrivalDelay
-            let intermediateStops = mapIntermediateStops(section.stops)
+            let stopIdPrefix = makeIntermediateStopPrefix(
+                fromStationId: fromStation.id,
+                toStationId: toStation.id,
+                lineNumber: info.number,
+                departure: section.from.departure,
+                arrival: section.to.arrival
+            )
+            let intermediateStops = mapIntermediateStops(
+                section.stops,
+                fromName: fromStation.name,
+                toName: toStation.name,
+                fromEsn: section.from.esn,
+                toEsn: section.to.esn,
+                stopIdPrefix: stopIdPrefix
+            )
+            let stopCount = section.stopCount ?? (intermediateStops.isEmpty ? nil : intermediateStops.count)
             return ConnectionLeg(
                 from: fromStation, to: toStation,
                 departureTime: parseDate(section.from.departureRealtime) ?? parseDate(section.from.departure),
                 arrivalTime: parseDate(section.to.arrivalRealtime) ?? parseDate(section.to.arrival),
-                platform: section.from.departurePlatformDeviation ?? section.from.departurePlatform,
-                lineNumber: info.number, trainType: info.trainType, isWalking: info.isWalking,
+                platform: departurePlatform,
+                arrivalPlatform: arrivalPlatform,
+                lineNumber: info.number, trainType: info.trainType, lineColors: info.lineColors,
+                isWalking: info.isWalking,
                 duration: section.duration.map { TimeInterval($0) / 1000 },
                 finalDestination: info.isWalking ? nil : toStation.name,
-                platformChanged: section.from.departurePlatformDeviation != nil, stopCount: section.stopCount,
+                platformChanged: section.from.departurePlatformDeviation != nil, stopCount: stopCount,
                 delayMinutes: legDelay.map { max(0, $0) }, intermediateStops: intermediateStops
             )
         }
     }
 
-    private static func mapIntermediateStops(_ stops: [OebbConnectionStop]?) -> [IntermediateStop] {
-        guard let stops, stops.count > 2 else { return [] }
-        // Exclude first and last stops (they are the leg's from/to stations)
-        return stops.dropFirst().dropLast().compactMap { stop -> IntermediateStop? in
+    private static func mapIntermediateStops(
+        _ stops: [OebbConnectionStop]?,
+        fromName: String,
+        toName: String,
+        fromEsn: Int?,
+        toEsn: Int?,
+        stopIdPrefix: String
+    ) -> [IntermediateStop] {
+        guard let stops, !stops.isEmpty else { return [] }
+
+        // Most passlists include section endpoints; only trim those when they match leg boundaries.
+        let normalizedFrom = normalizeStationName(fromName)
+        let normalizedTo = normalizeStationName(toName)
+        let firstName = normalizeStationName(stops.first?.name)
+        let lastName = normalizeStationName(stops.last?.name)
+        let firstEsn = stops.first?.esn
+        let lastEsn = stops.last?.esn
+        let matchesByName = firstName == normalizedFrom && lastName == normalizedTo
+        let matchesByEsn =
+            fromEsn != nil && toEsn != nil && firstEsn == fromEsn && lastEsn == toEsn
+        let includesEndpoints = (matchesByName || matchesByEsn) && stops.count >= 2
+
+        let candidates: ArraySlice<OebbConnectionStop> = includesEndpoints ? stops.dropFirst().dropLast() : stops[...]
+        guard !candidates.isEmpty else { return [] }
+
+        return candidates.enumerated().compactMap { index, stop -> IntermediateStop? in
             guard let name = stop.name, !name.isEmpty else { return nil }
             return IntermediateStop(
-                id: stop.esn.map(String.init) ?? UUID().uuidString, name: name, arrivalTime: parseDate(stop.arrival),
+                id: stableIntermediateStopID(
+                    prefix: stopIdPrefix,
+                    index: index,
+                    esn: stop.esn,
+                    name: name,
+                    arrival: stop.arrival,
+                    departure: stop.departure
+                ),
+                name: name,
+                arrivalTime: parseDate(stop.arrival),
                 departureTime: parseDate(stop.departure), arrivalDelay: stop.arrivalDelay,
                 departureDelay: stop.departureDelay, platform: stop.arrivalPlatform
             )
         }
+    }
+
+    private static func mapIntermediateStops(
+        _ stops: [OebbConnectionDetailIntermediatePoint], connectionId: String, fromName: String, toName: String
+    ) -> [IntermediateStop] {
+        guard !stops.isEmpty else { return [] }
+        let prefix = makeIntermediateStopPrefix(
+            fromStationId: connectionId,
+            toStationId: "\(fromName)-\(toName)",
+            lineNumber: "detail",
+            departure: nil,
+            arrival: nil
+        )
+
+        return stops.enumerated().compactMap { index, stop in
+            guard let rawName = stop.name?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else {
+                return nil
+            }
+
+            let scheduledArrival = parseDate(stop.arrival)
+            let realtimeArrival = parseDate(stop.realtimeInformation?.arrival)
+            let scheduledDeparture = parseDate(stop.departure)
+            let realtimeDeparture = parseDate(stop.realtimeInformation?.departure)
+
+            return IntermediateStop(
+                id: stableIntermediateStopID(
+                    prefix: prefix,
+                    index: index,
+                    esn: nil,
+                    name: rawName,
+                    arrival: stop.realtimeInformation?.arrival ?? stop.arrival,
+                    departure: stop.realtimeInformation?.departure ?? stop.departure
+                ),
+                name: rawName,
+                arrivalTime: realtimeArrival ?? scheduledArrival,
+                departureTime: realtimeDeparture ?? scheduledDeparture,
+                arrivalDelay: realtimeDelayMinutes(scheduled: scheduledArrival, realtime: realtimeArrival),
+                departureDelay: realtimeDelayMinutes(scheduled: scheduledDeparture, realtime: realtimeDeparture),
+                platform: stop.realtimeInformation?.arrivalPlatform ?? stop.realtimeInformation?.departurePlatform
+            )
+        }
+    }
+
+    private static func realtimeDelayMinutes(scheduled: Date?, realtime: Date?) -> Int? {
+        guard let scheduled, let realtime else { return nil }
+        return max(0, Int(realtime.timeIntervalSince(scheduled) / 60))
+    }
+
+    private static func makeIntermediateStopPrefix(
+        fromStationId: String,
+        toStationId: String,
+        lineNumber: String,
+        departure: String?,
+        arrival: String?
+    ) -> String {
+        let fromToken = normalizedIdentifierToken(fromStationId)
+        let toToken = normalizedIdentifierToken(toStationId)
+        let lineToken = normalizedIdentifierToken(lineNumber)
+        let departureToken = normalizedIdentifierToken(departure)
+        let arrivalToken = normalizedIdentifierToken(arrival)
+        return "\(fromToken)-\(toToken)-\(lineToken)-\(departureToken)-\(arrivalToken)"
+    }
+
+    private static func stableIntermediateStopID(
+        prefix: String,
+        index: Int,
+        esn: Int?,
+        name: String,
+        arrival: String?,
+        departure: String?
+    ) -> String {
+        let esnToken = esn.map(String.init) ?? "na"
+        let nameToken = normalizedIdentifierToken(name)
+        let arrivalToken = normalizedIdentifierToken(arrival)
+        let departureToken = normalizedIdentifierToken(departure)
+        return "\(prefix)-\(index)-\(esnToken)-\(nameToken)-\(arrivalToken)-\(departureToken)"
+    }
+
+    private static func normalizedIdentifierToken(_ value: String?) -> String {
+        guard let value else { return "na" }
+        let token = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines).filter {
+            $0.isLetter || $0.isNumber
+        }
+        return token.isEmpty ? "na" : token
+    }
+
+    private static func findMatchingDetailSectionIndex(
+        for leg: ConnectionLeg, detailSections: [OebbConnectionDetailSection], usedDetailIndices: inout Set<Int>,
+        fallbackCursor: inout Int
+    ) -> Int? {
+        let normalizedFrom = normalizeStationName(leg.from.name)
+        let normalizedTo = normalizeStationName(leg.to.name)
+
+        var bestIndex: Int?
+        var bestScore = 0
+
+        for index in detailSections.indices where !usedDetailIndices.contains(index) {
+            let section = detailSections[index]
+            guard !isWalkingDetailSection(section) else { continue }
+            let fromScore =
+                normalizeStationName(section.from?.name).map { $0 == normalizedFrom ? 1 : 0 } ?? 0
+            let toScore =
+                normalizeStationName(section.to?.name).map { $0 == normalizedTo ? 1 : 0 } ?? 0
+            let score = fromScore + toScore
+            if score > bestScore {
+                bestScore = score
+                bestIndex = index
+                if score == 2 { break }
+            }
+        }
+
+        if let bestIndex {
+            usedDetailIndices.insert(bestIndex)
+            return bestIndex
+        }
+
+        while fallbackCursor < detailSections.count {
+            let index = fallbackCursor
+            fallbackCursor += 1
+            if usedDetailIndices.contains(index) { continue }
+            if isWalkingDetailSection(detailSections[index]) { continue }
+            usedDetailIndices.insert(index)
+            return index
+        }
+        return nil
+    }
+
+    private static func normalizeStationName(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let cleaned = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines).filter {
+            $0.isLetter || $0.isNumber
+        }
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private static func isWalkingDetailSection(_ section: OebbConnectionDetailSection) -> Bool {
+        let type = section.type?.lowercased() ?? ""
+        if type.contains("walk") || type == "footpath" { return true }
+        let rideShortName = section.ride?.shortName?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return rideShortName == "W" || rideShortName == "WALK"
     }
 
     private static func mapStop(
@@ -154,10 +410,8 @@ enum ConnectionMapper {
 
     private static func parseDate(_ value: String?) -> Date? {
         guard let value else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
-        return formatter.date(from: value)
+        parseDateLock.lock()
+        defer { parseDateLock.unlock() }
+        return parseDateFormatter.date(from: value)
     }
 }

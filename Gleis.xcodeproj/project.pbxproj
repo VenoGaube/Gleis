@@ -16,7 +16,6 @@
 		B007 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007; };
 		B008 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008; };
 		B009 /* TransportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009; };
-ttB045 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F045; };
 		B046 /* CameraService2.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046; };
 		B010 /* OebbAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F010; };
 		B011 /* ConnectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011; };
@@ -38,7 +37,6 @@ ttB045 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04
 		B027 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027; };
 		B028 /* StationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028; };
 		B029 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029; };
-		B030 /* RouteConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F030; };
 		B031 /* TicketWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F031; };
 		B032 /* CommuteScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F032; };
 		B033 /* WidgetRefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F033; };
@@ -91,7 +89,6 @@ ttB045 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04
 		F007 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		F008 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		F009 /* TransportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportService.swift; sourceTree = "<group>"; };
-ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F046 /* CameraService2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F010 /* OebbAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbAPIClient.swift; sourceTree = "<group>"; };
 		F011 /* ConnectionMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapper.swift; sourceTree = "<group>"; };
@@ -113,7 +110,6 @@ ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = 
 		F027 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F028 /* StationPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationPicker.swift; sourceTree = "<group>"; };
 		F029 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		F030 /* RouteConfigurationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteConfigurationView.swift; sourceTree = "<group>"; };
 		F031 /* TicketWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketWalletView.swift; sourceTree = "<group>"; };
 		F032 /* CommuteScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleView.swift; sourceTree = "<group>"; };
 		F033 /* WidgetRefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetRefreshService.swift; sourceTree = "<group>"; };
@@ -257,7 +253,6 @@ ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = 
 			isa = PBXGroup;
 			children = (
 				F029 /* SettingsView.swift */,
-				F030 /* RouteConfigurationView.swift */,
 				F031 /* TicketWalletView.swift */,
 			);
 			path = Settings;
@@ -289,7 +284,6 @@ ttF045 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = 
 				F007 /* LocationService.swift */,
 				F008 /* NotificationService.swift */,
 				F009 /* TransportService.swift */,
-ttttF045 /* CameraService.swift */,
 				F046 /* CameraService2.swift */,
 				F033 /* WidgetRefreshService.swift */,
 				F042 /* NearbyStationService.swift */,
@@ -525,15 +519,11 @@ ttttF045 /* CameraService.swift */,
 				B027,
 				B028,
 				B029,
-				B030,
 				B031,
 				B032,
 				B033,
 				B034,
 				B035,
-				B036,
-				B037,
-				B038,
 				B039,
 				B041,
 				B042,

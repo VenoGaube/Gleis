@@ -31,6 +31,7 @@ final class TransportViewModel: ObservableObject {
     private var displayTimer: Timer?
     private var currentFetchTask: Task<Void, Never>?
     private var lastFetchedRouteKey: String?
+    private var lastInitializedFilterRouteKey: String?
     private var isFetching = false
     private var isLoadingStations = false
     private var lastWidgetUpdate: Date?
@@ -116,17 +117,20 @@ final class TransportViewModel: ObservableObject {
         guard let start = currentConfig.startStation, let end = currentConfig.endStation, start.id != end.id else {
             connections = .idle
             isShowingCachedData = false
+            availableTrainTypes = []
+            lastInitializedFilterRouteKey = nil
             updateWidget(with: [])
             return
         }
 
         let routeKey = "\(start.id)-\(end.id)"
+        initializeFiltersIfNeeded(for: routeKey)
         let existingConnections: [TrainConnection]? = connections.value
         let isRouteChange = routeKey != lastFetchedRouteKey
 
         // Skip fetch if route unchanged, already loaded, and not user-initiated
         // But still filter out past connections from existing state
-        if !isUserInitiated && !isRouteChange && connections.isLoaded {
+        if !isUserInitiated && !isRouteChange && connections.isLoaded && !isShowingCachedData {
             if let existing = connections.value {
                 let now = Date()
                 let pinnedId = settingsManager.pinnedJourney?.connectionId
@@ -135,15 +139,18 @@ final class TransportViewModel: ObservableObject {
                     setConnections(stillFuture)
                     updateWidgetIfNeeded(with: stillFuture)
                 }
+                // If route details are still missing, continue to network fetch even when route is unchanged.
+                if !stillFuture.contains(where: missingRouteDetails) { return }
+            } else {
+                return
             }
-            return
         }
 
         // Offline: use cached data
         if !NetworkMonitor.shared.isConnected,
            let cached = await connectionCache.load(for: transportType, from: start, to: end)
         {
-            let futureConnections = cached.connections.filter { $0.departureTime > Date() }
+            let futureConnections = cached.filter { $0.departureTime > Date() }
             guard !futureConnections.isEmpty else {
                 connections = .error(.noConnectionsAvailable)
                 return
@@ -151,7 +158,7 @@ final class TransportViewModel: ObservableObject {
             lastFetchedRouteKey = routeKey
             setConnections(futureConnections)
             isShowingCachedData = true
-            lastUpdated = await connectionCache.lastUpdateTime(for: transportType)
+            lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
             updateWidgetIfNeeded(with: futureConnections)
             return
         }
@@ -160,6 +167,7 @@ final class TransportViewModel: ObservableObject {
         if existingConnections == nil || isRouteChange {
             connections = .loading
             isShowingCachedData = false
+            availableTrainTypes = []
         }
 
         do {
@@ -196,7 +204,7 @@ final class TransportViewModel: ObservableObject {
                 return
             }
             if let cached = await connectionCache.load(for: transportType, from: start, to: end) {
-                let futureConnections = cached.connections.filter { $0.departureTime > Date() }
+                let futureConnections = cached.filter { $0.departureTime > Date() }
                 guard !futureConnections.isEmpty else {
                     connections = .error(.noConnectionsAvailable)
                     handleError(error)
@@ -205,7 +213,7 @@ final class TransportViewModel: ObservableObject {
                 lastFetchedRouteKey = routeKey
                 setConnections(futureConnections)
                 isShowingCachedData = true
-                lastUpdated = await connectionCache.lastUpdateTime(for: transportType)
+                lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
                 toastManager.show("Showing cached data", type: .info)
                 updateWidgetIfNeeded(with: futureConnections)
             } else {
@@ -283,7 +291,7 @@ final class TransportViewModel: ObservableObject {
         if case let .loaded(conns) = connections { updateWidgetIfNeeded(with: conns) }
     }
 
-    func unpinJourney(for _: TrainConnection) {
+    func unpinJourney() {
         settingsManager.unpinJourney()
         toastManager.show("Unpinned journey", type: .info)
         rebuildDisplayConnections()
@@ -377,9 +385,17 @@ final class TransportViewModel: ObservableObject {
             return
         }
 
-        // Update available train types from all connections (before filtering)
-        let types = Set(connections.map(\.trainType))
-        availableTrainTypes = types.sorted()
+        // Build available dynamic train types from API-derived connection data.
+        var typesById: [String: TrainType] = [:]
+        for connection in connections {
+            let type = connection.trainType
+            if let existing = typesById[type.id] {
+                typesById[type.id] = existing.merged(with: type)
+            } else {
+                typesById[type.id] = type
+            }
+        }
+        availableTrainTypes = typesById.values.sorted()
 
         let excluded = config.excludedTrainTypes
         let filtered = excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
@@ -424,7 +440,7 @@ final class TransportViewModel: ObservableObject {
                 || settingsManager.savedCommuteRoute.matchesSchedule(conn) != nil
             let isPinned = settingsManager.isPinned(conn.id)
             return WidgetConnection(
-                id: conn.id, lineNumber: conn.lineNumber, departureTime: conn.departureTime,
+                id: conn.id, lineNumber: conn.lineNumber, lineColors: conn.lineColors, departureTime: conn.departureTime,
                 arrivalTime: conn.arrivalTime, destination: conn.arrivalStation.name, platform: conn.platform,
                 transfers: conn.transfers, delay: conn.delay, stopCount: stopCount, hasReminder: hasReminder,
                 isPinned: isPinned
@@ -447,6 +463,15 @@ final class TransportViewModel: ObservableObject {
     }
 
     // MARK: - Error Handling
+
+    private func missingRouteDetails(_ connection: TrainConnection) -> Bool {
+        connection.legs.contains { leg in
+            !leg.isWalking && (
+                leg.stopCount == nil
+                    || ((leg.stopCount ?? 0) > 0 && leg.intermediateStops.isEmpty)
+            )
+        }
+    }
 
     private func handleError(_ error: Error) {
         errorMessage = (error as? GleisError)?.errorDescription ?? error.localizedDescription
@@ -478,5 +503,14 @@ final class TransportViewModel: ObservableObject {
             group.cancelAll()
             return result
         }
+    }
+
+    private func initializeFiltersIfNeeded(for routeKey: String) {
+        guard lastInitializedFilterRouteKey != routeKey else { return }
+        lastInitializedFilterRouteKey = routeKey
+        guard !config.excludedTrainTypes.isEmpty else { return }
+        var updated = config
+        updated.excludedTrainTypes = []
+        settingsManager.updateConfig(updated)
     }
 }

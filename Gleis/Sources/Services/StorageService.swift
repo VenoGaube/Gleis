@@ -13,9 +13,6 @@ enum StorageKey: String {
 struct ArchivedSchedules: Codable {
     var toWorkSchedules: [Weekday: DaySchedule]
     var toHomeSchedules: [Weekday: DaySchedule]
-    var isEnabled: Bool
-    var notifyFiveMinBefore: Bool
-    var notifyAtLeaveTime: Bool
 }
 
 // MARK: - LocalStorageService
@@ -151,8 +148,6 @@ final class SettingsManager: ObservableObject {
         updateConfig(cfg)
     }
 
-    func resetConfig(for type: TransportType) { updateConfig(RouteConfiguration(transportType: type)) }
-
     func updateSavedCommuteRoute(_ route: SavedCommuteRoute) {
         savedCommuteRoute = route
         try? storage.save(route, forKey: StorageKey.savedCommuteRoute.rawValue)
@@ -175,9 +170,8 @@ final class SettingsManager: ObservableObject {
         guard !savedCommuteRoute.toWorkSchedules.isEmpty || !savedCommuteRoute.toHomeSchedules.isEmpty else { return }
 
         let archived = ArchivedSchedules(
-            toWorkSchedules: savedCommuteRoute.toWorkSchedules, toHomeSchedules: savedCommuteRoute.toHomeSchedules,
-            isEnabled: savedCommuteRoute.isEnabled, notifyFiveMinBefore: savedCommuteRoute.notifyFiveMinBefore,
-            notifyAtLeaveTime: savedCommuteRoute.notifyAtLeaveTime
+            toWorkSchedules: savedCommuteRoute.toWorkSchedules,
+            toHomeSchedules: savedCommuteRoute.toHomeSchedules
         )
         archivedSchedulesByStationPair[key] = archived
         try? storage.save(archivedSchedulesByStationPair, forKey: StorageKey.archivedSchedulesByStationPair.rawValue)
@@ -201,9 +195,6 @@ final class SettingsManager: ObservableObject {
             // Restore archived schedules
             route.toWorkSchedules = archived.toWorkSchedules
             route.toHomeSchedules = archived.toHomeSchedules
-            route.isEnabled = archived.isEnabled
-            route.notifyFiveMinBefore = archived.notifyFiveMinBefore
-            route.notifyAtLeaveTime = archived.notifyAtLeaveTime
         } else {
             // No archived schedules for this pair - clear schedules
             route.toWorkSchedules = [:]

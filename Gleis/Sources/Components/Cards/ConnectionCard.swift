@@ -74,7 +74,7 @@ struct ConnectionCard: View {
 
     private var compactMissedView: some View {
         HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber)
+            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
             VStack(alignment: .leading, spacing: 2) {
                 Text(connection.arrivalStation.name).font(.subheadline.weight(.medium)).scalableText(minimumScale: 0.8)
                 Text(connection.departureTime, style: .time).font(.caption).foregroundStyle(.secondary)
@@ -87,7 +87,7 @@ struct ConnectionCard: View {
 
     private var headerSection: some View {
         HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber)
+            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(connection.departureStation.name).font(.subheadline.weight(.medium)).scalableText(
@@ -132,18 +132,14 @@ struct ConnectionCard: View {
                     connection.platform != nil ? .headline.weight(.semibold).monospacedDigit() : .caption2
                 ).foregroundStyle(connection.platform != nil ? .primary : .tertiary)
             }.frame(width: 50)
-            if connection.transfers > 0 {
-                Button {
-                    Haptics.selection()
-                    onTap()
-                } label: {
-                    Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
-                        .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).padding(8).contentShape(
-                            Rectangle())
-                }.buttonStyle(.borderless)
-            } else {
-                Color.clear.frame(width: 36)
-            }
+            Button {
+                Haptics.selection()
+                onTap()
+            } label: {
+                Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                    .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).padding(8).contentShape(
+                        Rectangle())
+            }.buttonStyle(.borderless)
         }.padding(.horizontal, 16).padding(.vertical, 12)
     }
 
@@ -234,12 +230,27 @@ struct ConnectionCard: View {
 
 struct LineBadge: View {
     let line: String
+    let colors: TrainLineColors?
+
+    init(line: String, colors: TrainLineColors? = nil) {
+        self.line = line
+        self.colors = colors
+    }
 
     var body: some View {
-        Text(line.uppercased()).font(.headline.weight(.bold)).foregroundStyle(.white).scalableText(minimumScale: 0.7)
-            .padding(.horizontal, 12).padding(.vertical, 8).background(
-                Color.lineColor(for: line), in: RoundedRectangle(cornerRadius: 8)
-            )
+        let style = Color.lineBadgeStyle(for: line, apiColors: colors)
+        return Text(line.uppercased())
+            .font(.headline.weight(.bold))
+            .foregroundStyle(style.foreground)
+            .scalableText(minimumScale: 0.7)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(style.background, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                if let border = style.border {
+                    RoundedRectangle(cornerRadius: 8).stroke(border.opacity(0.7), lineWidth: 1)
+                }
+            }
     }
 }
 

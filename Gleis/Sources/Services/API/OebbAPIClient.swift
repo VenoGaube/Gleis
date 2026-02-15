@@ -19,6 +19,22 @@ actor OebbAPIClient {
         return f
     }()
 
+    private lazy var gateDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyyMMdd"
+        return f
+    }()
+
+    private lazy var gateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "HHmmss"
+        return f
+    }()
+
     init(storage: StorageServiceProtocol = LocalStorageService.shared, urlSession: URLSession = .shared) {
         self.storage = storage
         self.urlSession = urlSession
@@ -112,6 +128,22 @@ actor OebbAPIClient {
     func fetchTimetable(
         from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
     ) async throws -> OebbTimetableResponse {
+        do {
+            let gateResponse = try await fetchTimetableViaGateTripSearch(
+                from: from, to: to, count: count, departure: departure
+            )
+            if !gateResponse.connections.isEmpty { return gateResponse }
+        } catch {
+            if isCancellation(error) { throw error }
+            // Fall back to the authenticated shop endpoint if gate TripSearch fails.
+        }
+
+        return try await fetchTimetableViaShop(from: from, to: to, count: count, departure: departure)
+    }
+
+    private func fetchTimetableViaShop(
+        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
+    ) async throws -> OebbTimetableResponse {
         let payload = OebbTimetableRequest(
             reverse: false, datetimeDeparture: dateFormatter.string(from: departure), filter: .default,
             passengers: [.default], count: count, debugFilter: .default,
@@ -122,6 +154,366 @@ actor OebbAPIClient {
         return try await performAuthorized(
             url: url, method: "POST", body: encoder.encode(payload), decode: OebbTimetableResponse.self
         )
+    }
+
+    func fetchConnectionDetails(connectionId: String) async throws -> OebbConnectionDetailResponse {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+        guard let encodedId = connectionId.addingPercentEncoding(withAllowedCharacters: allowed),
+              let url = URL(string: "\(baseURL.absoluteString)/api/timetable/v1/connections/\(encodedId)")
+        else {
+            throw GleisError.networkError("Invalid connection detail URL")
+        }
+        return try await performAuthorized(url: url, method: "GET", decode: OebbConnectionDetailResponse.self)
+    }
+
+    private func fetchTimetableViaGateTripSearch(
+        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
+    ) async throws -> OebbTimetableResponse {
+        var components = URLComponents(url: fahrplanBaseURL.appendingPathComponent("gate"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "rnd", value: String(Int(Date().timeIntervalSince1970 * 1000)))
+        ]
+        guard let url = components?.url else { throw GleisError.networkError("Invalid gate URL") }
+
+        let payload = OebbGateTripSearchRequest(
+            id: makeGateRequestId(),
+            ver: "1.88",
+            lang: "deu",
+            auth: .init(type: "AID", aid: "5vHavmuWPWIfetEe"),
+            client: .init(id: "OEBB", type: "WEB", name: "webapp", l: "vs_webapp", v: 21901),
+            formatted: false,
+            ext: "OEBB.14",
+            svcReqL: [
+                .init(
+                    meth: "TripSearch",
+                    req: .init(
+                        depLocL: [.init(lid: makeGateLid(for: from), name: from.name)],
+                        arrLocL: [.init(lid: makeGateLid(for: to), name: to.name)],
+                        minChgTime: "-1",
+                        liveSearch: false,
+                        maxChg: "1000",
+                        outFrwd: true,
+                        outTime: gateTimeFormatter.string(from: departure),
+                        outDate: gateDateFormatter.string(from: departure),
+                        getPasslist: true,
+                        getTariff: true,
+                        getPolyline: false,
+                        numF: max(1, min(count, 30))
+                    ),
+                    id: "1|0|"
+                )
+            ]
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = try encoder.encode(payload)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let response = try await perform(request, decode: OebbGateResponse.self, retryAuth: false)
+        if let err = response.err, err.uppercased() != "OK" { throw GleisError.apiError("Gate error: \(err)") }
+
+        let service = response.svcResL?.first {
+            ($0.meth ?? "").localizedCaseInsensitiveCompare("TripSearch") == .orderedSame
+        } ?? response.svcResL?.first
+        if let err = service?.err, err.uppercased() != "OK" { throw GleisError.apiError("Gate error: \(err)") }
+
+        let mappedConnections = mapGateTripConnections(
+            service?.res,
+            fallbackFrom: from,
+            fallbackTo: to
+        )
+
+        return OebbTimetableResponse(connections: Array(mappedConnections.prefix(max(1, count))))
+    }
+
+    private func mapGateTripConnections(
+        _ payload: OebbGateServicePayload?,
+        fallbackFrom: OebbStationRef,
+        fallbackTo: OebbStationRef
+    ) -> [OebbConnection] {
+        guard let payload else { return [] }
+
+        let fallbackLocations = payload.locL ?? []
+        var locationsByIndex = Dictionary(uniqueKeysWithValues: fallbackLocations.enumerated().map { ($0.offset, $0.element) })
+        for (index, location) in (payload.common?.locL ?? []).enumerated() {
+            locationsByIndex[index] = location
+        }
+        let productsByIndex = Dictionary(
+            uniqueKeysWithValues: (payload.common?.prodL ?? []).enumerated().map { ($0.offset, $0.element) }
+        )
+        let iconsByIndex = Dictionary(
+            uniqueKeysWithValues: (payload.common?.icoL ?? []).enumerated().map { ($0.offset, $0.element) }
+        )
+
+        return (payload.outConL ?? []).enumerated().map { index, connection in
+            let serviceDay = connection.date ?? connection.secL?.first?.jny?.date
+
+            let mappedSections: [OebbSection] = (connection.secL ?? []).compactMap {
+                mapGateTripSection(
+                    $0,
+                    defaultServiceDay: serviceDay,
+                    locationsByIndex: locationsByIndex,
+                    productsByIndex: productsByIndex,
+                    iconsByIndex: iconsByIndex
+                )
+            }
+
+            let fallbackFromStop = OebbConnectionStop(
+                name: fallbackFrom.name,
+                esn: fallbackFrom.number,
+                departure: nil,
+                arrival: nil
+            )
+            let fallbackToStop = OebbConnectionStop(
+                name: fallbackTo.name,
+                esn: fallbackTo.number,
+                departure: nil,
+                arrival: nil
+            )
+
+            let depStop = mapGateTripStop(
+                connection.dep,
+                serviceDay: serviceDay,
+                locationsByIndex: locationsByIndex,
+                fallbackName: fallbackFrom.name,
+                fallbackEsn: fallbackFrom.number
+            ) ?? mappedSections.first?.from ?? fallbackFromStop
+            let arrStop = mapGateTripStop(
+                connection.arr,
+                serviceDay: serviceDay,
+                locationsByIndex: locationsByIndex,
+                fallbackName: fallbackTo.name,
+                fallbackEsn: fallbackTo.number
+            ) ?? mappedSections.last?.to ?? fallbackToStop
+
+            let durationMillis = gateDurationMillis(connection.durS)
+                ?? gateDurationFromStops(departure: depStop.departure, arrival: arrStop.arrival)
+
+            let normalizedId = gateNormalizedString(connection.cksum)
+                ?? gateNormalizedString(connection.cid)
+                ?? "gate-\(index)-\(fallbackFrom.number)-\(fallbackTo.number)-\(serviceDay ?? "unknown")"
+
+            return OebbConnection(
+                id: normalizedId,
+                from: depStop,
+                to: arrStop,
+                sections: mappedSections.isEmpty ? nil : mappedSections,
+                switches: connection.chg,
+                duration: durationMillis
+            )
+        }
+    }
+
+    private func mapGateTripSection(
+        _ section: OebbGateTripSection,
+        defaultServiceDay: String?,
+        locationsByIndex: [Int: OebbGateLocation],
+        productsByIndex: [Int: OebbGateTripProduct],
+        iconsByIndex: [Int: OebbGateTripIcon]
+    ) -> OebbSection? {
+        let sectionServiceDay = section.jny?.date ?? defaultServiceDay
+        let stops = mapGateTripStops(
+            section.jny?.stopL,
+            serviceDay: sectionServiceDay,
+            locationsByIndex: locationsByIndex
+        )
+
+        let from = mapGateTripStop(
+            section.dep,
+            serviceDay: sectionServiceDay,
+            locationsByIndex: locationsByIndex
+        ) ?? stops?.first
+        let to = mapGateTripStop(
+            section.arr,
+            serviceDay: sectionServiceDay,
+            locationsByIndex: locationsByIndex
+        ) ?? stops?.last
+
+        guard let from, let to else { return nil }
+
+        let duration = gateDurationMillis(section.jny?.durS)
+            ?? gateDurationFromStops(departure: from.departure, arrival: to.arrival)
+
+        return OebbSection(
+            from: from,
+            to: to,
+            duration: duration,
+            category: mapGateTripCategory(section, productsByIndex: productsByIndex, iconsByIndex: iconsByIndex),
+            type: section.type,
+            hasRealtime: nil,
+            stops: stops
+        )
+    }
+
+    private func mapGateTripCategory(
+        _ section: OebbGateTripSection,
+        productsByIndex: [Int: OebbGateTripProduct],
+        iconsByIndex: [Int: OebbGateTripIcon]
+    ) -> OebbCategory? {
+        if isWalkingGateSection(section) {
+            return OebbCategory(name: "Walk", number: nil, shortName: "WALK", displayName: "Walk")
+        }
+
+        let productIndex = section.jny?.prodL?.first?.prodX ?? section.dep?.dProdX ?? section.arr?.aProdX
+        guard let product = productIndex.flatMap({ productsByIndex[$0] }) else { return nil }
+
+        let shortName = gateNormalizedString(product.prodCtx?.catOutS)
+            ?? gateNormalizedString(product.prodCtx?.catIn)
+            ?? gateLeadingLetters(in: product.nameS ?? product.name)
+        let number = gateNormalizedString(product.number)
+            ?? gateNormalizedString(product.prodCtx?.num)
+            ?? gateTrailingNumber(in: product.nameS ?? product.name)
+        let displayName = gateNormalizedString(product.prodCtx?.catOutL)
+            ?? gateNormalizedString(product.nameS)
+            ?? gateNormalizedString(product.name)
+
+        let icon = product.icoX.flatMap { iconsByIndex[$0] }
+        let backgroundHex = gateHex(icon?.bg)
+        let foregroundHex = gateHex(icon?.fg)
+
+        return OebbCategory(
+            name: displayName ?? shortName,
+            number: number,
+            shortName: shortName,
+            displayName: displayName ?? shortName,
+            backgroundColor: backgroundHex,
+            fontColor: foregroundHex,
+            barColor: backgroundHex,
+            train: true
+        )
+    }
+
+    private func mapGateTripStops(
+        _ stopRefs: [OebbGateTripStopRef]?,
+        serviceDay: String?,
+        locationsByIndex: [Int: OebbGateLocation]
+    ) -> [OebbConnectionStop]? {
+        guard let stopRefs, !stopRefs.isEmpty else { return nil }
+
+        let mapped = stopRefs.compactMap {
+            mapGateTripStop($0, serviceDay: serviceDay, locationsByIndex: locationsByIndex)
+        }
+
+        return mapped.isEmpty ? nil : mapped
+    }
+
+    private func mapGateTripStop(
+        _ stopRef: OebbGateTripStopRef?,
+        serviceDay: String?,
+        locationsByIndex: [Int: OebbGateLocation],
+        fallbackName: String? = nil,
+        fallbackEsn: Int? = nil
+    ) -> OebbConnectionStop? {
+        guard let stopRef else { return nil }
+
+        let location = stopRef.locX.flatMap { locationsByIndex[$0] }
+        let name = gateNormalizedString(location?.name) ?? gateNormalizedString(fallbackName)
+        guard let name else { return nil }
+
+        return OebbConnectionStop(
+            name: name,
+            esn: gateNormalizedString(location?.extId).flatMap(Int.init) ?? fallbackEsn,
+            departure: gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeS),
+            arrival: gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeS),
+            departurePlatform: gateNormalizedString(stopRef.dPltfS?.txt),
+            arrivalPlatform: gateNormalizedString(stopRef.aPltfS?.txt)
+        )
+    }
+
+    private func gateDurationMillis(_ rawValue: String?) -> Int? {
+        guard let rawValue else { return nil }
+        let digits = rawValue.filter(\.isNumber)
+        guard digits.count >= 6 else { return nil }
+
+        let secondsPart = String(digits.suffix(2))
+        let minutesPart = String(digits.dropLast(2).suffix(2))
+        let hoursPart = String(digits.dropLast(4))
+
+        guard let seconds = Int(secondsPart), let minutes = Int(minutesPart), let hours = Int(hoursPart) else {
+            return nil
+        }
+
+        return ((hours * 3600) + (minutes * 60) + seconds) * 1000
+    }
+
+    private func gateDurationFromStops(departure: String?, arrival: String?) -> Int? {
+        guard
+            let departure,
+            let arrival,
+            let departureDate = dateFormatter.date(from: departure),
+            let arrivalDate = dateFormatter.date(from: arrival)
+        else {
+            return nil
+        }
+
+        let duration = Int(arrivalDate.timeIntervalSince(departureDate) * 1000)
+        return duration > 0 ? duration : nil
+    }
+
+    private func gateIsoTimestamp(date: String?, time: String?) -> String? {
+        guard let date, let time else { return nil }
+        let dateDigits = date.filter(\.isNumber)
+        let timeDigits = time.filter(\.isNumber)
+        guard dateDigits.count == 8, timeDigits.count >= 6 else { return nil }
+
+        let year = dateDigits.prefix(4)
+        let month = dateDigits.dropFirst(4).prefix(2)
+        let day = dateDigits.suffix(2)
+
+        let hour = timeDigits.prefix(2)
+        let minute = timeDigits.dropFirst(2).prefix(2)
+        let second = timeDigits.dropFirst(4).prefix(2)
+
+        return "\(year)-\(month)-\(day)T\(hour):\(minute):\(second).000"
+    }
+
+    private func gateHex(_ color: OebbGateTripRGBColor?) -> String? {
+        guard
+            let red = color?.r,
+            let green = color?.g,
+            let blue = color?.b,
+            (0 ... 255).contains(red),
+            (0 ... 255).contains(green),
+            (0 ... 255).contains(blue)
+        else {
+            return nil
+        }
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    private func gateNormalizedString(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private func gateLeadingLetters(in value: String?) -> String? {
+        guard let value = gateNormalizedString(value) else { return nil }
+        let letters = value.prefix { $0.isLetter }
+        guard !letters.isEmpty else { return nil }
+        return String(letters).uppercased()
+    }
+
+    private func gateTrailingNumber(in value: String?) -> String? {
+        guard let value = gateNormalizedString(value) else { return nil }
+        let matches = value.split(whereSeparator: { !$0.isNumber })
+        guard let lastNumber = matches.last else { return nil }
+        let normalized = String(lastNumber)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func makeGateLid(for station: OebbStationRef) -> String {
+        let safeName = station.name.replacingOccurrences(of: "@", with: " ").trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return "A=1@O=\(safeName)@X=\(station.longitude)@Y=\(station.latitude)@U=81@L=\(station.number)@"
+    }
+
+    private func isWalkingGateSection(_ section: OebbGateTripSection) -> Bool {
+        let type = section.type?.lowercased() ?? ""
+        return type.contains("walk") || type.contains("footpath")
     }
 
     // MARK: - Private Helpers
@@ -231,5 +623,9 @@ actor OebbAPIClient {
     private func makeGateRequestId() -> String {
         let chars = Array("abcdefghijklmnopqrstuvwxyz0123456789")
         return String((0 ..< 16).map { _ in chars.randomElement()! })
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 }

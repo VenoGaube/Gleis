@@ -3,6 +3,7 @@ import Foundation
 struct PinnedJourney: Codable, Equatable {
     let connectionId: String
     let lineNumber: String
+    let lineColors: TrainLineColors?
     let departureTime: Date
     let arrivalTime: Date
     let departureStation: Station
@@ -32,6 +33,7 @@ struct PinnedJourney: Codable, Equatable {
     init(from connection: TrainConnection) {
         connectionId = connection.id
         lineNumber = connection.lineNumber
+        lineColors = connection.lineColors
         departureTime = connection.departureTime
         arrivalTime = connection.arrivalTime
         departureStation = connection.departureStation
@@ -47,10 +49,11 @@ struct PinnedJourney: Codable, Equatable {
     init(
         connectionId: String, lineNumber: String, departureTime: Date, arrivalTime: Date, departureStation: Station,
         arrivalStation: Station, platform: String?, delay: Int, pinnedAt: Date, legs: [ConnectionLeg] = [],
-        transfers: Int = 0
+        transfers: Int = 0, lineColors: TrainLineColors? = nil
     ) {
         self.connectionId = connectionId
         self.lineNumber = lineNumber
+        self.lineColors = lineColors
         self.departureTime = departureTime
         self.arrivalTime = arrivalTime
         self.departureStation = departureStation

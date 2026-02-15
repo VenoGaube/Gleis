@@ -106,12 +106,10 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
 // MARK: - NotificationSettings
 
 struct NotificationSettings: Codable, Equatable {
-    var isEnabled: Bool
     var customMessage: String
     var soundEnabled: Bool
 
     init(transportType: TransportType) {
-        isEnabled = true
         soundEnabled = true
         customMessage = transportType == .trainCommute ? "🚂 Time to catch your train!" : "🚇 Time to go!"
     }

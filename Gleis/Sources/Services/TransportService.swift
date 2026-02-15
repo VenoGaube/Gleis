@@ -44,7 +44,17 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                     $0, from: resolvedFrom.station, to: resolvedTo.station, transportType: transportType
                 )
             }
-            return connections
+            return try await enrichConnectionsBestEffort(connections)
+        } catch {
+            if isCancellation(error) { throw CancellationError() }
+            throw mapError(error)
+        }
+    }
+
+    func enrichConnectionDetails(_ connection: TrainConnection) async throws -> TrainConnection {
+        do {
+            let detail = try await apiClient.fetchConnectionDetails(connectionId: connection.id)
+            return ConnectionMapper.enrichConnection(connection, detail: detail)
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -138,5 +148,33 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     private func isCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    private func enrichConnectionsBestEffort(_ connections: [TrainConnection]) async throws -> [TrainConnection] {
+        var enriched = connections
+        for index in enriched.indices {
+            if Task.isCancelled { throw CancellationError() }
+            let connection = enriched[index]
+            guard needsDetailEnrichment(connection) else { continue }
+
+            do {
+                let detail = try await apiClient.fetchConnectionDetails(connectionId: connection.id)
+                enriched[index] = ConnectionMapper.enrichConnection(connection, detail: detail)
+            } catch {
+                if isCancellation(error) { throw CancellationError() }
+                // Keep base v4 data for this connection if detail fetch fails.
+                continue
+            }
+        }
+        return enriched
+    }
+
+    private func needsDetailEnrichment(_ connection: TrainConnection) -> Bool {
+        connection.legs.contains { leg in
+            !leg.isWalking && (
+                leg.stopCount == nil
+                    || ((leg.stopCount ?? 0) > 0 && leg.intermediateStops.isEmpty)
+            )
+        }
     }
 }

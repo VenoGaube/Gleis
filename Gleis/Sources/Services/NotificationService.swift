@@ -37,7 +37,6 @@ final class NotificationService: NotificationServiceProtocol {
     }
 
     func cancelNotification(id: String) { center.removePendingNotificationRequests(withIdentifiers: [id]) }
-    func cancelAllNotifications() { center.removeAllPendingNotificationRequests() }
 
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection) {
         let ids = [
@@ -66,7 +65,7 @@ final class NotificationService: NotificationServiceProtocol {
         let bufferTime = config.bufferTime(for: fromStation.id) ?? config.bufferTimeMinutes
         let leaveMinutes = schedule.departureHour * 60 + schedule.departureMinute - walkingTime - bufferTime
 
-        // Always schedule both notification types when notifications are enabled
+        // Repeat journeys always use both notification types.
         try await scheduleWeeklyNotification(
             id: "commute_\(direction.rawValue)_\(day.rawValue)_5min", weekday: day.rawValue, minutes: leaveMinutes - 5,
             title: "⏰ 5 Minutes",

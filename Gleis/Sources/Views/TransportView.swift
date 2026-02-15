@@ -59,7 +59,7 @@ struct TransportView: View {
                 )
 
                 // Train type filter chips
-                if !viewModel.availableTrainTypes.isEmpty {
+                if viewModel.connections.isLoaded, !viewModel.availableTrainTypes.isEmpty {
                     TrainTypeFilterBar(
                         availableTypes: viewModel.availableTrainTypes,
                         excludedTypes: Binding(
@@ -78,16 +78,7 @@ struct TransportView: View {
                     MyJourneyCard(
                         journey: pinnedJourney
                     ) {
-                        viewModel.unpinJourney(
-                            for: TrainConnection(
-                                id: pinnedJourney.connectionId, lineNumber: pinnedJourney.lineNumber,
-                                trainType: .other, departureTime: pinnedJourney.departureTime,
-                                arrivalTime: pinnedJourney.arrivalTime,
-                                departureStation: pinnedJourney.departureStation,
-                                arrivalStation: pinnedJourney.arrivalStation, platform: pinnedJourney.platform,
-                                delay: pinnedJourney.delay, status: .onTime, transfers: pinnedJourney.transfers,
-                                legs: pinnedJourney.legs
-                            ))
+                        viewModel.unpinJourney()
                     }
                 }
 
@@ -198,9 +189,8 @@ struct TransportView: View {
                     onSchedule: { Task { await viewModel.scheduleNotification(for: displayConnection.connection) } },
                     onCancel: { viewModel.cancelNotification(for: displayConnection.connection) },
                     onPin: { viewModel.pinJourney(for: displayConnection.connection) },
-                    onUnpin: { viewModel.unpinJourney(for: displayConnection.connection) },
+                    onUnpin: { viewModel.unpinJourney() },
                     onTap: {
-                        guard displayConnection.connection.transfers > 0 else { return }
                         Haptics.selection()
                         detailConnection = displayConnection.connection
                     }

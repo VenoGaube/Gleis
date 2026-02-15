@@ -38,7 +38,8 @@ final class WidgetRefreshService {
                     let hasReminder =
                         SettingsManager.shared.isReminderSet(for: conn.id) || savedRoute.matchesSchedule(conn) != nil
                     return WidgetConnection(
-                        id: conn.id, lineNumber: conn.lineNumber, departureTime: conn.departureTime,
+                        id: conn.id, lineNumber: conn.lineNumber, lineColors: conn.lineColors,
+                        departureTime: conn.departureTime,
                         arrivalTime: conn.arrivalTime, destination: conn.arrivalStation.name, platform: conn.platform,
                         transfers: conn.transfers, delay: conn.delay, stopCount: stopCount, hasReminder: hasReminder
                     )
