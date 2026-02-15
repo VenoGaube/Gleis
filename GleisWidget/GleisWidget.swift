@@ -706,7 +706,7 @@ extension Color {
     static func lineColor(for line: String) -> Color {
         let uppercased = line.uppercased()
 
-        // Vienna U-Bahn colors
+        // Vienna U-Bahn colors 
         if uppercased == "U1" { return Color(red: 0.89, green: 0.15, blue: 0.21) }
         if uppercased == "U2" { return Color(red: 0.58, green: 0.22, blue: 0.58) }
         if uppercased == "U3" { return Color(red: 0.95, green: 0.55, blue: 0.15) }

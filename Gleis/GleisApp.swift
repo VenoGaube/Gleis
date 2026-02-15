@@ -18,6 +18,7 @@ struct GleisApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @State private var deepLinkConnectionId: String?
+    @StateObject private var launchBootstrapper = AppLaunchBootstrapper()
 
     init() {
         // Configure status bar and navigation bar appearance for proper safe area handling
@@ -29,7 +30,15 @@ struct GleisApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(selectedTab: $selectedTab, deepLinkConnectionId: $deepLinkConnectionId).onOpenURL { url in
+            Group {
+                if launchBootstrapper.isReady {
+                    ContentView(selectedTab: $selectedTab, deepLinkConnectionId: $deepLinkConnectionId)
+                } else {
+                    AppLaunchLoadingView(statusText: launchBootstrapper.statusText)
+                }
+            }
+            .task { await launchBootstrapper.bootstrapIfNeeded() }
+            .onOpenURL { url in
                 handleDeepLink(url)
             }
         }.onChange(of: scenePhase) { _, newPhase in
@@ -59,6 +68,64 @@ struct GleisApp: App {
         case "repeat": selectedTab = 1
         case "settings": selectedTab = 2
         default: break
+        }
+    }
+}
+
+@MainActor
+private final class AppLaunchBootstrapper: ObservableObject {
+    @Published private(set) var isReady = false
+    @Published private(set) var statusText = "Loading your commute..."
+
+    private var hasBootstrapped = false
+
+    func bootstrapIfNeeded() async {
+        guard !hasBootstrapped else { return }
+        hasBootstrapped = true
+
+        statusText = "Preparing saved routes..."
+        _ = SettingsManager.shared.savedCommuteRoute
+
+        statusText = "Preparing station data..."
+        _ = Task(priority: .utility) {
+            _ = try? await TransportService.shared.fetchStations(for: .trainCommute)
+        }
+
+        statusText = "Preparing location..."
+        LocationService.shared.startUpdatingLocation()
+
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        isReady = true
+    }
+}
+
+private struct AppLaunchLoadingView: View {
+    let statusText: String
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.05, green: 0.15, blue: 0.3), Color(red: 0.06, green: 0.22, blue: 0.4)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Image(systemName: "tram.fill")
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("Gleis")
+                    .font(.title.bold())
+                    .foregroundStyle(.white)
+                Text(statusText)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.85))
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+            }
+            .padding(.horizontal, 24)
         }
     }
 }

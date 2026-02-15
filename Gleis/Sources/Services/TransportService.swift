@@ -3,6 +3,8 @@ import Foundation
 final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
     private let apiClient: OebbAPIClient
+    private let stationCacheLock = NSLock()
+    private var cachedStationsByTransport: [String: [Station]] = [:]
 
     init(apiClient: OebbAPIClient = .shared) {
         self.apiClient = apiClient
@@ -62,10 +64,14 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     }
 
     func fetchStations(for transportType: TransportType) async throws -> [Station] {
+        if let cached = cachedStations(for: transportType) { return cached }
+
         do {
-            return try await apiClient.searchStations(query: "", count: 25).map {
+            let stations = try await apiClient.searchStations(query: "", count: 25).map {
                 ConnectionMapper.mapStation($0, transportType: transportType)
             }
+            cacheStations(stations, for: transportType)
+            return stations
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -148,6 +154,18 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     private func isCancellation(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    private func cachedStations(for transportType: TransportType) -> [Station]? {
+        stationCacheLock.lock()
+        defer { stationCacheLock.unlock() }
+        return cachedStationsByTransport[transportType.rawValue]
+    }
+
+    private func cacheStations(_ stations: [Station], for transportType: TransportType) {
+        stationCacheLock.lock()
+        cachedStationsByTransport[transportType.rawValue] = stations
+        stationCacheLock.unlock()
     }
 
     private func enrichConnectionsBestEffort(_ connections: [TrainConnection]) async throws -> [TrainConnection] {

@@ -22,6 +22,9 @@ final class CommuteScheduleViewModel: ObservableObject {
     private let locationService: LocationService
     private let searchService: StationSearchService
     private var cancellables = Set<AnyCancellable>()
+    private var hasLoadedStations = false
+    private var isLoadingStations = false
+    private var isObservingLocationChanges = false
 
     // MARK: - Computed
 
@@ -58,15 +61,44 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func onAppear() async {
-        route = settingsManager.savedCommuteRoute
+    func onAppear() { route = settingsManager.savedCommuteRoute }
+
+    func loadStationsIfNeeded(refreshNearbyAfterLoad: Bool = true) async {
+        if refreshNearbyAfterLoad {
+            locationService.startUpdatingLocation()
+            observeLocationChanges()
+            nearbyStationService.updateDistances(for: routeContextStations())
+        }
+
+        if hasLoadedStations {
+            guard refreshNearbyAfterLoad else { return }
+            let knownStations = nearbyContextStations(includeLoadedStations: true)
+            nearbyStationService.updateDistances(for: knownStations)
+            await nearbyStationService.refreshIfNeeded(
+                transportType: transportType,
+                knownStations: knownStations
+            )
+            return
+        }
+
+        guard !isLoadingStations else { return }
+        isLoadingStations = true
+        defer { isLoadingStations = false }
+
         do {
             stations = try await transportService.fetchStations(for: transportType)
-            nearbyStationService.updateDistances(for: stations)
-        } catch {}
-        await nearbyStationService.refreshIfNeeded(transportType: transportType, knownStations: stations)
-        locationService.startUpdatingLocation()
-        observeLocationChanges()
+            hasLoadedStations = true
+        } catch {
+            return
+        }
+
+        guard refreshNearbyAfterLoad else { return }
+        let knownStations = nearbyContextStations(includeLoadedStations: true)
+        nearbyStationService.updateDistances(for: knownStations)
+        await nearbyStationService.refreshIfNeeded(
+            transportType: transportType,
+            knownStations: knownStations
+        )
     }
 
     // MARK: - Station Search
@@ -130,6 +162,21 @@ final class CommuteScheduleViewModel: ObservableObject {
         save()
     }
 
+    func findSuggestedSchedule(
+        for day: Weekday,
+        basedOn template: DaySchedule,
+        direction: CommuteDirection
+    ) async -> DaySchedule? {
+        guard let from = route.fromStation(for: direction), let to = route.toStation(for: direction) else { return nil }
+        guard let departure = suggestionSearchStart(for: day, template: template) else { return nil }
+
+        guard let connections = try? await transportService.fetchConnections(
+            from: from, to: to, transportType: transportType, departureTime: departure, count: 80
+        ) else { return nil }
+
+        return bestSuggestedSchedule(in: connections, template: template)
+    }
+
     // MARK: - Notifications
 
     func rescheduleAllNotifications() {
@@ -151,7 +198,99 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     // MARK: - Private
 
+    private func suggestionSearchStart(for day: Weekday, template: DaySchedule) -> Date? {
+        var components = DateComponents()
+        components.weekday = day.rawValue
+        components.hour = template.departureHour
+        components.minute = template.departureMinute
+        components.second = 0
+
+        guard let departure = Calendar.current.nextDate(
+            after: Date().addingTimeInterval(-60),
+            matching: components,
+            matchingPolicy: .nextTime,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        ) else { return nil }
+
+        return departure.addingTimeInterval(-45 * 60)
+    }
+
+    private func bestSuggestedSchedule(in connections: [TrainConnection], template: DaySchedule) -> DaySchedule? {
+        let eligibleConnections = connections.filter { $0.status != .cancelled }
+        guard !eligibleConnections.isEmpty else { return nil }
+
+        if let templateConnectionId = template.connectionId,
+           let matchingId = eligibleConnections.first(where: { $0.id == templateConnectionId })
+        {
+            return makeSchedule(from: matchingId)
+        }
+
+        if let exact = eligibleConnections.first(where: { connectionMatchesTemplate($0, template: template) }) {
+            return makeSchedule(from: exact)
+        }
+
+        let normalizedTemplateLine = normalizeLine(template.lineNumber)
+        let templateMinutes = template.departureHour * 60 + template.departureMinute
+        let calendar = Calendar.current
+
+        let sameLineMatches: [(TrainConnection, Int)] = eligibleConnections.compactMap { connection in
+            guard normalizeLine(connection.lineNumber) == normalizedTemplateLine else { return nil }
+            let hour = calendar.component(.hour, from: connection.departureTime)
+            let minute = calendar.component(.minute, from: connection.departureTime)
+            let diff = abs((hour * 60 + minute) - templateMinutes)
+            guard diff <= 45 else { return nil }
+            return (connection, diff)
+        }
+        if let sameLineClosest = sameLineMatches.min(by: { $0.1 < $1.1 }).map({ $0.0 }) {
+            return makeSchedule(from: sameLineClosest)
+        }
+
+        let sameTimeMatches: [(TrainConnection, Int)] = eligibleConnections.compactMap { connection in
+            let hour = calendar.component(.hour, from: connection.departureTime)
+            let minute = calendar.component(.minute, from: connection.departureTime)
+            let diff = abs((hour * 60 + minute) - templateMinutes)
+            guard diff <= 30 else { return nil }
+            return (connection, diff)
+        }
+        if let sameTimeClosest = sameTimeMatches.min(by: { $0.1 < $1.1 }).map({ $0.0 }) {
+            return makeSchedule(from: sameTimeClosest)
+        }
+
+        return makeSchedule(from: eligibleConnections[0])
+    }
+
+    private func connectionMatchesTemplate(_ connection: TrainConnection, template: DaySchedule) -> Bool {
+        let calendar = Calendar.current
+        return normalizeLine(connection.lineNumber) == normalizeLine(template.lineNumber)
+            && calendar.component(.hour, from: connection.departureTime) == template.departureHour
+            && calendar.component(.minute, from: connection.departureTime) == template.departureMinute
+    }
+
+    private func makeSchedule(from connection: TrainConnection) -> DaySchedule {
+        let calendar = Calendar.current
+        return DaySchedule(
+            lineNumber: connection.lineNumber,
+            lineColors: connection.lineColors,
+            departureHour: calendar.component(.hour, from: connection.departureTime),
+            departureMinute: calendar.component(.minute, from: connection.departureTime),
+            connectionId: connection.id,
+            isDailyRepeat: false,
+            transfers: connection.transfers
+        )
+    }
+
+    private func normalizeLine(_ line: String) -> String {
+        line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+    }
+
     private func observeLocationChanges() {
+        guard !isObservingLocationChanges else { return }
+        isObservingLocationChanges = true
+
         locationService.$currentLocation
             .dropFirst()
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
@@ -165,5 +304,24 @@ final class CommuteScheduleViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    private func routeContextStations() -> [Station] {
+        var routeStations: [Station] = []
+        if let home = route.homeStation { routeStations.append(home) }
+        if let work = route.workStation, routeStations.contains(where: { $0.id == work.id }) == false {
+            routeStations.append(work)
+        }
+        return routeStations
+    }
+
+    private func nearbyContextStations(includeLoadedStations: Bool) -> [Station] {
+        var knownStations = routeContextStations()
+        guard includeLoadedStations else { return knownStations }
+
+        for station in stations.prefix(40) where knownStations.contains(where: { $0.id == station.id }) == false {
+            knownStations.append(station)
+        }
+        return knownStations
     }
 }

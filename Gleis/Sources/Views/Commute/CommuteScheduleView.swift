@@ -15,6 +15,14 @@ struct CommuteScheduleView: View {
     @State private var showResetConfirm = false
     @State private var pulseHint = false
     @State private var showCopySheet: Weekday?
+    @State private var toWorkSuggestions: [Weekday: DaySchedule] = [:]
+    @State private var toHomeSuggestions: [Weekday: DaySchedule] = [:]
+    @State private var toWorkSuggestionLoadingDays: Set<Weekday> = []
+    @State private var toHomeSuggestionLoadingDays: Set<Weekday> = []
+    @State private var toWorkDismissedSuggestionDays: Set<Weekday> = []
+    @State private var toHomeDismissedSuggestionDays: Set<Weekday> = []
+    @State private var suggestionLookupTask: Task<Void, Never>?
+    @State private var suggestionLookupGeneration = 0
     @Environment(\.colorScheme) var colorScheme
 
     private var autoPreferredStationIds: Set<String> {
@@ -55,11 +63,22 @@ struct CommuteScheduleView: View {
             (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).task {
-            await viewModel.onAppear()
+            viewModel.onAppear()
         }.onAppear {
             withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true }
         }
-            .onDisappear { pulseHint = false }
+            .onDisappear {
+                pulseHint = false
+                resetAllSuggestions()
+            }
+            .onChange(of: viewModel.route.homeStation?.id) { _, _ in resetAllSuggestions() }
+            .onChange(of: viewModel.route.workStation?.id) { _, _ in resetAllSuggestions() }
+            .onChange(of: viewModel.selectedDirection) { _, _ in
+                suggestionLookupTask?.cancel()
+                suggestionLookupTask = nil
+                clearAllSuggestionLoading()
+                clearAllDismissedSuggestions()
+            }
             .sheet(isPresented: $showStationAPicker) {
                 StationPickerSheet(
                     title: "Station A", stations: viewModel.stations, recentStations: viewModel.recentStations,
@@ -79,6 +98,7 @@ struct CommuteScheduleView: View {
                         set: { viewModel.handleStationAChange($0) }
                     )
                 )
+                .task { await viewModel.loadStationsIfNeeded() }
             }.sheet(isPresented: $showStationBPicker) {
                 StationPickerSheet(
                     title: "Station B", stations: viewModel.stations, recentStations: viewModel.recentStations,
@@ -98,12 +118,14 @@ struct CommuteScheduleView: View {
                         set: { viewModel.handleStationBChange($0) }
                     )
                 )
+                .task { await viewModel.loadStationsIfNeeded() }
             }.sheet(item: $selectedDay) { day in
                 if let from = viewModel.currentFromStation, let to = viewModel.currentToStation {
                     DayTrainPicker(
                         day: day, from: from, to: to, direction: viewModel.selectedDirection,
                         transportType: viewModel.transportType, route: $viewModel.route,
-                        onSave: { viewModel.save() }
+                        onSave: { viewModel.save() },
+                        onScheduleSaved: handleScheduleSaved
                     ) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             viewModel.toastManager.show(
@@ -132,7 +154,8 @@ struct CommuteScheduleView: View {
                     },
                     onCopied: { message in viewModel.toastManager.show(message, type: .success) }
                 )
-            }.toastOverlay(viewModel.toastManager)
+            }
+            .toastOverlay(viewModel.toastManager)
     }
 
     private func setPreferredAutoStation(_ station: Station) {
@@ -264,16 +287,30 @@ struct CommuteScheduleView: View {
                 if !hasAnySchedule { ReadyToScheduleHint() }
 
                 ForEach(Weekday.mondayFirst) { day in
-                    let hasSchedule = viewModel.route.schedule(
-                        for: day, direction: viewModel.selectedDirection
-                    ) != nil
+                    let schedule = viewModel.route.schedule(for: day, direction: viewModel.selectedDirection)
+                    let hasSchedule = schedule != nil
+                    let suggestion = suggestion(for: day, direction: viewModel.selectedDirection)
+                    let isSuggestionLoading =
+                        suggestion == nil && suggestionLoading(for: day, direction: viewModel.selectedDirection)
+
                     DayScheduleRow(
                         day: day,
-                        schedule: viewModel.route.schedule(for: day, direction: viewModel.selectedDirection),
+                        schedule: schedule,
+                        suggestion: suggestion,
+                        isSuggestionLoading: isSuggestionLoading,
                         walkingTime: travelTime, bufferTime: bufferTime, hasNotification: hasSchedule,
                         onTap: { selectedDay = day },
-                        onClear: { viewModel.clearSchedule(day: day, direction: viewModel.selectedDirection) },
-                        onCopy: hasSchedule ? { showCopySheet = day } : nil
+                        onClear: { handleScheduleCleared(day: day, direction: viewModel.selectedDirection) },
+                        onCopy: hasSchedule ? { showCopySheet = day } : nil,
+                        onUseSuggestion: suggestion != nil
+                            ? { applySuggestion(for: day, direction: viewModel.selectedDirection) }
+                            : nil,
+                        onChooseDifferentSuggestion: suggestion != nil
+                            ? { chooseDifferentSuggestion(for: day, direction: viewModel.selectedDirection) }
+                            : nil,
+                        onDismissSuggestion: suggestion != nil
+                            ? { dismissSuggestion(for: day, direction: viewModel.selectedDirection) }
+                            : nil
                     )
                 }
             }
@@ -282,6 +319,203 @@ struct CommuteScheduleView: View {
                 Text("Schedule for \(viewModel.selectedDirection == .toWork ? "A → B" : "B → A")")
             }
         }
+    }
+
+    private func handleScheduleSaved(day _: Weekday, schedule: DaySchedule, direction: CommuteDirection) {
+        requestSuggestions(basedOn: schedule, direction: direction)
+    }
+
+    private func requestSuggestions(basedOn schedule: DaySchedule, direction: CommuteDirection) {
+        suggestionLookupTask?.cancel()
+        suggestionLookupTask = nil
+        suggestionLookupGeneration += 1
+        let lookupGeneration = suggestionLookupGeneration
+
+        clearDismissedSuggestions(for: direction)
+        clearSuggestions(for: direction)
+
+        let candidates = Weekday.mondayFirst.filter { day in
+            viewModel.route.schedule(for: day, direction: direction) == nil
+                && !isSuggestionDismissed(day, direction: direction)
+        }
+        guard !candidates.isEmpty else {
+            clearSuggestionLoading(for: direction)
+            return
+        }
+        setSuggestionLoading(Set(candidates), for: direction)
+
+        suggestionLookupTask = Task(priority: .utility) {
+            for candidateDay in candidates {
+                if Task.isCancelled { return }
+                let matchedSchedule = await viewModel.findSuggestedSchedule(
+                    for: candidateDay,
+                    basedOn: schedule,
+                    direction: direction
+                )
+
+                await MainActor.run {
+                    guard suggestionLookupGeneration == lookupGeneration else { return }
+                    removeSuggestionLoading(for: candidateDay, direction: direction)
+                    guard let matchedSchedule else { return }
+                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
+                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
+                    switch direction {
+                    case .toWork: toWorkSuggestions[candidateDay] = matchedSchedule
+                    case .toHome: toHomeSuggestions[candidateDay] = matchedSchedule
+                    }
+                }
+            }
+
+            if Task.isCancelled { return }
+
+            await MainActor.run {
+                guard suggestionLookupGeneration == lookupGeneration else { return }
+                clearSuggestionLoading(for: direction)
+                suggestionLookupTask = nil
+            }
+        }
+    }
+
+    private func handleScheduleCleared(day: Weekday, direction: CommuteDirection) {
+        viewModel.clearSchedule(day: day, direction: direction)
+        dismissSuggestion(for: day, direction: direction)
+        removeSuggestionLoading(for: day, direction: direction)
+
+        guard let template = firstScheduleTemplate(for: direction) else {
+            clearSuggestions(for: direction)
+            clearSuggestionLoading(for: direction)
+            return
+        }
+        requestSuggestions(basedOn: template, direction: direction)
+    }
+
+    private func suggestion(for day: Weekday, direction: CommuteDirection) -> DaySchedule? {
+        switch direction {
+        case .toWork: return toWorkSuggestions[day]
+        case .toHome: return toHomeSuggestions[day]
+        }
+    }
+
+    private func setSuggestions(_ suggestions: [Weekday: DaySchedule], for direction: CommuteDirection) {
+        switch direction {
+        case .toWork: toWorkSuggestions = suggestions
+        case .toHome: toHomeSuggestions = suggestions
+        }
+    }
+
+    private func clearSuggestions(for direction: CommuteDirection) {
+        setSuggestions([:], for: direction)
+    }
+
+    private func suggestionLoading(for day: Weekday, direction: CommuteDirection) -> Bool {
+        switch direction {
+        case .toWork: return toWorkSuggestionLoadingDays.contains(day)
+        case .toHome: return toHomeSuggestionLoadingDays.contains(day)
+        }
+    }
+
+    private func setSuggestionLoading(_ loadingDays: Set<Weekday>, for direction: CommuteDirection) {
+        switch direction {
+        case .toWork: toWorkSuggestionLoadingDays = loadingDays
+        case .toHome: toHomeSuggestionLoadingDays = loadingDays
+        }
+    }
+
+    private func removeSuggestionLoading(for day: Weekday, direction: CommuteDirection) {
+        switch direction {
+        case .toWork: toWorkSuggestionLoadingDays.remove(day)
+        case .toHome: toHomeSuggestionLoadingDays.remove(day)
+        }
+    }
+
+    private func clearSuggestionLoading(for direction: CommuteDirection) {
+        setSuggestionLoading([], for: direction)
+    }
+
+    private func dismissedSuggestionDays(for direction: CommuteDirection) -> Set<Weekday> {
+        switch direction {
+        case .toWork: return toWorkDismissedSuggestionDays
+        case .toHome: return toHomeDismissedSuggestionDays
+        }
+    }
+
+    private func isSuggestionDismissed(_ day: Weekday, direction: CommuteDirection) -> Bool {
+        dismissedSuggestionDays(for: direction).contains(day)
+    }
+
+    private func setDismissedSuggestionDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
+        switch direction {
+        case .toWork: toWorkDismissedSuggestionDays = days
+        case .toHome: toHomeDismissedSuggestionDays = days
+        }
+    }
+
+    private func markSuggestionDismissed(_ day: Weekday, direction: CommuteDirection) {
+        switch direction {
+        case .toWork: toWorkDismissedSuggestionDays.insert(day)
+        case .toHome: toHomeDismissedSuggestionDays.insert(day)
+        }
+    }
+
+    private func clearDismissedSuggestions(for direction: CommuteDirection) {
+        setDismissedSuggestionDays([], for: direction)
+    }
+
+    private func clearAllDismissedSuggestions() {
+        toWorkDismissedSuggestionDays.removeAll()
+        toHomeDismissedSuggestionDays.removeAll()
+    }
+
+    private func clearAllSuggestionLoading() {
+        toWorkSuggestionLoadingDays.removeAll()
+        toHomeSuggestionLoadingDays.removeAll()
+    }
+
+    private func resetAllSuggestions() {
+        suggestionLookupTask?.cancel()
+        suggestionLookupTask = nil
+        suggestionLookupGeneration += 1
+        toWorkSuggestions.removeAll()
+        toHomeSuggestions.removeAll()
+        clearAllSuggestionLoading()
+        clearAllDismissedSuggestions()
+    }
+
+    private func dismissSuggestion(for day: Weekday, direction: CommuteDirection) {
+        markSuggestionDismissed(day, direction: direction)
+        removeSuggestionLoading(for: day, direction: direction)
+        switch direction {
+        case .toWork: toWorkSuggestions.removeValue(forKey: day)
+        case .toHome: toHomeSuggestions.removeValue(forKey: day)
+        }
+    }
+
+    private func firstScheduleTemplate(for direction: CommuteDirection) -> DaySchedule? {
+        for day in Weekday.mondayFirst {
+            if let schedule = viewModel.route.schedule(for: day, direction: direction) {
+                return schedule
+            }
+        }
+        return nil
+    }
+
+    private func applySuggestion(for day: Weekday, direction: CommuteDirection) {
+        guard let schedule = suggestion(for: day, direction: direction) else { return }
+
+        viewModel.route.setSchedule(schedule, for: day, direction: direction)
+        viewModel.save()
+        viewModel.rescheduleAllNotifications()
+        dismissSuggestion(for: day, direction: direction)
+
+        viewModel.toastManager.show(
+            "Applied \(schedule.lineNumber) to \(day.fullName).",
+            type: .success
+        )
+    }
+
+    private func chooseDifferentSuggestion(for day: Weekday, direction: CommuteDirection) {
+        dismissSuggestion(for: day, direction: direction)
+        selectedDay = day
     }
 }
 
@@ -452,26 +686,47 @@ struct RouteVisualizer: View {
 struct DayScheduleRow: View {
     let day: Weekday
     let schedule: DaySchedule?
+    let suggestion: DaySchedule?
+    let isSuggestionLoading: Bool
     let walkingTime: Int
     let bufferTime: Int
     let hasNotification: Bool
     let onTap: () -> Void
     let onClear: () -> Void
     let onCopy: (() -> Void)?
+    let onUseSuggestion: (() -> Void)?
+    let onChooseDifferentSuggestion: (() -> Void)?
+    let onDismissSuggestion: (() -> Void)?
     @Environment(\.colorScheme) var colorScheme
 
     init(
-        day: Weekday, schedule: DaySchedule?, walkingTime: Int, bufferTime: Int, hasNotification: Bool,
-        onTap: @escaping () -> Void, onClear: @escaping () -> Void, onCopy: (() -> Void)? = nil
+        day: Weekday,
+        schedule: DaySchedule?,
+        suggestion: DaySchedule? = nil,
+        isSuggestionLoading: Bool = false,
+        walkingTime: Int,
+        bufferTime: Int,
+        hasNotification: Bool,
+        onTap: @escaping () -> Void,
+        onClear: @escaping () -> Void,
+        onCopy: (() -> Void)? = nil,
+        onUseSuggestion: (() -> Void)? = nil,
+        onChooseDifferentSuggestion: (() -> Void)? = nil,
+        onDismissSuggestion: (() -> Void)? = nil
     ) {
         self.day = day
         self.schedule = schedule
+        self.suggestion = suggestion
+        self.isSuggestionLoading = isSuggestionLoading
         self.walkingTime = walkingTime
         self.bufferTime = bufferTime
         self.hasNotification = hasNotification
         self.onTap = onTap
         self.onClear = onClear
         self.onCopy = onCopy
+        self.onUseSuggestion = onUseSuggestion
+        self.onChooseDifferentSuggestion = onChooseDifferentSuggestion
+        self.onDismissSuggestion = onDismissSuggestion
     }
 
     private var leaveTime: String? {
@@ -480,10 +735,19 @@ struct DayScheduleRow: View {
         return String(format: "%02d:%02d", totalMinutes / 60, totalMinutes % 60)
     }
 
+    private var isShowingSuggestion: Bool { schedule == nil && suggestion != nil }
+    private var isShowingSuggestionOrLoading: Bool { isShowingSuggestion || (schedule == nil && isSuggestionLoading) }
+
     var body: some View {
-        HStack(spacing: 0) {
-            mainButton
-            clearButton
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 0) {
+                mainButton
+                clearButton
+            }
+
+            if isShowingSuggestion {
+                suggestionActionRow
+            }
         }
     }
 
@@ -495,7 +759,7 @@ struct DayScheduleRow: View {
                 dayBadge
                 scheduleContent
             }
-            .padding(.vertical, 12)
+            .padding(.vertical, isShowingSuggestionOrLoading ? 8 : 12)
         }
         .tint(.primary)
         .contextMenu { contextMenuContent }
@@ -520,8 +784,49 @@ struct DayScheduleRow: View {
     private var scheduleContent: some View {
         if let s = schedule {
             scheduleDetailsView(s)
+        } else if let suggested = suggestion {
+            suggestionPreviewView(suggested)
+        } else if isSuggestionLoading {
+            suggestionLoadingView
         } else {
             Text("Not set - Tap to add").font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private var suggestionLoadingView: some View {
+        HStack(spacing: 8) {
+            SkeletonBox(width: 44, height: 22, cornerRadius: 11)
+            SkeletonBox(width: 56, height: 18, cornerRadius: 6)
+            SkeletonBox(width: 70, height: 14, cornerRadius: 6)
+            Spacer()
+        }
+    }
+
+    private func suggestionPreviewView(_ s: DaySchedule) -> some View {
+        let style = Color.lineBadgeStyle(for: s.lineNumber, apiColors: s.lineColors)
+        return HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Text(s.lineNumber)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(style.foreground)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(style.background, in: Capsule())
+                    .overlay {
+                        if let border = style.border {
+                            Capsule().stroke(border.opacity(0.7), lineWidth: 1)
+                        }
+                    }
+
+                Text(s.departureTimeString)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Text("Suggested")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             Spacer()
         }
     }
@@ -614,13 +919,64 @@ struct DayScheduleRow: View {
     @ViewBuilder
     private var clearButton: some View {
         if schedule != nil {
-                Button {
+            Button {
                 Haptics.impact(.light)
                 onClear()
             } label: {
                 Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
             }.buttonStyle(.plain).padding(.leading, 8)
         }
+    }
+
+    @ViewBuilder
+    private var suggestionActionRow: some View {
+        HStack(spacing: 10) {
+            if let onUseSuggestion {
+                Button {
+                    Haptics.selection()
+                    onUseSuggestion()
+                }
+                label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Accept suggested train")
+            }
+
+            if let onChooseDifferentSuggestion {
+                Button {
+                    Haptics.selection()
+                    onChooseDifferentSuggestion()
+                }
+                label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Deny suggestion and choose another train")
+            }
+
+            Spacer()
+
+            if let onDismissSuggestion {
+                Button {
+                    Haptics.selection()
+                    onDismissSuggestion()
+                }
+                label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss suggestion")
+            }
+        }
+        .padding(.leading, 50)
+        .padding(.bottom, 4)
     }
 }
 
@@ -807,6 +1163,7 @@ struct DayTrainPicker: View {
     let transportType: TransportType
     @Binding var route: SavedCommuteRoute
     let onSave: () -> Void
+    let onScheduleSaved: ((Weekday, DaySchedule, CommuteDirection) -> Void)?
     let onFirstSchedule: (() -> Void)?
 
     private let transportService: TransportServiceProtocol
@@ -827,7 +1184,9 @@ struct DayTrainPicker: View {
         transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
         route: Binding<SavedCommuteRoute>,
-        onSave: @escaping () -> Void, onFirstSchedule: (() -> Void)? = nil
+        onSave: @escaping () -> Void,
+        onScheduleSaved: ((Weekday, DaySchedule, CommuteDirection) -> Void)? = nil,
+        onFirstSchedule: (() -> Void)? = nil
     ) {
         self.day = day
         self.from = from
@@ -838,6 +1197,7 @@ struct DayTrainPicker: View {
         self.notificationService = notificationService
         _route = route
         self.onSave = onSave
+        self.onScheduleSaved = onScheduleSaved
         self.onFirstSchedule = onFirstSchedule
     }
 
@@ -940,6 +1300,7 @@ struct DayTrainPicker: View {
         )
         route.setSchedule(schedule, for: day, direction: direction)
         onSave()
+        onScheduleSaved?(day, schedule, direction)
 
         if isFirstSchedule {
             Haptics.notification(.success)
