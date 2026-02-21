@@ -246,6 +246,9 @@ actor OebbAPIClient {
         let iconsByIndex = Dictionary(
             uniqueKeysWithValues: (payload.common?.icoL ?? []).enumerated().map { ($0.offset, $0.element) }
         )
+        let himByIndex = Dictionary(
+            uniqueKeysWithValues: (payload.common?.himL ?? []).enumerated().map { ($0.offset, $0.element) }
+        )
 
         return (payload.outConL ?? []).enumerated().map { index, connection in
             let serviceDay = connection.date ?? connection.secL?.first?.jny?.date
@@ -301,7 +304,14 @@ actor OebbAPIClient {
                 to: arrStop,
                 sections: mappedSections.isEmpty ? nil : mappedSections,
                 switches: connection.chg,
-                duration: durationMillis
+                duration: durationMillis,
+                // Gate payload is alert-capable; use [] to explicitly represent "no alerts",
+                // while nil remains "alert metadata unknown" (e.g. non-gate fallback payloads).
+                serviceAlerts: mapGateConnectionAlerts(
+                    connection,
+                    himByIndex: himByIndex,
+                    productsByIndex: productsByIndex
+                ) ?? []
             )
         }
     }
@@ -422,6 +432,111 @@ actor OebbAPIClient {
         )
     }
 
+    private func mapGateConnectionAlerts(
+        _ connection: OebbGateTripConnection,
+        himByIndex: [Int: OebbGateHimMessage],
+        productsByIndex: [Int: OebbGateTripProduct]
+    ) -> [OebbServiceAlert]? {
+        let sectionMessageRefs = (connection.secL ?? []).flatMap { section in
+            ((section.msgL ?? []) + (section.jny?.msgL ?? [])).compactMap { message -> Int? in
+                guard (message.type ?? "").uppercased() == "HIM" else { return nil }
+                return message.himX
+            }
+        }
+        let connectionMessageRefs = (connection.msgL ?? []).compactMap { message -> Int? in
+            guard (message.type ?? "").uppercased() == "HIM" else { return nil }
+            return message.himX
+        }
+        var refs = Set(sectionMessageRefs + connectionMessageRefs)
+
+        // Some payload variants expose alert linkage via product.himIdL instead of msgL refs.
+        if refs.isEmpty {
+            let himIndexById: [String: Int] = Dictionary(uniqueKeysWithValues: himByIndex.compactMap { index, him in
+                guard let hid = gateNormalizedString(him.hid) else { return nil }
+                return (hid, index)
+            })
+            let productRefs = Set((connection.secL ?? []).flatMap { section in
+                (section.jny?.prodL ?? []).compactMap(\.prodX)
+            })
+            for productRef in productRefs {
+                guard let product = productsByIndex[productRef] else { continue }
+                for productHimId in product.himIdL ?? [] {
+                    guard let normalizedId = gateNormalizedHimProductId(productHimId),
+                          let himIndex = himIndexById[normalizedId]
+                    else { continue }
+                    refs.insert(himIndex)
+                }
+            }
+        }
+
+        // Final fallback: infer relevance from alert location range overlap.
+        if refs.isEmpty {
+            let connectionLocIndices = Set((connection.secL ?? []).flatMap { section in
+                var indices: [Int] = []
+                if let depLocX = section.dep?.locX { indices.append(depLocX) }
+                if let arrLocX = section.arr?.locX { indices.append(arrLocX) }
+                indices.append(contentsOf: (section.jny?.stopL ?? []).compactMap(\.locX))
+                return indices
+            } + [connection.dep?.locX, connection.arr?.locX].compactMap { $0 })
+
+            if !connectionLocIndices.isEmpty {
+                for (index, him) in himByIndex {
+                    guard let fLoc = him.fLocX ?? him.tLocX else { continue }
+                    let tLoc = him.tLocX ?? him.fLocX ?? fLoc
+                    let lower = min(fLoc, tLoc)
+                    let upper = max(fLoc, tLoc)
+                    if connectionLocIndices.contains(where: { lower ... upper ~= $0 }) {
+                        refs.insert(index)
+                    }
+                }
+            }
+        }
+
+        guard !refs.isEmpty else { return nil }
+
+        var alerts: [OebbServiceAlert] = []
+        var seenAlertIDs = Set<String>()
+
+        for ref in refs.sorted() {
+            guard let source = himByIndex[ref] else { continue }
+
+            let id = gateNormalizedString(source.hid) ?? "gate-him-\(ref)"
+            guard !seenAlertIDs.contains(id) else { continue }
+            seenAlertIDs.insert(id)
+
+            let title = gateNormalizedString(source.head) ?? "Service disruption"
+            let message = gatePlainText(source.text)
+            let startsAt = gateDateTime(date: source.sDate, time: source.sTime)
+            let endsAt = gateDateTime(date: source.eDate, time: source.eTime)
+            let priority = source.prio ?? 0
+            let isActive = source.act ?? true
+
+            alerts.append(
+                OebbServiceAlert(
+                    id: id,
+                    title: title,
+                    message: message,
+                    startsAt: startsAt,
+                    endsAt: endsAt,
+                    priority: priority,
+                    isActive: isActive
+                )
+            )
+        }
+
+        return alerts.isEmpty ? nil : alerts.sorted(by: { $0.priority > $1.priority })
+    }
+
+    private func gateNormalizedHimProductId(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let digitsStart = trimmed.lastIndex(where: { !$0.isNumber }) {
+            let candidate = String(trimmed[trimmed.index(after: digitsStart)...])
+            return candidate.isEmpty ? nil : candidate
+        }
+        return trimmed
+    }
+
     private func gateDurationMillis(_ rawValue: String?) -> Int? {
         guard let rawValue else { return nil }
         let digits = rawValue.filter(\.isNumber)
@@ -467,6 +582,23 @@ actor OebbAPIClient {
         let second = timeDigits.dropFirst(4).prefix(2)
 
         return "\(year)-\(month)-\(day)T\(hour):\(minute):\(second).000"
+    }
+
+    private func gateDateTime(date: String?, time: String?) -> Date? {
+        guard let timestamp = gateIsoTimestamp(date: date, time: time) else { return nil }
+        return dateFormatter.date(from: timestamp)
+    }
+
+    private func gatePlainText(_ value: String?) -> String {
+        guard let value = gateNormalizedString(value) else { return "" }
+        let withoutBreaks = value.replacingOccurrences(of: "<br>", with: "\n", options: [.caseInsensitive])
+            .replacingOccurrences(of: "<br/>", with: "\n", options: [.caseInsensitive])
+            .replacingOccurrences(of: "<br />", with: "\n", options: [.caseInsensitive])
+        let withoutTags = withoutBreaks.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        return withoutTags.replacingOccurrences(of: "\\s+\\n", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "\\n\\s+", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func gateHex(_ color: OebbGateTripRGBColor?) -> String? {

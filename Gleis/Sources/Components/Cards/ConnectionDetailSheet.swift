@@ -26,6 +26,7 @@ struct ConnectionDetailSheet: View {
             ScrollView {
                 VStack(spacing: 16) {
                     connectionSummary
+                    serviceAlertsSection
                     connectionLegs
                 }
                 .padding()
@@ -81,6 +82,36 @@ struct ConnectionDetailSheet: View {
                 }
             }
         }.padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder private var serviceAlertsSection: some View {
+        let alerts = (resolvedConnection.serviceAlerts ?? []).filter(\.isActive).sorted { $0.priority > $1.priority }
+        if !alerts.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Text("Service Alerts").font(.headline)
+                }
+                ForEach(alerts) { alert in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(alert.title).font(.subheadline.weight(.semibold))
+                        if !alert.message.isEmpty {
+                            Text(alert.message).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let endsAt = alert.endsAt {
+                            Text("Until \(endsAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(16)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
     }
 
     @ViewBuilder private var connectionLegs: some View {

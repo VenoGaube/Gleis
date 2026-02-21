@@ -1,20 +1,17 @@
-import CoreLocation
 import SwiftUI
 
 // MARK: - CommuteScheduleView
 
 struct CommuteScheduleView: View {
     @StateObject private var viewModel: CommuteScheduleViewModel
-    @EnvironmentObject private var settingsManager: SettingsManager
-    @EnvironmentObject private var locationService: LocationService
-    @State private var showStationAPicker = false
-    @State private var showStationBPicker = false
+    @State private var showFromStationPicker = false
+    @State private var showToStationPicker = false
     @State private var selectedDay: Weekday?
-    @State private var showTravelTimeSheet: Station?
-    @State private var showBufferTimeSheet: Station?
+    @State private var activeTimingSheet: TimingSheet?
     @State private var showResetConfirm = false
-    @State private var pulseHint = false
     @State private var showCopySheet: Weekday?
+    @State private var showExcludedDatesSheet = false
+    @State private var excludedDateSelection: Set<DateComponents> = []
     @State private var toWorkSuggestions: [Weekday: DaySchedule] = [:]
     @State private var toHomeSuggestions: [Weekday: DaySchedule] = [:]
     @State private var toWorkSuggestionLoadingDays: Set<Weekday> = []
@@ -25,16 +22,39 @@ struct CommuteScheduleView: View {
     @State private var suggestionLookupGeneration = 0
     @Environment(\.colorScheme) var colorScheme
 
-    private var autoPreferredStationIds: Set<String> {
-        Set(settingsManager.appSettings.autoSelectionPreferences.areaPreferences.map(\.stationId))
+    private var directionLabel: String {
+        viewModel.selectedDirection == .toWork ? "From → To" : "To → From"
     }
 
-    private var autoExcludedStationIds: Set<String> {
-        settingsManager.appSettings.autoSelectionPreferences.excludedStationIds
+    private var activeRouteLabel: String {
+        guard let from = viewModel.currentFromStation?.name, let to = viewModel.currentToStation?.name else {
+            return directionLabel
+        }
+        return "\(from) → \(to)"
+    }
+
+    private var directionIcon: String {
+        viewModel.selectedDirection == .toWork ? "arrow.right" : "arrow.left"
+    }
+
+    private enum TimingSheet: Identifiable {
+        case travel(Station)
+        case buffer(Station)
+
+        var id: String {
+            switch self {
+            case let .travel(station): "travel-\(station.id)"
+            case let .buffer(station): "buffer-\(station.id)"
+            }
+        }
     }
 
     init(transportType: TransportType = .trainCommute) {
         _viewModel = StateObject(wrappedValue: CommuteScheduleViewModel(transportType: transportType))
+    }
+
+    init(viewModel: CommuteScheduleViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     var body: some View {
@@ -42,12 +62,38 @@ struct CommuteScheduleView: View {
             HStack(alignment: .center) {
                 Text("Repeat Journeys").font(.largeTitle.bold())
                 Spacer()
+                Menu {
+                    Button {
+                        excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
+                        showExcludedDatesSheet = true
+                    } label: {
+                        Label("Holidays / OOO", systemImage: "calendar.badge.minus")
+                    }
+
+                    if !viewModel.excludedDates.isEmpty {
+                        Button(role: .destructive) {
+                            excludedDateSelection = []
+                            viewModel.updateExcludedDates(dates(from: excludedDateSelection))
+                        } label: {
+                            Label("Clear Excluded Dates", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                        if !viewModel.excludedDates.isEmpty {
+                            Text("\(viewModel.excludedDates.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityLabel("Commute options")
             }.padding(.horizontal).padding(.top, 13).padding(.bottom, 12)
 
             List {
                 stationsSection
-                directionPicker
-                if viewModel.currentFromStation != nil { travelTimeSection }
                 scheduleSection
                 Section {
                     Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
@@ -64,13 +110,8 @@ struct CommuteScheduleView: View {
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).task {
             viewModel.onAppear()
-        }.onAppear {
-            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true }
         }
-            .onDisappear {
-                pulseHint = false
-                resetAllSuggestions()
-            }
+            .onDisappear { resetAllSuggestions() }
             .onChange(of: viewModel.route.homeStation?.id) { _, _ in resetAllSuggestions() }
             .onChange(of: viewModel.route.workStation?.id) { _, _ in resetAllSuggestions() }
             .onChange(of: viewModel.selectedDirection) { _, _ in
@@ -79,43 +120,31 @@ struct CommuteScheduleView: View {
                 clearAllSuggestionLoading()
                 clearAllDismissedSuggestions()
             }
-            .sheet(isPresented: $showStationAPicker) {
+            .sheet(isPresented: $showFromStationPicker) {
                 StationPickerSheet(
-                    title: "Station A", stations: viewModel.stations, recentStations: viewModel.recentStations,
+                    title: "From Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
                     favoriteStations: viewModel.favoriteStations,
                     nearbyStations: viewModel.nearbyStationService.nearbyStations,
                     stationDistances: viewModel.nearbyStationService.stationDistances,
-                    autoSelection: StationPickerAutoSelectionOptions(
-                        preferredStationIds: autoPreferredStationIds,
-                        excludedStationIds: autoExcludedStationIds,
-                        onSetPreferred: setPreferredAutoStation,
-                        onToggleExcluded: toggleAutoExcludedStation
-                    ),
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
-                        get: { viewModel.route.homeStation },
-                        set: { viewModel.handleStationAChange($0) }
+                        get: { viewModel.currentFromStation },
+                        set: { viewModel.handleFromStationChange($0) }
                     )
                 )
                 .task { await viewModel.loadStationsIfNeeded() }
-            }.sheet(isPresented: $showStationBPicker) {
+            }.sheet(isPresented: $showToStationPicker) {
                 StationPickerSheet(
-                    title: "Station B", stations: viewModel.stations, recentStations: viewModel.recentStations,
+                    title: "To Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
                     favoriteStations: viewModel.favoriteStations,
                     nearbyStations: viewModel.nearbyStationService.nearbyStations,
                     stationDistances: viewModel.nearbyStationService.stationDistances,
-                    autoSelection: StationPickerAutoSelectionOptions(
-                        preferredStationIds: autoPreferredStationIds,
-                        excludedStationIds: autoExcludedStationIds,
-                        onSetPreferred: setPreferredAutoStation,
-                        onToggleExcluded: toggleAutoExcludedStation
-                    ),
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
-                        get: { viewModel.route.workStation },
-                        set: { viewModel.handleStationBChange($0) }
+                        get: { viewModel.currentToStation },
+                        set: { viewModel.handleToStationChange($0) }
                     )
                 )
                 .task { await viewModel.loadStationsIfNeeded() }
@@ -134,15 +163,18 @@ struct CommuteScheduleView: View {
                         }
                     }
                 }
-            }.sheet(item: $showTravelTimeSheet) { station in
-                TravelTimeSheet(
-                    station: station, currentValue: viewModel.config.travelTime(for: station.id),
-                    suggestedValue: viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: station.id)
-                ) { time in viewModel.saveTravelTime(time, for: station) }
-            }.sheet(item: $showBufferTimeSheet) { station in
-                BufferTimeSheet(
-                    station: station, currentValue: viewModel.config.bufferTime(for: station.id)
-                ) { time in viewModel.saveBufferTime(time, for: station) }
+            }.sheet(item: $activeTimingSheet) { sheet in
+                switch sheet {
+                case let .travel(station):
+                    TravelTimeSheet(
+                        station: station, currentValue: viewModel.config.travelTime(for: station.id),
+                        suggestedValue: viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: station.id)
+                    ) { time in viewModel.saveTravelTime(time, for: station) }
+                case let .buffer(station):
+                    BufferTimeSheet(
+                        station: station, currentValue: viewModel.config.bufferTime(for: station.id)
+                    ) { time in viewModel.saveBufferTime(time, for: station) }
+                }
             }.sheet(item: $showCopySheet) { day in
                 CopyScheduleSheet(
                     sourceDay: day,
@@ -154,124 +186,70 @@ struct CommuteScheduleView: View {
                     },
                     onCopied: { message in viewModel.toastManager.show(message, type: .success) }
                 )
+            }.sheet(isPresented: $showExcludedDatesSheet) {
+                ExcludedDatesSheet(
+                    selection: $excludedDateSelection,
+                    onSave: {
+                        viewModel.updateExcludedDates(dates(from: excludedDateSelection))
+                    }
+                )
             }
             .toastOverlay(viewModel.toastManager)
     }
 
-    private func setPreferredAutoStation(_ station: Station) {
-        guard let location = locationService.currentLocation else {
-            viewModel.toastManager.show("Location unavailable. Try again while location is active.", type: .info)
-            return
-        }
-
-        settingsManager.setPreferredAutoSelectionStation(station, at: location)
-        viewModel.toastManager.show("Will prefer \(station.name) for auto-select near this area.", type: .success)
-    }
-
-    private func toggleAutoExcludedStation(_ station: Station) {
-        let isNowExcluded = settingsManager.toggleAutoSelectionExclusion(for: station)
-        let message = isNowExcluded
-            ? "\(station.name) will no longer be auto-selected."
-            : "\(station.name) can now be auto-selected."
-        viewModel.toastManager.show(message, type: .info)
-    }
-
     private var stationsSection: some View {
         Section {
-            VStack(spacing: 0) {
-                LargeStationCard(label: "A", station: viewModel.route.homeStation, color: .green) {
-                    showStationAPicker = true
-                }
-                .padding(.horizontal, 16).padding(.top, 12)
-
-                RouteVisualizer(
-                    fromStation: viewModel.route.homeStation, toStation: viewModel.route.workStation,
-                    direction: viewModel.selectedDirection
-                ).padding(.vertical, 4)
-
-                LargeStationCard(label: "B", station: viewModel.route.workStation, color: .red) {
-                    showStationBPicker = true
-                }
-                .padding(.horizontal, 16).padding(.bottom, 12)
-            }
+            RouteHeader(
+                transportType: viewModel.transportType,
+                startStation: viewModel.currentFromStation,
+                endStation: viewModel.currentToStation,
+                travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
+                travelTimeToEnd: viewModel.config.travelTime(for: viewModel.currentToStation?.id),
+                suggestedTravelTimeToStart: viewModel.currentFromStation.flatMap {
+                    viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                },
+                suggestedTravelTimeToEnd: viewModel.currentToStation.flatMap {
+                    viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                },
+                bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
+                bufferTimeToEnd: viewModel.config.bufferTime(for: viewModel.currentToStation?.id),
+                onSwap: {
+                    viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
+                },
+                onStartTap: { showFromStationPicker = true },
+                onEndTap: { showToStationPicker = true },
+                onSetTravelTime: { station in
+                    activeTimingSheet = .travel(station)
+                },
+                onSetBufferTime: { station in
+                    activeTimingSheet = .buffer(station)
+                },
+                swapIcon: directionIcon,
+                showsAutoSelectionControl: false,
+                swapAccessibilityLabel: "Switch direction",
+                swapAccessibilityValue: directionLabel
+            )
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
 
             if viewModel.hasSchedules {
-                HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Text("Changing stations archives current schedules")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange)
-                        Text("Changing stations will archive your current schedules").font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }.padding(.horizontal, 16).padding(.vertical, 12).background(
-                        RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.1)))
-                    Spacer()
-                }.padding(.horizontal, 16)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
             }
         }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
-    }
-
-    private var directionPicker: some View {
-        Section {
-            Picker("Direction", selection: $viewModel.selectedDirection) {
-                Text("A → B").tag(CommuteDirection.toWork)
-                Text("B → A").tag(CommuteDirection.toHome)
-            }.pickerStyle(.segmented).listRowBackground(Color.clear).listRowInsets(
-                EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-        }
-    }
-
-    private var travelTimeSection: some View {
-        Section("Timing for \(viewModel.selectedDirection == .toWork ? "A → B" : "B → A")") {
-            let fromStation = viewModel.currentFromStation
-            let travelTime = fromStation.flatMap { viewModel.config.travelTime(for: $0.id) }
-            let suggestedTravelTime = fromStation.flatMap {
-                viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
-            }
-            let bufferTime = fromStation.flatMap { viewModel.config.bufferTime(for: $0.id) }
-            if let time = travelTime {
-                HStack {
-                    Label("\(time) min to station", systemImage: "figure.walk")
-                    Spacer()
-                    if let station = fromStation { Button("Edit") { showTravelTimeSheet = station }.font(.subheadline) }
-                }
-            } else if let suggested = suggestedTravelTime, let station = fromStation {
-                HStack {
-                    Label("Suggested \(suggested) min", systemImage: "sparkles").foregroundStyle(.blue)
-                    Spacer()
-                    Button("Use") { viewModel.saveTravelTime(suggested, for: station) }.font(.subheadline)
-                    Button("Edit") { showTravelTimeSheet = station }.font(.subheadline)
-                }
-            } else if let station = fromStation {
-                Button {
-                    showTravelTimeSheet = station
-                } label: {
-                    HStack {
-                        Label("Set travel time to \(station.name)", systemImage: "plus.circle.fill").opacity(
-                            pulseHint ? 0.7 : 1)
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            if let buffer = bufferTime {
-                HStack {
-                    Label("\(buffer) min buffer", systemImage: "clock.badge.checkmark").foregroundStyle(.orange)
-                    Spacer()
-                    if let station = fromStation { Button("Edit") { showBufferTimeSheet = station }.font(.subheadline) }
-                }
-            } else if let station = fromStation {
-                Button {
-                    showBufferTimeSheet = station
-                } label: {
-                    HStack {
-                        Label("Set buffer time", systemImage: "plus.circle.fill").foregroundStyle(.orange).opacity(
-                            pulseHint ? 0.7 : 1)
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        }
     }
 
     private var scheduleSection: some View {
@@ -316,22 +294,28 @@ struct CommuteScheduleView: View {
             }
         } header: {
             if viewModel.route.isConfigured {
-                Text("Schedule for \(viewModel.selectedDirection == .toWork ? "A → B" : "B → A")")
+                Text("Schedule for \(activeRouteLabel)")
             }
         }
     }
 
     private func handleScheduleSaved(day _: Weekday, schedule: DaySchedule, direction: CommuteDirection) {
-        requestSuggestions(basedOn: schedule, direction: direction)
+        requestSuggestions(basedOn: schedule, direction: direction, resetDismissedDays: true)
     }
 
-    private func requestSuggestions(basedOn schedule: DaySchedule, direction: CommuteDirection) {
+    private func requestSuggestions(
+        basedOn schedule: DaySchedule,
+        direction: CommuteDirection,
+        resetDismissedDays: Bool
+    ) {
         suggestionLookupTask?.cancel()
         suggestionLookupTask = nil
         suggestionLookupGeneration += 1
         let lookupGeneration = suggestionLookupGeneration
 
-        clearDismissedSuggestions(for: direction)
+        if resetDismissedDays {
+            clearDismissedSuggestions(for: direction)
+        }
         clearSuggestions(for: direction)
 
         let candidates = Weekday.mondayFirst.filter { day in
@@ -345,31 +329,24 @@ struct CommuteScheduleView: View {
         setSuggestionLoading(Set(candidates), for: direction)
 
         suggestionLookupTask = Task(priority: .utility) {
-            for candidateDay in candidates {
-                if Task.isCancelled { return }
-                let matchedSchedule = await viewModel.findSuggestedSchedule(
-                    for: candidateDay,
-                    basedOn: schedule,
-                    direction: direction
-                )
+            let suggestions = await viewModel.findSuggestedSchedules(
+                for: candidates,
+                basedOn: schedule,
+                direction: direction
+            )
+            if Task.isCancelled { return }
 
-                await MainActor.run {
-                    guard suggestionLookupGeneration == lookupGeneration else { return }
-                    removeSuggestionLoading(for: candidateDay, direction: direction)
-                    guard let matchedSchedule else { return }
-                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
-                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
+            await MainActor.run {
+                guard suggestionLookupGeneration == lookupGeneration else { return }
+                for candidateDay in candidates {
+                    guard let matchedSchedule = suggestions[candidateDay] else { continue }
+                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { continue }
+                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { continue }
                     switch direction {
                     case .toWork: toWorkSuggestions[candidateDay] = matchedSchedule
                     case .toHome: toHomeSuggestions[candidateDay] = matchedSchedule
                     }
                 }
-            }
-
-            if Task.isCancelled { return }
-
-            await MainActor.run {
-                guard suggestionLookupGeneration == lookupGeneration else { return }
                 clearSuggestionLoading(for: direction)
                 suggestionLookupTask = nil
             }
@@ -386,7 +363,7 @@ struct CommuteScheduleView: View {
             clearSuggestionLoading(for: direction)
             return
         }
-        requestSuggestions(basedOn: template, direction: direction)
+        requestSuggestions(basedOn: template, direction: direction, resetDismissedDays: false)
     }
 
     private func suggestion(for day: Weekday, direction: CommuteDirection) -> DaySchedule? {
@@ -517,166 +494,55 @@ struct CommuteScheduleView: View {
         dismissSuggestion(for: day, direction: direction)
         selectedDay = day
     }
-}
 
-// MARK: - LargeStationCard
-
-struct LargeStationCard: View {
-    let label: String
-    let station: Station?
-    let color: Color
-    let onTap: () -> Void
-    @Environment(\.colorScheme) var colorScheme
-    @State private var isPressed = false
-
-    var body: some View {
-        Button(action: { Haptics.impact(.light); onTap() }) {
-            cardContent
-        }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.97 : 1.0)
-        .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isPressed)
-        .simultaneousGesture(pressGesture)
-        .accessibilityLabel("Station \(label): \(station?.name ?? "Not selected")")
-        .accessibilityHint("Tap to select station \(label)")
+    private func dateComponentsSet(from dates: [Date]) -> Set<DateComponents> {
+        let calendar = Calendar.current
+        return Set(dates.map { calendar.dateComponents([.year, .month, .day], from: $0) })
     }
 
-    // MARK: - Subviews
-
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            headerView
-            stationContent
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(cardBackground)
-        .overlay(cardBorder)
-        .shadow(color: shadowColor, radius: 12, y: 4)
-    }
-
-    private var headerView: some View {
-        HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 12, height: 12)
-            Text("Station \(label)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.5)
-        }
-    }
-
-    @ViewBuilder
-    private var stationContent: some View {
-        if let station {
-            selectedStationView(station)
-        } else {
-            emptyStateView
-        }
-    }
-
-    private func selectedStationView(_ station: Station) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(station.name)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.primary)
-                .scalableText(minimumScale: 0.7)
-
-            if !station.lines.isEmpty {
-                lineBadgesView(station.lines)
-            }
-        }
-    }
-
-    private func lineBadgesView(_ lines: [String]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(lines.prefix(5)), id: \.self) { line in
-                    Text(line)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.lineColor(for: line), in: Capsule())
-                }
-                if lines.count > 5 {
-                    Text("+\(lines.count - 5)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                }
-            }
-        }
-    }
-
-    private var emptyStateView: some View {
-        let promptText: String = label == "A" ? "starting point" : "destination"
-        let hintText: String = label == "A" ? "Choose your home/work station" : "Choose your destination station"
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("Tap to select \(promptText)")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 4) {
-                Image(systemName: "hand.tap.fill").font(.caption)
-                Text(hintText).font(.caption)
-            }
-            .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var cardBackground: some View {
-        let fillColor: Color = colorScheme == .dark ? Color(.secondarySystemBackground) : .white
-        return RoundedRectangle(cornerRadius: 16).fill(fillColor)
-    }
-
-    private var cardBorder: some View {
-        let strokeColor: Color = station != nil
-            ? color.opacity(0.3)
-            : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2))
-        let lineWidth: CGFloat = station != nil ? 2 : 1
-        return RoundedRectangle(cornerRadius: 16).stroke(strokeColor, lineWidth: lineWidth)
-    }
-
-    private var shadowColor: Color {
-        colorScheme == .dark ? .clear : .black.opacity(0.06)
-    }
-
-    private var pressGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { _ in isPressed = true }
-            .onEnded { _ in isPressed = false }
+    private func dates(from components: Set<DateComponents>) -> [Date] {
+        let calendar = Calendar.current
+        return components.compactMap { calendar.date(from: $0) }.sorted()
     }
 }
 
-// MARK: - RouteVisualizer
+private struct ExcludedDatesSheet: View {
+    @Binding var selection: Set<DateComponents>
+    let onSave: () -> Void
 
-struct RouteVisualizer: View {
-    let fromStation: Station?
-    let toStation: Station?
-    let direction: CommuteDirection
-    @State private var pulseAnimation = false
-    @Environment(\.colorScheme) var colorScheme
-
-    var showArrow: Bool { fromStation != nil || toStation != nil }
-
-    var rotationAngle: Double { direction == .toHome ? 180 : 0 }
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 4) {
-                ForEach(0 ..< 3) { i in
-                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(
-                        showArrow ? Color.accentColor : Color.secondary.opacity(0.3)
-                    ).opacity(pulseAnimation ? 0.3 : 1.0).animation(
-                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true).delay(Double(i) * 0.2),
-                        value: pulseAnimation
-                    )
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Exclude holidays or OOO days so commute suggestions and reminders can ignore them.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+
+                MultiDatePicker(
+                    "Excluded dates",
+                    selection: $selection,
+                    in: Date()...
+                )
+                .padding(.horizontal, 12)
+
+                Spacer()
+            }
+            .padding(.top, 12)
+            .navigationTitle("Excluded Dates")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
-            }.frame(height: 28).rotationEffect(.degrees(rotationAngle)).animation(
-                .spring(response: 0.6, dampingFraction: 0.7), value: rotationAngle
-            ).onAppear { pulseAnimation = true }
-            Spacer()
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }
@@ -1246,7 +1112,7 @@ struct DayTrainPicker: View {
                     transportType: transportType
                 ))
                 ?? []
-        hasMore = connections.count >= 5
+        hasMore = connections.count >= FetchLimits.connectionBatchSize
         isLoading = false
         preselectExisting()
     }
@@ -1271,7 +1137,8 @@ struct DayTrainPicker: View {
                     && Calendar.current.isDate(new.departureTime, inSameDayAs: today)
             }
             connections.append(contentsOf: newConns)
-            hasMore = more.count >= 5 && (connections.last?.departureTime ?? Date()) < endOfDay
+            hasMore = more.count >= FetchLimits.connectionBatchSize
+                && (connections.last?.departureTime ?? Date()) < endOfDay
             isLoadingMore = false
         }
     }

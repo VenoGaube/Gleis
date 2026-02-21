@@ -125,19 +125,57 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     // MARK: - Station Changes
 
-    func handleStationAChange(_ newStation: Station?) {
+    func handleFromStationChange(_ newStation: Station?) {
         let old = (route.homeStation, route.workStation)
-        settingsManager.handleStationChange(
-            oldStart: old.0, oldEnd: old.1, newStart: newStation, newEnd: old.1
-        )
+        switch selectedDirection {
+        case .toWork:
+            settingsManager.handleStationChange(
+                oldStart: old.0,
+                oldEnd: old.1,
+                newStart: newStation,
+                newEnd: old.1
+            )
+        case .toHome:
+            settingsManager.handleStationChange(
+                oldStart: old.0,
+                oldEnd: old.1,
+                newStart: old.0,
+                newEnd: newStation
+            )
+        }
         route = settingsManager.savedCommuteRoute
         rescheduleAllNotifications()
     }
 
-    func handleStationBChange(_ newStation: Station?) {
+    func handleToStationChange(_ newStation: Station?) {
+        let old = (route.homeStation, route.workStation)
+        switch selectedDirection {
+        case .toWork:
+            settingsManager.handleStationChange(
+                oldStart: old.0,
+                oldEnd: old.1,
+                newStart: old.0,
+                newEnd: newStation
+            )
+        case .toHome:
+            settingsManager.handleStationChange(
+                oldStart: old.0,
+                oldEnd: old.1,
+                newStart: newStation,
+                newEnd: old.1
+            )
+        }
+        route = settingsManager.savedCommuteRoute
+        rescheduleAllNotifications()
+    }
+
+    func swapStations() {
         let old = (route.homeStation, route.workStation)
         settingsManager.handleStationChange(
-            oldStart: old.0, oldEnd: old.1, newStart: old.0, newEnd: newStation
+            oldStart: old.0,
+            oldEnd: old.1,
+            newStart: old.1,
+            newEnd: old.0
         )
         route = settingsManager.savedCommuteRoute
         rescheduleAllNotifications()
@@ -156,6 +194,19 @@ final class CommuteScheduleViewModel: ObservableObject {
         toastManager.show("Cleared \(day.fullName) schedule", type: .info)
     }
 
+    func updateExcludedDates(_ dates: [Date]) {
+        let calendar = Calendar.current
+        route.skippedDates = dates
+            .map { calendar.startOfDay(for: $0) }
+            .sorted()
+        route.pruneOldSkippedDates()
+        save()
+    }
+
+    var excludedDates: [Date] {
+        route.skippedDates.sorted()
+    }
+
     func resetToDefaults() {
         Haptics.notification(.warning)
         route = SavedCommuteRoute()
@@ -170,11 +221,34 @@ final class CommuteScheduleViewModel: ObservableObject {
         guard let from = route.fromStation(for: direction), let to = route.toStation(for: direction) else { return nil }
         guard let departure = suggestionSearchStart(for: day, template: template) else { return nil }
 
-        guard let connections = try? await transportService.fetchConnections(
-            from: from, to: to, transportType: transportType, departureTime: departure, count: 80
+        guard let connections = try? await fetchSuggestionConnections(
+            from: from,
+            to: to,
+            departureTime: departure,
+            count: FetchLimits.commuteSuggestionConnectionCount
         ) else { return nil }
 
         return bestSuggestedSchedule(in: connections, template: template)
+    }
+
+    func findSuggestedSchedules(
+        for days: [Weekday],
+        basedOn template: DaySchedule,
+        direction: CommuteDirection
+    ) async -> [Weekday: DaySchedule] {
+        var suggestions: [Weekday: DaySchedule] = [:]
+        for day in days {
+            if Task.isCancelled { return suggestions }
+            if let suggestion = await findSuggestedSchedule(
+                for: day,
+                basedOn: template,
+                direction: direction
+            ) {
+                suggestions[day] = suggestion
+            }
+        }
+
+        return suggestions
     }
 
     // MARK: - Notifications
@@ -214,6 +288,31 @@ final class CommuteScheduleViewModel: ObservableObject {
         ) else { return nil }
 
         return departure.addingTimeInterval(-45 * 60)
+    }
+
+    private func fetchSuggestionConnections(
+        from: Station,
+        to: Station,
+        departureTime: Date,
+        count: Int
+    ) async throws -> [TrainConnection] {
+        if let transportService = transportService as? TransportService {
+            return try await transportService.fetchConnectionsWithoutDetails(
+                from: from,
+                to: to,
+                transportType: transportType,
+                departureTime: departureTime,
+                count: count
+            )
+        }
+
+        return try await transportService.fetchConnections(
+            from: from,
+            to: to,
+            transportType: transportType,
+            departureTime: departureTime,
+            count: count
+        )
     }
 
     private func bestSuggestedSchedule(in connections: [TrainConnection], template: DaySchedule) -> DaySchedule? {

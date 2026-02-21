@@ -45,6 +45,9 @@ struct GleisApp: App {
             switch newPhase {
             case .active:
                 // Force widget refresh when app becomes active (e.g., after unlocking phone)
+                Task(priority: .utility) {
+                    await WidgetRefreshService.shared.refreshWidgetData()
+                }
                 WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
             case .background:
                 // Schedule background refresh for fresh widget data
@@ -78,24 +81,68 @@ private final class AppLaunchBootstrapper: ObservableObject {
     @Published private(set) var statusText = "Loading your commute..."
 
     private var hasBootstrapped = false
+    private var backgroundPreloadTask: Task<Void, Never>?
 
     func bootstrapIfNeeded() async {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
 
-        statusText = "Preparing saved routes..."
-        _ = SettingsManager.shared.savedCommuteRoute
+        // Never block first render on network warm-up tasks.
+        isReady = true
 
-        statusText = "Preparing station data..."
-        _ = Task(priority: .utility) {
-            _ = try? await TransportService.shared.fetchStations(for: .trainCommute)
-        }
+        statusText = "Preparing saved routes..."
+        let settings = SettingsManager.shared
+        let trainConfig = settings.trainCommuteConfig
+        let savedCommuteRoute = settings.savedCommuteRoute
 
         statusText = "Preparing location..."
         LocationService.shared.startUpdatingLocation()
 
-        try? await Task.sleep(nanoseconds: 900_000_000)
-        isReady = true
+        statusText = "Preloading stations and routes..."
+        backgroundPreloadTask = Task.detached(priority: .utility) {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask(priority: .utility) {
+                    _ = try? await TransportService.shared.fetchStations(for: .trainCommute)
+                }
+
+                if let start = trainConfig.startStation, let end = trainConfig.endStation, start.id != end.id {
+                    group.addTask(priority: .utility) {
+                        await TransportService.shared.preloadCurrentConnections(
+                            from: start,
+                            to: end,
+                            transportType: .trainCommute,
+                            count: FetchLimits.connectionBatchSize
+                        )
+                    }
+                }
+
+                if let home = savedCommuteRoute.homeStation,
+                   let work = savedCommuteRoute.workStation,
+                   home.id != work.id
+                {
+                    group.addTask(priority: .utility) {
+                        await TransportService.shared.preloadMidnightConnections(
+                            from: home,
+                            to: work,
+                            transportType: .trainCommute,
+                            count: FetchLimits.connectionBatchSize
+                        )
+                    }
+                    group.addTask(priority: .utility) {
+                        await TransportService.shared.preloadMidnightConnections(
+                            from: work,
+                            to: home,
+                            transportType: .trainCommute,
+                            count: FetchLimits.connectionBatchSize
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    deinit {
+        backgroundPreloadTask?.cancel()
     }
 }
 
@@ -171,7 +218,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Schedule the next refresh before handling this one
         WidgetRefreshService.shared.scheduleBackgroundRefresh()
 
-        let refreshTask = Task { await WidgetRefreshService.shared.refreshWidgetData() }
+        let refreshTask = Task { await WidgetRefreshService.shared.refreshWidgetData(force: true) }
 
         task.expirationHandler = { refreshTask.cancel() }
 

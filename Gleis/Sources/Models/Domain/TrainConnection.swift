@@ -204,9 +204,11 @@ struct TrainConnection: Identifiable, Codable, Equatable {
     let status: ConnectionStatus
     let transfers: Int
     let legs: [ConnectionLeg]
+    var serviceAlerts: [ServiceAlert]? = nil
 
     var isDelayed: Bool { delay > 0 }
-    var duration: TimeInterval { arrivalTime.timeIntervalSince(departureTime) }
+    var duration: TimeInterval { max(0, arrivalTime.timeIntervalSince(departureTime)) }
+    var hasServiceAlerts: Bool { !(serviceAlerts ?? []).isEmpty }
 
     var totalStopCount: Int? {
         let counts = legs.filter { !$0.isWalking }.compactMap { leg in
@@ -216,6 +218,16 @@ struct TrainConnection: Identifiable, Codable, Equatable {
         guard !counts.isEmpty else { return nil }
         return counts.reduce(0, +)
     }
+}
+
+struct ServiceAlert: Identifiable, Codable, Equatable {
+    let id: String
+    let title: String
+    let message: String
+    let startsAt: Date?
+    let endsAt: Date?
+    let priority: Int
+    let isActive: Bool
 }
 
 // MARK: - ConnectionStatus

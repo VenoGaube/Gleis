@@ -268,7 +268,9 @@ struct SettingsView: View {
                                 }
                                 HStack(spacing: 4) {
                                     Image(systemName: "repeat").font(.caption2)
-                                    Text("\(item.day.shortName) • \(item.direction == .toWork ? "A→B" : "B→A")").font(
+                                    Text(
+                                        "\(item.day.shortName) • \(item.direction == .toWork ? "From→To" : "To→From")"
+                                    ).font(
                                         .caption)
                                 }.foregroundStyle(.orange)
                             }

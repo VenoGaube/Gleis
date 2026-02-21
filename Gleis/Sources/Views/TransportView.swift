@@ -82,8 +82,22 @@ struct TransportView: View {
 
                 if !networkMonitor.isConnected {
                     OfflineBanner()
+                } else if viewModel.isServiceDegraded {
+                    ServiceDegradedBanner(retryAt: viewModel.serviceRetryAt, lastUpdated: viewModel.lastUpdated)
                 } else if viewModel.isShowingCachedData {
                     CachedDataBanner(lastUpdated: viewModel.lastUpdated)
+                }
+
+                if let recovery = viewModel.connectionRecovery {
+                    ReminderRecoveryBanner(
+                        recovery: recovery,
+                        onApply: {
+                            viewModel.acceptConnectionRecovery()
+                        },
+                        onDismiss: {
+                            viewModel.dismissConnectionRecovery()
+                        }
+                    )
                 }
 
                 RouteHeader(
@@ -180,7 +194,7 @@ struct TransportView: View {
                     settingsManager.saveBufferTime(time, for: station.id, transportType: viewModel.transportType)
                 }
             }.toastOverlay(viewModel.toastManager).alert(
-                "Error", isPresented: $viewModel.showError
+                viewModel.errorTitle ?? "Error", isPresented: $viewModel.showError
             ) {
                 Button("OK") { viewModel.showError = false }
             } message: {
@@ -444,12 +458,17 @@ struct TransportView: View {
         var config = viewModel.config
         let oldStart = config.startStation
         let oldEnd = config.endStation
+        let routeChanged = oldStart?.id != start?.id || oldEnd?.id != end?.id
         let changed = oldStart != start || oldEnd != end
         if changed { viewModel.selectedConnection = nil }
         config.startStation = start
         config.endStation = end
         if manualStartSelection { config.isStartStationManuallySelected = true }
         settingsManager.updateConfig(config)
+        if routeChanged {
+            viewModel.cancelCurrentFetch()
+            Task { await viewModel.refreshConnections(isUserInitiated: true) }
+        }
     }
 
     private func swapStations() {
@@ -491,6 +510,49 @@ struct TransportView: View {
         }
     }
 
+}
+
+private struct ReminderRecoveryBanner: View {
+    let recovery: ConnectionRecoveryState
+    let onApply: () -> Void
+    let onDismiss: () -> Void
+
+    private var actionTitle: String {
+        if let line = recovery.suggestedConnection?.lineNumber {
+            return "Use \(line)"
+        }
+        return "Review"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: recovery.kind == .missingSelection ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundStyle(.orange)
+                Text(recovery.title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+
+            Text(recovery.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button(actionTitle, action: onApply)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                Button("Dismiss", action: onDismiss)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+    }
 }
 
 #Preview {

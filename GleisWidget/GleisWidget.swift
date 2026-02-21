@@ -5,10 +5,13 @@ import WidgetKit
 // MARK: - SelectTransportIntent
 
 struct SelectTransportIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Select Transport"
-    static var description: IntentDescription = "Choose which transport to display"
+    static var title: LocalizedStringResource = "Configure Commute Widget"
+    static var description: IntentDescription = "Choose route, direction, and day"
 
     @Parameter(title: "Transport Type", default: .trainCommute) var transportType: TransportTypeOption
+    @Parameter(title: "Route", default: .repeatJourney) var route: WidgetRouteOption
+    @Parameter(title: "Direction", default: .forward) var direction: WidgetDirectionOption
+    @Parameter(title: "Day", default: .today) var day: WidgetDayOption
 }
 
 // MARK: - TransportTypeOption
@@ -20,6 +23,62 @@ enum TransportTypeOption: String, AppEnum {
     static var caseDisplayRepresentations: [TransportTypeOption: DisplayRepresentation] = [
         .trainCommute: DisplayRepresentation(title: "Train", image: .init(systemName: "tram.fill")),
     ]
+
+    var modelValue: TransportType { .trainCommute }
+}
+
+enum WidgetRouteOption: String, AppEnum {
+    case repeatJourney = "Repeat Journey"
+    case liveRoute = "Current Route"
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Route"
+    static var caseDisplayRepresentations: [WidgetRouteOption: DisplayRepresentation] = [
+        .repeatJourney: DisplayRepresentation(title: "Repeat Journey", image: .init(systemName: "repeat")),
+        .liveRoute: DisplayRepresentation(title: "Current Route", image: .init(systemName: "location")),
+    ]
+
+    var storageScope: WidgetRouteScope {
+        switch self {
+        case .repeatJourney: return .repeatJourney
+        case .liveRoute: return .liveRoute
+        }
+    }
+}
+
+enum WidgetDirectionOption: String, AppEnum {
+    case forward = "Forward"
+    case reverse = "Reverse"
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Direction"
+    static var caseDisplayRepresentations: [WidgetDirectionOption: DisplayRepresentation] = [
+        .forward: DisplayRepresentation(title: "From → To", image: .init(systemName: "arrow.right")),
+        .reverse: DisplayRepresentation(title: "To → From", image: .init(systemName: "arrow.left")),
+    ]
+
+    var storageScope: WidgetDirectionScope {
+        switch self {
+        case .forward: return .forward
+        case .reverse: return .reverse
+        }
+    }
+}
+
+enum WidgetDayOption: String, AppEnum {
+    case today = "Today"
+    case tomorrow = "Tomorrow"
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Day"
+    static var caseDisplayRepresentations: [WidgetDayOption: DisplayRepresentation] = [
+        .today: DisplayRepresentation(title: "Today", image: .init(systemName: "calendar")),
+        .tomorrow: DisplayRepresentation(title: "Tomorrow", image: .init(systemName: "calendar.badge.clock")),
+    ]
+
+    var storageScope: WidgetDayScope {
+        switch self {
+        case .today: return .today
+        case .tomorrow: return .tomorrow
+        }
+    }
 }
 
 // MARK: - GleisProvider
@@ -30,20 +89,18 @@ struct GleisProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: SelectTransportIntent, in _: Context) async -> GleisEntry {
-        GleisEntry(date: Date(), data: loadData(), configuration: configuration)
+        GleisEntry(date: Date(), data: loadData(for: configuration), configuration: configuration)
     }
 
     func timeline(for configuration: SelectTransportIntent, in _: Context) async -> Timeline<GleisEntry> {
-        let data = loadData()
+        let data = loadData(for: configuration)
         let now = Date()
         var entries: [GleisEntry] = []
 
-        // Check if data is stale (all connections departed or data too old)
-        // If stale, show empty state and request refresh soon
-        if let data, data.isStale {
-            entries.append(GleisEntry(date: now, data: nil, configuration: configuration))
-            // Request refresh as soon as possible when data is stale
-            return Timeline(entries: entries, policy: .atEnd)
+        // Explicit stale state should be surfaced to the user with a clear CTA.
+        if let data, data.state == .stale {
+            entries.append(GleisEntry(date: now, data: data, configuration: configuration))
+            return Timeline(entries: entries, policy: .after(now.addingTimeInterval(15 * 60)))
         }
 
         if let data, let current = data.connection(at: now) {
@@ -90,8 +147,18 @@ struct GleisProvider: AppIntentTimelineProvider {
             if let lastConn = data.connections.last {
                 let staleDate = lastConn.departureTime.addingTimeInterval(1)
                 if staleDate > now {
-                    // Pass nil data to show empty/stale state after last train departs
-                    entries.append(GleisEntry(date: staleDate, data: nil, configuration: configuration))
+                    let staleData = WidgetData(
+                        transportType: data.transportType,
+                        connections: [],
+                        leaveTimes: [],
+                        fromStationName: data.fromStationName,
+                        toStationName: data.toStationName,
+                        updatedAt: staleDate,
+                        state: .stale,
+                        stateMessage: "No more departures right now.",
+                        recoveryAction: data.recoveryAction
+                    )
+                    entries.append(GleisEntry(date: staleDate, data: staleData, configuration: configuration))
                 }
             }
         } else if let data {
@@ -99,8 +166,18 @@ struct GleisProvider: AppIntentTimelineProvider {
             let futureConnections = data.futureConnections(from: now)
 
             if futureConnections.isEmpty {
-                // All connections have departed - show empty state
-                entries.append(GleisEntry(date: now, data: nil, configuration: configuration))
+                let staleData = WidgetData(
+                    transportType: data.transportType,
+                    connections: [],
+                    leaveTimes: [],
+                    fromStationName: data.fromStationName,
+                    toStationName: data.toStationName,
+                    updatedAt: now,
+                    state: .stale,
+                    stateMessage: "No upcoming departures.",
+                    recoveryAction: data.recoveryAction
+                )
+                entries.append(GleisEntry(date: now, data: staleData, configuration: configuration))
             } else {
                 entries.append(GleisEntry(date: now, data: data, configuration: configuration))
 
@@ -145,15 +222,22 @@ struct GleisProvider: AppIntentTimelineProvider {
                 refreshPolicy = .after(now.addingTimeInterval(300)) // 5 min refresh
             }
         } else {
-            // No data or no future connections - request refresh immediately
-            // This helps recover from stale data when phone unlocks
-            refreshPolicy = .atEnd
+            // No data or no future connections. Poll gently to recover.
+            refreshPolicy = .after(now.addingTimeInterval(15 * 60))
         }
 
         return Timeline(entries: entries, policy: refreshPolicy)
     }
 
-    private func loadData() -> WidgetData? { AppGroupStorage.loadWidgetData(for: .trainCommute) }
+    private func loadData(for configuration: SelectTransportIntent) -> WidgetData? {
+        let storageKey = WidgetDataStorageKey(
+            transportType: configuration.transportType.modelValue,
+            routeScope: configuration.route.storageScope,
+            directionScope: configuration.direction.storageScope,
+            dayScope: configuration.day.storageScope
+        )
+        return AppGroupStorage.loadWidgetData(for: storageKey)
+    }
 }
 
 // MARK: - GleisEntry
@@ -193,7 +277,12 @@ struct GleisWidgetEntryView: View {
 extension View {
     func widgetBackground(entry: GleisEntry, colorScheme: ColorScheme) -> some View {
         let color: Color = {
-            guard let data = entry.data, let current = data.connection(at: entry.date) else {
+            guard let data = entry.data else {
+                return colorScheme == .dark ? Color(.systemBackground) : .white
+            }
+            if data.state == .fallback { return .orange }
+            if data.state == .stale { return .gray }
+            guard let current = data.connection(at: entry.date) else {
                 return colorScheme == .dark ? Color(.systemBackground) : .white
             }
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
@@ -224,8 +313,18 @@ struct SmallWidgetView: View {
             let conn = current.connection
 
             VStack(spacing: 0) {
+                Text(widgetRouteText(for: entry, data: data))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.62)
+                    .allowsTightening(true)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+
                 // Top: Line badge (centered)
-                LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small).padding(.top, 12)
+                LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small).padding(.top, 6)
 
                 Spacer(minLength: 0)
 
@@ -235,10 +334,22 @@ struct SmallWidgetView: View {
                 Spacer(minLength: 0)
 
                 // Bottom: Departure info - what you need at the station
-                DepartureInfo(connection: conn, size: .small).padding(.horizontal, 12).padding(.bottom, 12)
-            }.widgetURL(URL(string: "gleis://connection?id=\(conn.id)"))
+                VStack(spacing: 4) {
+                    DepartureInfo(connection: conn, size: .small)
+                    if conn.hasServiceAlert {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text("Service alert active")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.red)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
         } else {
-            EmptyWidgetView(size: .small)
+            EmptyWidgetView(size: .small, data: entry.data)
         }
     }
 }
@@ -269,6 +380,14 @@ struct MediumWidgetView: View {
 
                 // Right: Journey details
                 VStack(alignment: .leading, spacing: 8) {
+                    Text(widgetRouteText(for: entry, data: data))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.7)
+                        .allowsTightening(true)
+
                     // Header: Line + Destination
                     HStack(spacing: 8) {
                         LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
@@ -323,17 +442,25 @@ struct MediumWidgetView: View {
                     }
 
                     // Delay indicator
-                    if conn.isDelayed {
+                if conn.isDelayed {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
                             Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
                         }.foregroundStyle(.orange)
                     }
+
+                    if conn.hasServiceAlert {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                            Text("Service alert active").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.red)
+                    }
                 }.padding(14)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).widgetURL(
-                URL(string: "gleis://connection?id=\(conn.id)"))
+                entryURL(entry, fallbackConnectionId: conn.id))
         } else {
-            EmptyWidgetView(size: .medium)
+            EmptyWidgetView(size: .medium, data: entry.data)
         }
     }
 
@@ -378,15 +505,15 @@ struct CircularWidgetView: View {
                         Text("\(Int(ceil(remaining / 60)))").font(
                             .system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
                         ).scalableText(minimumScale: 0.6)
-                        Text("min").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                        Text("min").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                     }
                 }
-            }.widgetURL(URL(string: "gleis://commute"))
+            }.widgetURL(entryURL(entry, fallbackConnectionId: current.connection.id))
         } else {
             ZStack {
                 AccessoryWidgetBackground()
                 Image(systemName: "tram.fill").font(.title3)
-            }.widgetURL(URL(string: "gleis://commute"))
+            }.widgetURL(entryURL(entry))
         }
     }
 }
@@ -405,6 +532,11 @@ struct RectangularWidgetView: View {
             VStack(alignment: .leading, spacing: 1) {
                 // Line 1: Line number + Destination
                 HStack(spacing: 5) {
+                    Text(widgetCompactRouteText(for: entry, data: data))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .scalableText(minimumScale: 0.7)
+                    Text("•").foregroundStyle(.secondary)
                     Text(conn.lineNumber).fontWeight(.bold).widgetAccentable()
                     Text(conn.destination).scalableText(minimumScale: 0.8)
                 }.font(.headline)
@@ -414,6 +546,10 @@ struct RectangularWidgetView: View {
                     Text(timeFormatter.string(from: conn.departureTime)).fontWeight(.semibold).scalableText(
                         minimumScale: 0.8)
                     if conn.isDelayed { Text("+\(conn.delay)'").foregroundStyle(.orange) }
+                    if conn.hasServiceAlert {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
                     Text("•").foregroundStyle(.secondary)
                     Text("Pl. \(conn.platform ?? "–")").fontWeight(.semibold).scalableText(minimumScale: 0.8)
                 }.font(.subheadline)
@@ -433,15 +569,15 @@ struct RectangularWidgetView: View {
                         Text("to go").foregroundStyle(.secondary)
                     }
                 }.font(.subheadline)
-            }.widgetURL(URL(string: "gleis://commute"))
+            }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Image(systemName: "tram.fill").widgetAccentable()
                     Text("Gleis").fontWeight(.semibold)
                 }.font(.headline)
-                Text("Tap to set up route").font(.subheadline).foregroundStyle(.secondary)
-            }.widgetURL(URL(string: "gleis://setup"))
+                Text(emptyHintText(for: entry.data)).font(.subheadline).foregroundStyle(.secondary)
+            }.widgetURL(entryURL(entry))
         }
     }
 }
@@ -614,35 +750,52 @@ struct DepartureInfo: View {
 
 struct EmptyWidgetView: View {
     let size: EmptySize
+    let data: WidgetData?
 
     enum EmptySize { case small, medium }
 
     var body: some View {
+        let accentColor: Color = {
+            switch data?.state {
+            case .fallback: return .orange
+            case .stale: return .secondary
+            default: return .trainBlue
+            }
+        }()
+        let title: String = {
+            switch data?.state {
+            case .fallback: return "Offline data"
+            case .stale: return "No departures"
+            default: return "Set up route"
+            }
+        }()
+        let subtitle = emptyHintText(for: data)
+
         switch size {
         case .small:
             VStack(spacing: 10) {
                 ZStack {
-                    Circle().fill(Color.trainBlue.opacity(0.1)).frame(width: 48, height: 48)
-                    Image(systemName: "tram.fill").font(.title3).foregroundStyle(Color.trainBlue)
+                    Circle().fill(accentColor.opacity(0.1)).frame(width: 48, height: 48)
+                    Image(systemName: "tram.fill").font(.title3).foregroundStyle(accentColor)
                 }
-                Text("Set up route").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(URL(string: "gleis://setup"))
+                Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(recoveryURL(for: data))
 
         case .medium:
             HStack(spacing: 16) {
                 ZStack {
-                    Circle().fill(Color.trainBlue.opacity(0.1)).frame(width: 56, height: 56)
-                    Image(systemName: "tram.fill").font(.title2).foregroundStyle(Color.trainBlue)
+                    Circle().fill(accentColor.opacity(0.1)).frame(width: 56, height: 56)
+                    Image(systemName: "tram.fill").font(.title2).foregroundStyle(accentColor)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No Route Configured").font(.headline)
-                    Text("Tap to set up your commute").font(.subheadline).foregroundStyle(.secondary)
+                    Text(title).font(.headline)
+                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
                 }
 
                 Spacer()
             } // .padding()
-            .widgetURL(URL(string: "gleis://setup"))
+            .widgetURL(recoveryURL(for: data))
         }
     }
 }
@@ -672,6 +825,68 @@ private let timeFormatter: DateFormatter = {
     f.timeStyle = .short
     return f
 }()
+
+private func widgetRouteText(for entry: GleisEntry, data: WidgetData) -> String {
+    let from = normalizedWidgetStationName(data.fromStationName)
+    let to = normalizedWidgetStationName(data.toStationName)
+    if let from, let to { return "\(from) → \(to)" }
+    return entry.configuration.direction == .forward ? "From → To" : "To → From"
+}
+
+private func widgetCompactRouteText(for entry: GleisEntry, data: WidgetData) -> String {
+    let from = normalizedWidgetStationName(data.fromStationName)
+    let to = normalizedWidgetStationName(data.toStationName)
+    if let from, let to {
+        let fromCompact = from.components(separatedBy: .whitespaces).first ?? from
+        let toCompact = to.components(separatedBy: .whitespaces).first ?? to
+        return "\(fromCompact)→\(toCompact)"
+    }
+    return entry.configuration.direction == .forward ? "F→T" : "T→F"
+}
+
+private func normalizedWidgetStationName(_ name: String?) -> String? {
+    guard let raw = name?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+    return raw
+}
+
+private func entryURL(_ entry: GleisEntry, fallbackConnectionId: String? = nil) -> URL? {
+    if let data = entry.data, data.state != .fresh, let url = recoveryURL(for: data) { return url }
+    if let fallbackConnectionId { return connectionDeepLink(id: fallbackConnectionId) }
+    return URL(string: "gleis://commute")
+}
+
+private func recoveryURL(for data: WidgetData?) -> URL? {
+    guard let action = data?.recoveryAction else {
+        if data == nil { return URL(string: "gleis://setup") }
+        return nil
+    }
+
+    switch action {
+    case .openLiveRoute:
+        return URL(string: "gleis://commute")
+    case .openRepeatJourney:
+        return URL(string: "gleis://repeat")
+    case .openSetup:
+        return URL(string: "gleis://setup")
+    }
+}
+
+private func connectionDeepLink(id: String) -> URL? {
+    let encodedId = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
+    return URL(string: "gleis://connection?id=\(encodedId)")
+}
+
+private func emptyHintText(for data: WidgetData?) -> String {
+    if let message = data?.stateMessage, !message.isEmpty { return message }
+    switch data?.state {
+    case .fallback:
+        return "Open the app to refresh."
+    case .stale:
+        return "Check again soon or update route."
+    default:
+        return "Tap to set up your commute"
+    }
+}
 
 private func formatCountdown(_ seconds: TimeInterval) -> String {
     // Truncate to show remaining time (0m appears in final minute)

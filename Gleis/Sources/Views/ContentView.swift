@@ -5,7 +5,9 @@ struct ContentView: View {
     @Binding var deepLinkConnectionId: String?
     @StateObject private var settingsManager = SettingsManager.shared
     @StateObject private var locationService = LocationService.shared
+    @StateObject private var commuteViewModel = CommuteScheduleViewModel(transportType: .trainCommute)
     @State private var showOnboarding = false
+    @State private var didPrewarmRepeatTab = false
     @State private var trainPath = NavigationPath()
     @State private var repeatPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
@@ -30,7 +32,7 @@ struct ContentView: View {
                 }
                 .tag(0)
 
-                NavigationStack(path: $repeatPath) { CommuteScheduleView() }
+                NavigationStack(path: $repeatPath) { CommuteScheduleView(viewModel: commuteViewModel) }
                     .tag(1)
 
                 NavigationStack(path: $settingsPath) { SettingsView() }
@@ -54,7 +56,12 @@ struct ContentView: View {
             }
         }.ignoresSafeArea(edges: [.top, .bottom]).tint(.trainBlue).environmentObject(settingsManager).environmentObject(
             locationService
-        ).onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }.onChange(
+        ).task(priority: .utility) {
+            guard !didPrewarmRepeatTab else { return }
+            didPrewarmRepeatTab = true
+            commuteViewModel.onAppear()
+            await commuteViewModel.loadStationsIfNeeded(refreshNearbyAfterLoad: false)
+        }.onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }.onChange(
             of: deepLinkConnectionId
         ) { _, newValue in
             if newValue != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { deepLinkConnectionId = nil } }

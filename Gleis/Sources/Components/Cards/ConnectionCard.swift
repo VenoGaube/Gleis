@@ -100,6 +100,7 @@ struct ConnectionCard: View {
                 }.foregroundStyle(.secondary)
             }
             Spacer()
+            if connection.hasServiceAlerts { ServiceAlertBadge() }
             if connection.isDelayed { DelayBadge(minutes: connection.delay) }
         }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
     }
@@ -266,6 +267,22 @@ struct DelayBadge: View {
             Text("+\(minutes)'")
         }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.orange.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
+    }
+}
+
+struct ServiceAlertBadge: View {
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            Text("Alert")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.red)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.red.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
     }
 }
 

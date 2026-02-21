@@ -36,6 +36,31 @@ final class NotificationService: NotificationServiceProtocol {
             UNNotificationRequest(identifier: "\(connection.id)_\(type)", content: content, trigger: trigger))
     }
 
+    func scheduleServiceAlertNotification(
+        for connection: TrainConnection,
+        alert: ServiceAlert,
+        reminderId: String
+    ) async throws {
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized else { throw GleisError.notificationPermissionDenied }
+        guard alert.isActive else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "⚠️ Service Alert"
+        content.body = serviceAlertBody(for: connection, alert: alert)
+        content.sound = .default
+        content.categoryIdentifier = "service_alert_\(connection.lineNumber)"
+        content.interruptionLevel = .timeSensitive
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let identifier = serviceAlertNotificationId(
+            reminderId: reminderId,
+            alertId: alert.id,
+            alertPayloadFingerprint: serviceAlertFingerprint(alert)
+        )
+        try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
+    }
+
     func cancelNotification(id: String) { center.removePendingNotificationRequests(withIdentifiers: [id]) }
 
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection) {
@@ -81,10 +106,12 @@ final class NotificationService: NotificationServiceProtocol {
     private func scheduleWeeklyNotification(
         id: String, weekday: Int, minutes: Int, title: String, body: String, level: UNNotificationInterruptionLevel
     ) async throws {
+        let normalized = normalizedWeeklyTrigger(weekday: weekday, minutes: minutes)
+
         var components = DateComponents()
-        components.weekday = weekday
-        components.hour = minutes / 60
-        components.minute = minutes % 60
+        components.weekday = normalized.weekday
+        components.hour = normalized.minutes / 60
+        components.minute = normalized.minutes % 60
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -102,8 +129,73 @@ final class NotificationService: NotificationServiceProtocol {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         let departureStr = formatter.string(from: config.effectiveDepartureTime(for: connection))
+        var detailParts: [String] = []
+        if connection.delay > 0 { detailParts.append("+\(connection.delay) min delay") }
+        if let platform = connection.platform, !platform.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            detailParts.append("Platform \(platform)")
+        }
+        let detailSuffix = detailParts.isEmpty ? "" : " (\(detailParts.joined(separator: ", ")))"
+
         return type == .fiveMinuteWarning
-            ? "\(config.notificationSettings.customMessage)\n\(connection.lineNumber) departs at \(departureStr)"
-            : "Catch \(connection.lineNumber) at \(departureStr) → \(connection.arrivalStation.name)"
+            ? "\(config.notificationSettings.customMessage)\n\(connection.lineNumber) departs at \(departureStr)\(detailSuffix)"
+            : "Catch \(connection.lineNumber) at \(departureStr)\(detailSuffix) → \(connection.arrivalStation.name)"
+    }
+
+    private func serviceAlertBody(for connection: TrainConnection, alert: ServiceAlert) -> String {
+        var parts: [String] = ["\(connection.lineNumber) to \(connection.arrivalStation.name)"]
+        if !alert.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append(alert.title) }
+        if let until = alert.endsAt {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            parts.append("until \(formatter.string(from: until))")
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private func serviceAlertNotificationId(
+        reminderId: String,
+        alertId: String,
+        alertPayloadFingerprint: String
+    ) -> String {
+        "serviceAlert_\(reminderId)_\(alertId)_\(alertPayloadFingerprint)"
+    }
+
+    private func serviceAlertFingerprint(_ alert: ServiceAlert) -> String {
+        let endStamp = alert.endsAt.map { Int($0.timeIntervalSince1970) } ?? 0
+        let startStamp = alert.startsAt.map { Int($0.timeIntervalSince1970) } ?? 0
+        let titleHash = stableHash(alert.title)
+        let messageHash = stableHash(alert.message)
+        return "\(alert.priority)_\(startStamp)_\(endStamp)_\(titleHash)_\(messageHash)"
+    }
+
+    private func stableHash(_ value: String) -> UInt64 {
+        // Deterministic 64-bit FNV-1a hash for notification deduping identifiers.
+        let prime: UInt64 = 1_099_511_628_211
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* prime
+        }
+        return hash
+    }
+
+    private func normalizedWeeklyTrigger(weekday: Int, minutes: Int) -> (weekday: Int, minutes: Int) {
+        var normalizedWeekday = weekday
+        var normalizedMinutes = minutes
+        let dayMinutes = 24 * 60
+
+        while normalizedMinutes < 0 {
+            normalizedMinutes += dayMinutes
+            normalizedWeekday -= 1
+            if normalizedWeekday < 1 { normalizedWeekday = 7 }
+        }
+
+        while normalizedMinutes >= dayMinutes {
+            normalizedMinutes -= dayMinutes
+            normalizedWeekday += 1
+            if normalizedWeekday > 7 { normalizedWeekday = 1 }
+        }
+
+        return (normalizedWeekday, normalizedMinutes)
     }
 }

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 // MARK: - ScalableText
@@ -308,6 +309,60 @@ struct CachedDataBanner: View {
     }
 }
 
+// MARK: - ServiceDegradedBanner
+
+struct ServiceDegradedBanner: View {
+    let retryAt: Date?
+    let lastUpdated: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let retry = retryDescription(at: timeline.date)
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Live data delayed").font(.subheadline.weight(.semibold))
+                    Text("Showing cached departures").font(.caption).opacity(0.95)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let retry {
+                        Text(retry).font(.caption.weight(.semibold))
+                    }
+                    if let lastUpdated {
+                        Text("Updated \(lastUpdated, style: .relative)").font(.caption2).opacity(0.9)
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Live data delayed. Showing cached departures.")
+            .accessibilityValue(accessibilityValue(at: timeline.date))
+        }
+    }
+
+    private func retryDescription(at now: Date) -> String? {
+        guard let retryAt else { return nil }
+        let remaining = Int(retryAt.timeIntervalSince(now))
+        if remaining <= 0 { return "Retrying now" }
+        let minutes = remaining / 60
+        let seconds = remaining % 60
+        let secondText = seconds < 10 ? "0\(seconds)" : "\(seconds)"
+        return "Retry in \(minutes):\(secondText)"
+    }
+
+    private func accessibilityValue(at now: Date) -> String {
+        let retryText = retryDescription(at: now) ?? "Retry time unavailable"
+        if let lastUpdated {
+            return "\(retryText). Last updated \(RelativeDateTimeFormatter().localizedString(for: lastUpdated, relativeTo: now))."
+        }
+        return retryText
+    }
+}
+
 // MARK: - EmptyStateView
 
 struct EmptyStateView: View {
@@ -382,11 +437,12 @@ struct ErrorView: View {
                 Image(systemName: errorInfo.icon).font(.system(size: 40)).foregroundStyle(errorInfo.color)
             }
             VStack(spacing: 8) {
-                Text(error.errorDescription ?? "Something went wrong").font(.title3.weight(.semibold))
+                Text(error.userFacingTitle).font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                if let suggestion = error.recoverySuggestion {
-                    Text(suggestion).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
+                Text(error.userFacingMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             Button {
                 Haptics.notification(.warning)
@@ -418,9 +474,65 @@ struct RouteHeader: View {
     let onEndTap: () -> Void
     let onSetTravelTime: (Station) -> Void
     let onSetBufferTime: (Station) -> Void
+    let swapIcon: String
+    let swapRotationStep: Double
+    let swapAnimation: Animation
+    let showsAutoSelectionControl: Bool
+    let swapAccessibilityLabel: String
+    let swapAccessibilityValue: String?
     @Environment(\.colorScheme) var colorScheme
     @State private var swapRotation: Double = 0
     @State private var pulseHint = false
+
+    init(
+        transportType: TransportType,
+        startStation: Station?,
+        endStation: Station?,
+        travelTimeToStart: Int?,
+        travelTimeToEnd: Int?,
+        suggestedTravelTimeToStart: Int?,
+        suggestedTravelTimeToEnd: Int?,
+        bufferTimeToStart: Int?,
+        bufferTimeToEnd: Int?,
+        onSwap: @escaping () -> Void,
+        isAutoSelectionEnabled: Bool = false,
+        autoSelectionStatusMessage: String? = nil,
+        onToggleAutoSelection: @escaping () -> Void = {},
+        onStartTap: @escaping () -> Void,
+        onEndTap: @escaping () -> Void,
+        onSetTravelTime: @escaping (Station) -> Void,
+        onSetBufferTime: @escaping (Station) -> Void,
+        swapIcon: String = "arrow.left.arrow.right",
+        swapRotationStep: Double = 180,
+        swapAnimation: Animation = .spring(response: 0.3),
+        showsAutoSelectionControl: Bool = true,
+        swapAccessibilityLabel: String = "Swap stations",
+        swapAccessibilityValue: String? = nil
+    ) {
+        self.transportType = transportType
+        self.startStation = startStation
+        self.endStation = endStation
+        self.travelTimeToStart = travelTimeToStart
+        self.travelTimeToEnd = travelTimeToEnd
+        self.suggestedTravelTimeToStart = suggestedTravelTimeToStart
+        self.suggestedTravelTimeToEnd = suggestedTravelTimeToEnd
+        self.bufferTimeToStart = bufferTimeToStart
+        self.bufferTimeToEnd = bufferTimeToEnd
+        self.onSwap = onSwap
+        self.isAutoSelectionEnabled = isAutoSelectionEnabled
+        self.autoSelectionStatusMessage = autoSelectionStatusMessage
+        self.onToggleAutoSelection = onToggleAutoSelection
+        self.onStartTap = onStartTap
+        self.onEndTap = onEndTap
+        self.onSetTravelTime = onSetTravelTime
+        self.onSetBufferTime = onSetBufferTime
+        self.swapIcon = swapIcon
+        self.swapRotationStep = swapRotationStep
+        self.swapAnimation = swapAnimation
+        self.showsAutoSelectionControl = showsAutoSelectionControl
+        self.swapAccessibilityLabel = swapAccessibilityLabel
+        self.swapAccessibilityValue = swapAccessibilityValue
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -431,15 +543,7 @@ struct RouteHeader: View {
                     Haptics.selection()
                     onStartTap()
                 }.layoutPriority(1)
-                Button {
-                    Haptics.impact(.light)
-                    withAnimation(.spring(response: 0.3)) { swapRotation += 180 }
-                    onSwap()
-                } label: {
-                    Image(systemName: "arrow.left.arrow.right").font(.body.weight(.semibold)).foregroundStyle(.white)
-                        .frame(width: 36, height: 36).background(Color.accentColor, in: Circle()).rotationEffect(
-                            .degrees(swapRotation))
-                }.buttonStyle(.plain)
+                swapButton
                 StationButton(
                     label: "To", station: endStation, icon: "flag.circle.fill", color: .red
                 ) {
@@ -455,6 +559,7 @@ struct RouteHeader: View {
                         } label: {
                             Label("\(time) min", systemImage: "figure.walk").font(.caption).foregroundStyle(.blue)
                         }
+                        .buttonStyle(.plain)
                     } else if let suggested = suggestedTravelTimeToStart {
                         suggestedTravelTimeHintButton(for: station, suggested: suggested)
                     } else {
@@ -467,32 +572,37 @@ struct RouteHeader: View {
                             Label("\(buffer) min buffer", systemImage: "clock.badge.checkmark").font(.caption)
                                 .foregroundStyle(.orange)
                         }
+                        .buttonStyle(.plain)
                     } else {
                         bufferTimeHintButton(for: station)
                     }
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Button {
-                        Haptics.selection()
-                        onToggleAutoSelection()
-                    } label: {
-                        Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(colorScheme == .dark ? 0.18 : 0.12),
-                                in: Capsule()
-                            )
-                    }.buttonStyle(.plain)
+                if showsAutoSelectionControl {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            Haptics.selection()
+                            onToggleAutoSelection()
+                        } label: {
+                            Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(
+                                        colorScheme == .dark ? 0.18 : 0.12
+                                    ),
+                                    in: Capsule()
+                                )
+                        }.buttonStyle(.plain)
 
-                    if let autoSelectionStatusMessage {
-                        Text(autoSelectionStatusMessage)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if let autoSelectionStatusMessage {
+                            Text(autoSelectionStatusMessage)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 Spacer()
@@ -508,6 +618,25 @@ struct RouteHeader: View {
         }
     }
 
+    @ViewBuilder
+    private var swapButton: some View {
+        let button = Button {
+            Haptics.impact(.light)
+            withAnimation(swapAnimation) { swapRotation += swapRotationStep }
+            onSwap()
+        } label: {
+            Image(systemName: swapIcon).font(.body.weight(.semibold)).foregroundStyle(.white)
+                .frame(width: 36, height: 36).background(Color.accentColor, in: Circle()).rotationEffect(
+                    .degrees(swapRotation))
+        }.buttonStyle(.plain).accessibilityLabel(swapAccessibilityLabel)
+
+        if let swapAccessibilityValue {
+            button.accessibilityValue(swapAccessibilityValue)
+        } else {
+            button
+        }
+    }
+
     private var autoIndicatorIcon: String {
         isAutoSelectionEnabled ? "location.fill" : "location.slash.fill"
     }
@@ -519,6 +648,7 @@ struct RouteHeader: View {
             Label("Set travel time", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
                 pulseHint ? 0.6 : 1)
         }
+        .buttonStyle(.plain)
     }
 
     private func suggestedTravelTimeHintButton(for station: Station, suggested: Int) -> some View {
@@ -530,6 +660,7 @@ struct RouteHeader: View {
                 .foregroundStyle(.blue)
                 .opacity(pulseHint ? 0.7 : 1)
         }
+        .buttonStyle(.plain)
     }
 
     private func bufferTimeHintButton(for station: Station) -> some View {
@@ -539,6 +670,7 @@ struct RouteHeader: View {
             Label("Set buffer", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.orange).opacity(
                 pulseHint ? 0.6 : 1)
         }
+        .buttonStyle(.plain)
     }
 }
 

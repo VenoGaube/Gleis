@@ -1,6 +1,9 @@
 import Foundation
 
 enum ConnectionMapper {
+    private static let secondsPerDay: TimeInterval = 86_400
+    private static let maxDayRollovers = 3
+
     private static let parseDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -28,17 +31,24 @@ enum ConnectionMapper {
             connectionCancelled(connection) ? ConnectionStatus.cancelled : (delayMinutes > 0 ? .delayed : .onTime)
         let transferSections = sections.filter { $0.category != nil && !isWalkingCategory($0.category) }
         let transfers = connection.switches ?? max(0, transferSections.count - 1)
+        let mappedLegs = mapLegs(
+            sections, transportType: transportType, fallbackFrom: from, fallbackTo: to,
+            fallbackLineNumber: lineInfo.number, fallbackLineColors: lineInfo.lineColors,
+            fallbackPlatform: platform, fallbackDeparture: departureTime, fallbackArrival: arrivalTime
+        )
+        let normalized = normalizeConnectionChronology(
+            departure: departureTime,
+            arrival: arrivalTime,
+            legs: mappedLegs
+        )
 
         return TrainConnection(
             id: connection.id, lineNumber: lineInfo.number, trainType: lineInfo.trainType,
             lineColors: lineInfo.lineColors,
-            departureTime: departureTime, arrivalTime: arrivalTime, departureStation: from, arrivalStation: to,
+            departureTime: normalized.departure, arrivalTime: normalized.arrival, departureStation: from, arrivalStation: to,
             platform: platform, delay: delayMinutes, status: status, transfers: transfers,
-            legs: mapLegs(
-                sections, transportType: transportType, fallbackFrom: from, fallbackTo: to,
-                fallbackLineNumber: lineInfo.number, fallbackLineColors: lineInfo.lineColors,
-                fallbackPlatform: platform, fallbackDeparture: departureTime, fallbackArrival: arrivalTime
-            )
+            legs: normalized.legs,
+            serviceAlerts: mapServiceAlerts(connection.serviceAlerts)
         )
     }
 
@@ -109,7 +119,8 @@ enum ConnectionMapper {
             departureTime: connection.departureTime, arrivalTime: connection.arrivalTime,
             departureStation: connection.departureStation, arrivalStation: connection.arrivalStation,
             platform: connection.platform, delay: connection.delay, status: connection.status,
-            transfers: connection.transfers, legs: enrichedLegs
+            transfers: connection.transfers, legs: enrichedLegs,
+            serviceAlerts: connection.serviceAlerts
         )
     }
 
@@ -191,7 +202,7 @@ enum ConnectionMapper {
                 arrivalPlatform: arrivalPlatform,
                 lineNumber: info.number, trainType: info.trainType, lineColors: info.lineColors,
                 isWalking: info.isWalking,
-                duration: section.duration.map { TimeInterval($0) / 1000 },
+                duration: section.duration.map { max(0, TimeInterval($0) / 1000) },
                 finalDestination: info.isWalking ? nil : toStation.name,
                 platformChanged: section.from.departurePlatformDeviation != nil, stopCount: stopCount,
                 delayMinutes: legDelay.map { max(0, $0) }, intermediateStops: intermediateStops
@@ -396,6 +407,21 @@ enum ConnectionMapper {
         return (connection.sections ?? []).contains { $0.from.cancelled == true || $0.to.cancelled == true }
     }
 
+    private static func mapServiceAlerts(_ alerts: [OebbServiceAlert]?) -> [ServiceAlert]? {
+        guard let alerts else { return nil }
+        return alerts.map {
+            ServiceAlert(
+                id: $0.id,
+                title: $0.title,
+                message: $0.message,
+                startsAt: $0.startsAt,
+                endsAt: $0.endsAt,
+                priority: $0.priority,
+                isActive: $0.isActive
+            )
+        }
+    }
+
     private static func delayMinutes(for connection: OebbConnection) -> Int {
         if let delay = connection.from.departureDelay ?? connection.to.arrivalDelay { return max(0, delay) }
         let sections = connection.sections ?? []
@@ -406,6 +432,121 @@ enum ConnectionMapper {
             return max(0, Int(realtime.timeIntervalSince(scheduled) / 60))
         }
         return 0
+    }
+
+    private static func normalizeConnectionChronology(
+        departure: Date,
+        arrival: Date,
+        legs: [ConnectionLeg]
+    ) -> (departure: Date, arrival: Date, legs: [ConnectionLeg]) {
+        var normalizedLegs: [ConnectionLeg] = []
+        var cursor: Date = departure
+
+        for leg in legs {
+            let normalizedDeparture = normalizedForward(leg.departureTime, relativeTo: cursor)
+            let normalizedArrival = normalizedForward(
+                leg.arrivalTime,
+                relativeTo: normalizedDeparture ?? cursor
+            )
+            let normalizedStops = normalizeIntermediateStopsChronology(
+                leg.intermediateStops,
+                relativeTo: normalizedDeparture ?? cursor
+            )
+            let normalizedDuration: TimeInterval? = {
+                if let dep = normalizedDeparture, let arr = normalizedArrival {
+                    return max(0, arr.timeIntervalSince(dep))
+                }
+                if let duration = leg.duration {
+                    return max(0, duration)
+                }
+                return nil
+            }()
+
+            normalizedLegs.append(
+                ConnectionLeg(
+                    id: leg.id,
+                    from: leg.from,
+                    to: leg.to,
+                    departureTime: normalizedDeparture,
+                    arrivalTime: normalizedArrival,
+                    platform: leg.platform,
+                    arrivalPlatform: leg.arrivalPlatform,
+                    lineNumber: leg.lineNumber,
+                    trainType: leg.trainType,
+                    lineColors: leg.lineColors,
+                    isWalking: leg.isWalking,
+                    duration: normalizedDuration,
+                    finalDestination: leg.finalDestination,
+                    platformChanged: leg.platformChanged,
+                    stopCount: leg.stopCount,
+                    delayMinutes: leg.delayMinutes,
+                    intermediateStops: normalizedStops
+                )
+            )
+
+            if let normalizedArrival {
+                cursor = normalizedArrival
+            } else if let normalizedDeparture {
+                cursor = normalizedDeparture
+            }
+        }
+
+        let normalizedDeparture = normalizedLegs.first?.departureTime ?? departure
+        var normalizedArrival = normalizedForward(arrival, relativeTo: normalizedDeparture) ?? arrival
+        if let lastLegArrival = normalizedLegs.last?.arrivalTime, lastLegArrival > normalizedArrival {
+            normalizedArrival = lastLegArrival
+        }
+
+        return (normalizedDeparture, normalizedArrival, normalizedLegs)
+    }
+
+    private static func normalizeIntermediateStopsChronology(
+        _ stops: [IntermediateStop],
+        relativeTo start: Date
+    ) -> [IntermediateStop] {
+        guard !stops.isEmpty else { return [] }
+
+        var normalized: [IntermediateStop] = []
+        var cursor = start
+
+        for stop in stops {
+            let arrival = normalizedForward(stop.arrivalTime, relativeTo: cursor)
+            let departure = normalizedForward(stop.departureTime, relativeTo: arrival ?? cursor)
+            normalized.append(
+                IntermediateStop(
+                    id: stop.id,
+                    name: stop.name,
+                    arrivalTime: arrival,
+                    departureTime: departure,
+                    arrivalDelay: stop.arrivalDelay,
+                    departureDelay: stop.departureDelay,
+                    platform: stop.platform
+                )
+            )
+
+            if let departure {
+                cursor = departure
+            } else if let arrival {
+                cursor = arrival
+            }
+        }
+
+        return normalized
+    }
+
+    private static func normalizedForward(_ value: Date?, relativeTo reference: Date?) -> Date? {
+        guard let value else { return nil }
+        guard let reference else { return value }
+        guard value < reference else { return value }
+
+        var adjusted = value
+        var rollovers = 0
+        while adjusted < reference, rollovers < maxDayRollovers {
+            adjusted = adjusted.addingTimeInterval(secondsPerDay)
+            rollovers += 1
+        }
+
+        return adjusted < reference ? reference : adjusted
     }
 
     private static func parseDate(_ value: String?) -> Date? {

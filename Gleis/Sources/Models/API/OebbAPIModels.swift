@@ -71,8 +71,9 @@ struct OebbConnection: Decodable {
     let sections: [OebbSection]?
     let switches: Int?
     let duration: Int?
+    let serviceAlerts: [OebbServiceAlert]?
 
-    enum CodingKeys: String, CodingKey { case id, from, to, sections, switches, duration }
+    enum CodingKeys: String, CodingKey { case id, from, to, sections, switches, duration, serviceAlerts }
 
     init(
         id: String,
@@ -80,7 +81,8 @@ struct OebbConnection: Decodable {
         to: OebbConnectionStop,
         sections: [OebbSection]?,
         switches: Int?,
-        duration: Int?
+        duration: Int?,
+        serviceAlerts: [OebbServiceAlert]? = nil
     ) {
         self.id = id
         self.from = from
@@ -88,6 +90,7 @@ struct OebbConnection: Decodable {
         self.sections = sections
         self.switches = switches
         self.duration = duration
+        self.serviceAlerts = serviceAlerts
     }
 
     init(from decoder: Decoder) throws {
@@ -98,7 +101,18 @@ struct OebbConnection: Decodable {
         sections = try? container.decodeIfPresent([OebbSection].self, forKey: .sections)
         switches = OebbDecoding.intIfPresent(container, forKey: .switches)
         duration = OebbDecoding.intIfPresent(container, forKey: .duration)
+        serviceAlerts = OebbDecoding.lossyArrayIfPresent(container, forKey: .serviceAlerts)
     }
+}
+
+struct OebbServiceAlert: Codable, Equatable {
+    let id: String
+    let title: String
+    let message: String
+    let startsAt: Date?
+    let endsAt: Date?
+    let priority: Int
+    let isActive: Bool
 }
 
 // MARK: - OebbSection
@@ -431,14 +445,47 @@ struct OebbGateTripCommon: Decodable {
     let locL: [OebbGateLocation]?
     let prodL: [OebbGateTripProduct]?
     let icoL: [OebbGateTripIcon]?
+    let himL: [OebbGateHimMessage]?
 
-    enum CodingKeys: String, CodingKey { case locL, prodL, icoL }
+    enum CodingKeys: String, CodingKey { case locL, prodL, icoL, himL }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         locL = OebbDecoding.lossyArrayIfPresent(container, forKey: .locL)
         prodL = OebbDecoding.lossyArrayIfPresent(container, forKey: .prodL)
         icoL = OebbDecoding.lossyArrayIfPresent(container, forKey: .icoL)
+        himL = OebbDecoding.lossyArrayIfPresent(container, forKey: .himL)
+    }
+}
+
+struct OebbGateHimMessage: Decodable {
+    let hid: String?
+    let head: String?
+    let text: String?
+    let sDate: String?
+    let sTime: String?
+    let eDate: String?
+    let eTime: String?
+    let prio: Int?
+    let act: Bool?
+    let fLocX: Int?
+    let tLocX: Int?
+
+    enum CodingKeys: String, CodingKey { case hid, head, text, sDate, sTime, eDate, eTime, prio, act, fLocX, tLocX }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hid = try? container.decodeIfPresent(String.self, forKey: .hid)
+        head = try? container.decodeIfPresent(String.self, forKey: .head)
+        text = try? container.decodeIfPresent(String.self, forKey: .text)
+        sDate = try? container.decodeIfPresent(String.self, forKey: .sDate)
+        sTime = try? container.decodeIfPresent(String.self, forKey: .sTime)
+        eDate = try? container.decodeIfPresent(String.self, forKey: .eDate)
+        eTime = try? container.decodeIfPresent(String.self, forKey: .eTime)
+        prio = OebbDecoding.intIfPresent(container, forKey: .prio)
+        act = OebbDecoding.boolIfPresent(container, forKey: .act)
+        fLocX = OebbDecoding.intIfPresent(container, forKey: .fLocX)
+        tLocX = OebbDecoding.intIfPresent(container, forKey: .tLocX)
     }
 }
 
@@ -448,11 +495,12 @@ struct OebbGateTripConnection: Decodable {
     let dep: OebbGateTripStopRef?
     let arr: OebbGateTripStopRef?
     let secL: [OebbGateTripSection]?
+    let msgL: [OebbGateTripJourneyMessage]?
     let chg: Int?
     let durS: String?
     let date: String?
 
-    enum CodingKeys: String, CodingKey { case cid, cksum, dep, arr, secL, chg, durS, date }
+    enum CodingKeys: String, CodingKey { case cid, cksum, dep, arr, secL, msgL, chg, durS, date }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -461,6 +509,7 @@ struct OebbGateTripConnection: Decodable {
         dep = try? container.decodeIfPresent(OebbGateTripStopRef.self, forKey: .dep)
         arr = try? container.decodeIfPresent(OebbGateTripStopRef.self, forKey: .arr)
         secL = OebbDecoding.lossyArrayIfPresent(container, forKey: .secL)
+        msgL = OebbDecoding.lossyArrayIfPresent(container, forKey: .msgL)
         chg = OebbDecoding.intIfPresent(container, forKey: .chg)
         durS = try? container.decodeIfPresent(String.self, forKey: .durS)
         date = try? container.decodeIfPresent(String.self, forKey: .date)
@@ -472,8 +521,9 @@ struct OebbGateTripSection: Decodable {
     let dep: OebbGateTripStopRef?
     let arr: OebbGateTripStopRef?
     let jny: OebbGateTripJourney?
+    let msgL: [OebbGateTripJourneyMessage]?
 
-    enum CodingKeys: String, CodingKey { case type, dep, arr, jny }
+    enum CodingKeys: String, CodingKey { case type, dep, arr, jny, msgL }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -481,25 +531,41 @@ struct OebbGateTripSection: Decodable {
         dep = try? container.decodeIfPresent(OebbGateTripStopRef.self, forKey: .dep)
         arr = try? container.decodeIfPresent(OebbGateTripStopRef.self, forKey: .arr)
         jny = try? container.decodeIfPresent(OebbGateTripJourney.self, forKey: .jny)
+        msgL = OebbDecoding.lossyArrayIfPresent(container, forKey: .msgL)
     }
 }
 
 struct OebbGateTripJourney: Decodable {
     let stopL: [OebbGateTripStopRef]?
     let prodL: [OebbGateTripProductRef]?
+    let msgL: [OebbGateTripJourneyMessage]?
     let dirTxt: String?
     let durS: String?
     let date: String?
 
-    enum CodingKeys: String, CodingKey { case stopL, prodL, dirTxt, durS, date }
+    enum CodingKeys: String, CodingKey { case stopL, prodL, msgL, dirTxt, durS, date }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         stopL = OebbDecoding.lossyArrayIfPresent(container, forKey: .stopL)
         prodL = OebbDecoding.lossyArrayIfPresent(container, forKey: .prodL)
+        msgL = OebbDecoding.lossyArrayIfPresent(container, forKey: .msgL)
         dirTxt = try? container.decodeIfPresent(String.self, forKey: .dirTxt)
         durS = try? container.decodeIfPresent(String.self, forKey: .durS)
         date = try? container.decodeIfPresent(String.self, forKey: .date)
+    }
+}
+
+struct OebbGateTripJourneyMessage: Decodable {
+    let type: String?
+    let himX: Int?
+
+    enum CodingKeys: String, CodingKey { case type, himX }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try? container.decodeIfPresent(String.self, forKey: .type)
+        himX = OebbDecoding.intIfPresent(container, forKey: .himX)
     }
 }
 
@@ -560,8 +626,9 @@ struct OebbGateTripProduct: Decodable {
     let number: String?
     let prodCtx: OebbGateTripProductContext?
     let icoX: Int?
+    let himIdL: [String]?
 
-    enum CodingKeys: String, CodingKey { case name, nameS, number, prodCtx, icoX }
+    enum CodingKeys: String, CodingKey { case name, nameS, number, prodCtx, icoX, himIdL }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -570,6 +637,7 @@ struct OebbGateTripProduct: Decodable {
         number = try? container.decodeIfPresent(String.self, forKey: .number)
         prodCtx = try? container.decodeIfPresent(OebbGateTripProductContext.self, forKey: .prodCtx)
         icoX = OebbDecoding.intIfPresent(container, forKey: .icoX)
+        himIdL = OebbDecoding.lossyArrayIfPresent(container, forKey: .himIdL)
     }
 }
 
