@@ -59,41 +59,90 @@ struct CommuteScheduleView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center) {
-                Text("Repeat Journeys").font(.largeTitle.bold())
-                Spacer()
-                Menu {
-                    Button {
-                        excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
-                        showExcludedDatesSheet = true
-                    } label: {
-                        Label("Holidays / OOO", systemImage: "calendar.badge.minus")
-                    }
-
-                    if !viewModel.excludedDates.isEmpty {
-                        Button(role: .destructive) {
-                            excludedDateSelection = []
-                            viewModel.updateExcludedDates(dates(from: excludedDateSelection))
+            VStack(spacing: 20) {
+                HStack(alignment: .center) {
+                    Text("Repeat Journeys").font(.largeTitle.bold())
+                    Spacer()
+                    Menu {
+                        Button {
+                            excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
+                            showExcludedDatesSheet = true
                         } label: {
-                            Label("Clear Excluded Dates", systemImage: "trash")
+                            Label("Holidays / OOO", systemImage: "calendar.badge.minus")
                         }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
+
                         if !viewModel.excludedDates.isEmpty {
-                            Text("\(viewModel.excludedDates.count)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                            Button(role: .destructive) {
+                                excludedDateSelection = []
+                                viewModel.updateExcludedDates(dates(from: excludedDateSelection))
+                            } label: {
+                                Label("Clear Excluded Dates", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title2)
+                            if !viewModel.excludedDates.isEmpty {
+                                Text("\(viewModel.excludedDates.count)")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .padding(.trailing, 4)
+                    .accessibilityLabel("Commute options")
                 }
-                .accessibilityLabel("Commute options")
-            }.padding(.horizontal).padding(.top, 13).padding(.bottom, 6)
+
+                RouteHeader(
+                    transportType: viewModel.transportType,
+                    startStation: viewModel.currentFromStation,
+                    endStation: viewModel.currentToStation,
+                    travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
+                    travelTimeToEnd: viewModel.config.travelTime(for: viewModel.currentToStation?.id),
+                    suggestedTravelTimeToStart: viewModel.currentFromStation.flatMap {
+                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                    },
+                    suggestedTravelTimeToEnd: viewModel.currentToStation.flatMap {
+                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
+                    },
+                    bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
+                    bufferTimeToEnd: viewModel.config.bufferTime(for: viewModel.currentToStation?.id),
+                    onSwap: {
+                        viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
+                    },
+                    onStartTap: { showFromStationPicker = true },
+                    onEndTap: { showToStationPicker = true },
+                    onSetTravelTime: { station in
+                        activeTimingSheet = .travel(station)
+                    },
+                    onSetBufferTime: { station in
+                        activeTimingSheet = .buffer(station)
+                    },
+                    swapIcon: directionIcon,
+                    showsAutoSelectionControl: false,
+                    swapAccessibilityLabel: "Switch direction",
+                    swapAccessibilityValue: directionLabel
+                )
+
+                if viewModel.hasSchedules {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                        Text("Changing stations archives current schedules")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+                }
+            }
+            .padding()
 
             List {
-                stationsSection
                 scheduleSection
                 Section {
                     Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
@@ -195,66 +244,6 @@ struct CommuteScheduleView: View {
                 )
             }
             .toastOverlay(viewModel.toastManager)
-    }
-
-    private var stationsSection: some View {
-        Group {
-            RouteHeader(
-                transportType: viewModel.transportType,
-                startStation: viewModel.currentFromStation,
-                endStation: viewModel.currentToStation,
-                travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
-                travelTimeToEnd: viewModel.config.travelTime(for: viewModel.currentToStation?.id),
-                suggestedTravelTimeToStart: viewModel.currentFromStation.flatMap {
-                    viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
-                },
-                suggestedTravelTimeToEnd: viewModel.currentToStation.flatMap {
-                    viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
-                },
-                bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
-                bufferTimeToEnd: viewModel.config.bufferTime(for: viewModel.currentToStation?.id),
-                onSwap: {
-                    viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
-                },
-                onStartTap: { showFromStationPicker = true },
-                onEndTap: { showToStationPicker = true },
-                onSetTravelTime: { station in
-                    activeTimingSheet = .travel(station)
-                },
-                onSetBufferTime: { station in
-                    activeTimingSheet = .buffer(station)
-                },
-                swapIcon: directionIcon,
-                showsAutoSelectionControl: false,
-                swapAccessibilityLabel: "Switch direction",
-                swapAccessibilityValue: directionLabel
-            )
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-
-            if viewModel.hasSchedules {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.orange)
-                    Text("Changing stations archives current schedules")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-        }
     }
 
     private var scheduleSection: some View {
