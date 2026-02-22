@@ -4,7 +4,7 @@ import Foundation
 // MARK: - FetchLimits
 
 enum FetchLimits {
-    static let connectionBatchSize = 5
+    static let connectionBatchSize = 6
     static let stationSearchCount = 25
     static let nearbyStationSearchCount = 15
     static let stationResolveCandidateCount = 5

@@ -57,13 +57,12 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 ? consumePrefetchedCurrentConnections(from: from, to: to, transportType: transportType) : nil
 
         do {
-            return try await fetchConnections(
+            return try await fetchConnectionsFromAPI(
                 from: from,
                 to: to,
                 transportType: transportType,
                 departureTime: departureTime,
-                count: count,
-                includeDetailEnrichment: false
+                count: count
             )
         } catch {
             if isCancellation(error) { throw error }
@@ -79,19 +78,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func fetchConnectionsWithoutDetails(
-        from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
-    ) async throws -> [TrainConnection] {
-        try await fetchConnections(
-            from: from,
-            to: to,
-            transportType: transportType,
-            departureTime: departureTime,
-            count: count,
-            includeDetailEnrichment: false
-        )
-    }
-
     func preloadCurrentConnections(
         from: Station,
         to: Station,
@@ -100,13 +86,12 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     ) async {
         guard from.id != to.id else { return }
         guard
-            let connections = try? await fetchConnections(
+            let connections = try? await fetchConnectionsFromAPI(
                 from: from,
                 to: to,
                 transportType: transportType,
                 departureTime: Date(),
-                count: max(1, count),
-                includeDetailEnrichment: false
+                count: max(1, count)
             ),
             !connections.isEmpty
         else { return }
@@ -122,13 +107,12 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     ) async {
         guard from.id != to.id else { return }
         guard
-            let connections = try? await fetchConnections(
+            let connections = try? await fetchConnectionsFromAPI(
                 from: from,
                 to: to,
                 transportType: transportType,
                 departureTime: Calendar.current.startOfDay(for: Date()),
-                count: max(1, count),
-                includeDetailEnrichment: false
+                count: max(1, count)
             ),
             !connections.isEmpty
         else { return }
@@ -136,17 +120,17 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         storePrefetchedMidnightConnections(connections, from: from, to: to, transportType: transportType)
     }
 
-    private func fetchConnections(
+    private func fetchConnectionsFromAPI(
         from: Station,
         to: Station,
         transportType: TransportType,
         departureTime: Date,
-        count: Int,
-        includeDetailEnrichment: Bool
+        count: Int
     ) async throws -> [TrainConnection] {
         do {
-            let resolvedFrom = try await resolveStation(from, transportType: transportType)
-            let resolvedTo = try await resolveStation(to, transportType: transportType)
+            async let resolvedFromTask = resolveStation(from, transportType: transportType)
+            async let resolvedToTask = resolveStation(to, transportType: transportType)
+            let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
             let response = try await apiClient.fetchTimetable(
                 from: resolvedFrom.ref, to: resolvedTo.ref, count: count, departure: departureTime
             )
@@ -155,8 +139,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                     $0, from: resolvedFrom.station, to: resolvedTo.station, transportType: transportType
                 )
             }
-            guard includeDetailEnrichment else { return connections }
-            return try await enrichConnectionsBestEffort(connections)
+            return connections
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -437,48 +420,4 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         return prefetchedMidnightConnectionsByRoute.removeValue(forKey: key)
     }
 
-    private func enrichConnectionsBestEffort(_ connections: [TrainConnection]) async throws -> [TrainConnection] {
-        var enriched = connections
-        let indicesNeedingEnrichment = enriched.indices.filter { needsDetailEnrichment(enriched[$0]) }
-        guard !indicesNeedingEnrichment.isEmpty else { return enriched }
-
-        typealias EnrichmentResult = (index: Int, enriched: TrainConnection?)
-        let results: [EnrichmentResult] = try await withThrowingTaskGroup(of: EnrichmentResult.self) { group in
-            for index in indicesNeedingEnrichment {
-                let connection = enriched[index]
-                group.addTask {
-                    do {
-                        let detail = try await self.apiClient.fetchConnectionDetails(connectionId: connection.id)
-                        return (index: index, enriched: ConnectionMapper.enrichConnection(connection, detail: detail))
-                    } catch {
-                        if self.isCancellation(error) { throw CancellationError() }
-                        // Keep base data when detail endpoint is unavailable for this item.
-                        return (index: index, enriched: nil)
-                    }
-                }
-            }
-
-            var collected: [EnrichmentResult] = []
-            for try await result in group {
-                collected.append(result)
-            }
-            return collected
-        }
-
-        for result in results {
-            if let enrichedConnection = result.enriched {
-                enriched[result.index] = enrichedConnection
-            }
-        }
-        return enriched
-    }
-
-    private func needsDetailEnrichment(_ connection: TrainConnection) -> Bool {
-        connection.legs.contains { leg in
-            !leg.isWalking && (
-                leg.stopCount == nil
-                    || ((leg.stopCount ?? 0) > 0 && leg.intermediateStops.isEmpty)
-            )
-        }
-    }
 }

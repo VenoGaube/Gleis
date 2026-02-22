@@ -589,15 +589,22 @@ struct OebbGateTripStopRef: Decodable {
     let idx: Int?
     let dTimeS: String?
     let aTimeS: String?
+    let dTimeR: String?
+    let aTimeR: String?
     let dPltfS: OebbGateTextValue?
     let aPltfS: OebbGateTextValue?
+    let dPltfR: OebbGateTextValue?
+    let aPltfR: OebbGateTextValue?
     let dProdX: Int?
     let aProdX: Int?
     let dTZOffset: Int?
     let aTZOffset: Int?
+    let dTZOffsetR: Int?
+    let aTZOffsetR: Int?
 
     enum CodingKeys: String, CodingKey {
-        case locX, idx, dTimeS, aTimeS, dPltfS, aPltfS, dProdX, aProdX, dTZOffset, aTZOffset
+        case locX, idx, dTimeS, aTimeS, dTimeR, aTimeR, dPltfS, aPltfS, dPltfR, aPltfR
+        case dProdX, aProdX, dTZOffset, aTZOffset, dTZOffsetR, aTZOffsetR
     }
 
     init(from decoder: Decoder) throws {
@@ -606,12 +613,18 @@ struct OebbGateTripStopRef: Decodable {
         idx = OebbDecoding.intIfPresent(container, forKey: .idx)
         dTimeS = try? container.decodeIfPresent(String.self, forKey: .dTimeS)
         aTimeS = try? container.decodeIfPresent(String.self, forKey: .aTimeS)
+        dTimeR = try? container.decodeIfPresent(String.self, forKey: .dTimeR)
+        aTimeR = try? container.decodeIfPresent(String.self, forKey: .aTimeR)
         dPltfS = try? container.decodeIfPresent(OebbGateTextValue.self, forKey: .dPltfS)
         aPltfS = try? container.decodeIfPresent(OebbGateTextValue.self, forKey: .aPltfS)
+        dPltfR = try? container.decodeIfPresent(OebbGateTextValue.self, forKey: .dPltfR)
+        aPltfR = try? container.decodeIfPresent(OebbGateTextValue.self, forKey: .aPltfR)
         dProdX = OebbDecoding.intIfPresent(container, forKey: .dProdX)
         aProdX = OebbDecoding.intIfPresent(container, forKey: .aProdX)
         dTZOffset = OebbDecoding.intIfPresent(container, forKey: .dTZOffset)
         aTZOffset = OebbDecoding.intIfPresent(container, forKey: .aTZOffset)
+        dTZOffsetR = OebbDecoding.intIfPresent(container, forKey: .dTZOffsetR)
+        aTZOffsetR = OebbDecoding.intIfPresent(container, forKey: .aTZOffsetR)
     }
 }
 

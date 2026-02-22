@@ -169,18 +169,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         rescheduleAllNotifications()
     }
 
-    func swapStations() {
-        let old = (route.homeStation, route.workStation)
-        settingsManager.handleStationChange(
-            oldStart: old.0,
-            oldEnd: old.1,
-            newStart: old.1,
-            newEnd: old.0
-        )
-        route = settingsManager.savedCommuteRoute
-        rescheduleAllNotifications()
-    }
-
     // MARK: - Schedule Management
 
     func save() {
@@ -221,9 +209,10 @@ final class CommuteScheduleViewModel: ObservableObject {
         guard let from = route.fromStation(for: direction), let to = route.toStation(for: direction) else { return nil }
         guard let departure = suggestionSearchStart(for: day, template: template) else { return nil }
 
-        guard let connections = try? await fetchSuggestionConnections(
+        guard let connections = try? await transportService.fetchConnections(
             from: from,
             to: to,
+            transportType: transportType,
             departureTime: departure,
             count: FetchLimits.commuteSuggestionConnectionCount
         ) else { return nil }
@@ -288,31 +277,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         ) else { return nil }
 
         return departure.addingTimeInterval(-45 * 60)
-    }
-
-    private func fetchSuggestionConnections(
-        from: Station,
-        to: Station,
-        departureTime: Date,
-        count: Int
-    ) async throws -> [TrainConnection] {
-        if let transportService = transportService as? TransportService {
-            return try await transportService.fetchConnectionsWithoutDetails(
-                from: from,
-                to: to,
-                transportType: transportType,
-                departureTime: departureTime,
-                count: count
-            )
-        }
-
-        return try await transportService.fetchConnections(
-            from: from,
-            to: to,
-            transportType: transportType,
-            departureTime: departureTime,
-            count: count
-        )
     }
 
     private func bestSuggestedSchedule(in connections: [TrainConnection], template: DaySchedule) -> DaySchedule? {

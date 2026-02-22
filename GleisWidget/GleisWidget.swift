@@ -39,8 +39,8 @@ enum WidgetRouteOption: String, AppEnum {
 
     var storageScope: WidgetRouteScope {
         switch self {
-        case .repeatJourney: return .repeatJourney
-        case .liveRoute: return .liveRoute
+        case .repeatJourney: .repeatJourney
+        case .liveRoute: .liveRoute
         }
     }
 }
@@ -57,8 +57,8 @@ enum WidgetDirectionOption: String, AppEnum {
 
     var storageScope: WidgetDirectionScope {
         switch self {
-        case .forward: return .forward
-        case .reverse: return .reverse
+        case .forward: .forward
+        case .reverse: .reverse
         }
     }
 }
@@ -75,8 +75,8 @@ enum WidgetDayOption: String, AppEnum {
 
     var storageScope: WidgetDayScope {
         switch self {
-        case .today: return .today
-        case .tomorrow: return .tomorrow
+        case .today: .today
+        case .tomorrow: .tomorrow
         }
     }
 }
@@ -147,16 +147,10 @@ struct GleisProvider: AppIntentTimelineProvider {
             if let lastConn = data.connections.last {
                 let staleDate = lastConn.departureTime.addingTimeInterval(1)
                 if staleDate > now {
-                    let staleData = WidgetData(
-                        transportType: data.transportType,
-                        connections: [],
-                        leaveTimes: [],
-                        fromStationName: data.fromStationName,
-                        toStationName: data.toStationName,
+                    let staleData = staleData(
+                        from: data,
                         updatedAt: staleDate,
-                        state: .stale,
-                        stateMessage: "No more departures right now.",
-                        recoveryAction: data.recoveryAction
+                        message: "No more departures right now."
                     )
                     entries.append(GleisEntry(date: staleDate, data: staleData, configuration: configuration))
                 }
@@ -166,16 +160,10 @@ struct GleisProvider: AppIntentTimelineProvider {
             let futureConnections = data.futureConnections(from: now)
 
             if futureConnections.isEmpty {
-                let staleData = WidgetData(
-                    transportType: data.transportType,
-                    connections: [],
-                    leaveTimes: [],
-                    fromStationName: data.fromStationName,
-                    toStationName: data.toStationName,
+                let staleData = staleData(
+                    from: data,
                     updatedAt: now,
-                    state: .stale,
-                    stateMessage: "No upcoming departures.",
-                    recoveryAction: data.recoveryAction
+                    message: "No upcoming departures."
                 )
                 entries.append(GleisEntry(date: now, data: staleData, configuration: configuration))
             } else {
@@ -237,6 +225,20 @@ struct GleisProvider: AppIntentTimelineProvider {
             dayScope: configuration.day.storageScope
         )
         return AppGroupStorage.loadWidgetData(for: storageKey)
+    }
+
+    private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
+        WidgetData(
+            transportType: data.transportType,
+            connections: [],
+            leaveTimes: [],
+            fromStationName: data.fromStationName,
+            toStationName: data.toStationName,
+            updatedAt: updatedAt,
+            state: .stale,
+            stateMessage: message,
+            recoveryAction: data.recoveryAction
+        )
     }
 }
 
@@ -339,7 +341,7 @@ struct SmallWidgetView: View {
                     if conn.hasServiceAlert {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
-                            Text("Service alert active")
+                            Text("Service alert")
                         }
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.red)
@@ -442,7 +444,7 @@ struct MediumWidgetView: View {
                     }
 
                     // Delay indicator
-                if conn.isDelayed {
+                    if conn.isDelayed {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
                             Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
@@ -452,7 +454,7 @@ struct MediumWidgetView: View {
                     if conn.hasServiceAlert {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("Service alert active").font(.caption.weight(.semibold))
+                            Text("Service alert").font(.caption.weight(.semibold))
                         }
                         .foregroundStyle(.red)
                     }
@@ -755,20 +757,16 @@ struct EmptyWidgetView: View {
     enum EmptySize { case small, medium }
 
     var body: some View {
-        let accentColor: Color = {
-            switch data?.state {
-            case .fallback: return .orange
-            case .stale: return .secondary
-            default: return .trainBlue
-            }
-        }()
-        let title: String = {
-            switch data?.state {
-            case .fallback: return "Offline data"
-            case .stale: return "No departures"
-            default: return "Set up route"
-            }
-        }()
+        let accentColor: Color = switch data?.state {
+        case .fallback: .orange
+        case .stale: .secondary
+        default: .trainBlue
+        }
+        let title = switch data?.state {
+        case .fallback: "Offline data"
+        case .stale: "No departures"
+        default: "Set up route"
+        }
         let subtitle = emptyHintText(for: data)
 
         switch size {
@@ -921,7 +919,7 @@ extension Color {
     static func lineColor(for line: String) -> Color {
         let uppercased = line.uppercased()
 
-        // Vienna U-Bahn colors 
+        // Vienna U-Bahn colors
         if uppercased == "U1" { return Color(red: 0.89, green: 0.15, blue: 0.21) }
         if uppercased == "U2" { return Color(red: 0.58, green: 0.22, blue: 0.58) }
         if uppercased == "U3" { return Color(red: 0.95, green: 0.55, blue: 0.15) }

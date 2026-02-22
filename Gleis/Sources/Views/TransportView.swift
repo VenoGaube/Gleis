@@ -465,10 +465,7 @@ struct TransportView: View {
         config.endStation = end
         if manualStartSelection { config.isStartStationManuallySelected = true }
         settingsManager.updateConfig(config)
-        if routeChanged {
-            viewModel.cancelCurrentFetch()
-            Task { await viewModel.refreshConnections(isUserInitiated: true) }
-        }
+        if routeChanged { viewModel.cancelCurrentFetch() }
     }
 
     private func swapStations() {

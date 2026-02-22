@@ -62,7 +62,6 @@ final class TransportViewModel: ObservableObject {
     private var lastWidgetUpdate: Date?
     private var dismissedRecoverySignatures = Set<String>()
     private var reminderResyncSignatures = Set<String>()
-    private var announcedServiceAlertIDs = Set<String>()
     private var deliveredServiceAlertSignatures = Set<String>()
     private let minimumLiveRefreshInterval: TimeInterval = 45
     private let alertRetentionWindow: TimeInterval = 10 * 60
@@ -208,7 +207,6 @@ final class TransportViewModel: ObservableObject {
             existingConnections = nil
         }
         if isRouteChange {
-            announcedServiceAlertIDs.removeAll()
             deliveredServiceAlertSignatures.removeAll()
             alertStabilityByConnectionID.removeAll()
             clearServiceDegradedState()
@@ -362,7 +360,7 @@ final class TransportViewModel: ObservableObject {
         }
     }
 
-    func scheduleNotification(for connection: TrainConnection) async {
+    func scheduleNotification(for connection: TrainConnection, replacingReminderId: String? = nil) async {
         do {
             let fromStationId = config.startStation?.id
             try await notificationService.scheduleNotification(
@@ -374,13 +372,22 @@ final class TransportViewModel: ObservableObject {
             toastManager.show("Reminder set for \(connection.lineNumber.uppercased())", type: .success)
             selectedConnection = connection
 
+            let createdAt =
+                replacingReminderId.flatMap { id in
+                    settingsManager.scheduledReminders.first(where: { $0.id == id })?.createdAt
+                } ?? Date()
             let reminder = ScheduledReminder(
                 id: connection.id, transportType: transportType, lineNumber: connection.lineNumber,
                 destination: connection.arrivalStation.name, platform: connection.platform,
                 departureTime: config.effectiveDepartureTime(for: connection),
                 leaveTime: calculateLeaveTime(for: connection), delayMinutes: connection.delay, fiveMinuteWarning: true,
-                exactTimeWarning: true, createdAt: Date()
+                exactTimeWarning: true, createdAt: createdAt
             )
+            if let replacingReminderId, replacingReminderId != connection.id {
+                notificationService.cancelNotification(id: "\(replacingReminderId)_fiveMinuteWarning")
+                notificationService.cancelNotification(id: "\(replacingReminderId)_exactTime")
+                settingsManager.removeReminder(connectionId: replacingReminderId)
+            }
             settingsManager.upsertReminder(reminder)
             rebuildDisplayConnections()
             if case let .loaded(conns) = connections { updateWidgetIfNeeded(with: conns) }
@@ -389,7 +396,7 @@ final class TransportViewModel: ObservableObject {
                 do {
                     let granted = try await notificationService.requestAuthorization()
                     if granted {
-                        await scheduleNotification(for: connection)
+                        await scheduleNotification(for: connection, replacingReminderId: replacingReminderId)
                     } else {
                         toastManager.show("Notifications permission required", type: .error)
                         errorMessage = "Enable notifications in Settings to receive reminders"
@@ -397,6 +404,10 @@ final class TransportViewModel: ObservableObject {
                     }
                 } catch { handleError(error) }
             } else {
+                if let replacingReminderId, replacingReminderId != connection.id {
+                    notificationService.cancelNotification(id: "\(connection.id)_fiveMinuteWarning")
+                    notificationService.cancelNotification(id: "\(connection.id)_exactTime")
+                }
                 handleError(error)
             }
         }
@@ -425,14 +436,12 @@ final class TransportViewModel: ObservableObject {
             dismissConnectionRecovery()
             return
         }
-
-        if recovery.originalReminderId != replacement.id {
-            notificationService.cancelNotification(id: "\(recovery.originalReminderId)_fiveMinuteWarning")
-            notificationService.cancelNotification(id: "\(recovery.originalReminderId)_exactTime")
-            settingsManager.removeReminder(connectionId: recovery.originalReminderId)
+        Task {
+            await scheduleNotification(
+                for: replacement,
+                replacingReminderId: recovery.originalReminderId
+            )
         }
-
-        Task { await scheduleNotification(for: replacement) }
         connectionRecovery = nil
     }
 
@@ -581,7 +590,6 @@ final class TransportViewModel: ObservableObject {
         let previousConnections = connections.value ?? []
         let stabilizedConnections = stabilizedServiceAlerts(in: newConnections, previous: previousConnections)
         connections = .loaded(stabilizedConnections)
-        announceServiceAlertsIfNeeded(previous: previousConnections, current: stabilizedConnections)
         rebuildDisplayConnections()
     }
 
@@ -661,33 +669,6 @@ final class TransportViewModel: ObservableObject {
             legs: connection.legs,
             serviceAlerts: alerts
         )
-    }
-
-    private func announceServiceAlertsIfNeeded(previous: [TrainConnection], current: [TrainConnection]) {
-        let previousAlertIDs = Set(previous.flatMap { connection in
-            (connection.serviceAlerts ?? []).filter(\.isActive).map(\.id)
-        })
-
-        let activeAlerts = current.flatMap { connection in
-            (connection.serviceAlerts ?? []).filter(\.isActive)
-        }
-        guard !activeAlerts.isEmpty else { return }
-
-        let knownAlertIDs = previousAlertIDs.union(announcedServiceAlertIDs)
-        let newAlerts = activeAlerts.filter { !knownAlertIDs.contains($0.id) }
-        guard !newAlerts.isEmpty else { return }
-
-        announcedServiceAlertIDs.formUnion(newAlerts.map(\.id))
-        let primaryAlert = newAlerts.max { $0.priority < $1.priority }
-        let message: String =
-            if newAlerts.count == 1, let title = primaryAlert?.title, !title.isEmpty {
-                "Service alert: \(title)"
-            } else {
-                "\(newAlerts.count) service alerts on this route"
-            }
-
-        Haptics.notification(.warning)
-        toastManager.show(message, type: .info)
     }
 
     // MARK: - Widget
@@ -965,8 +946,6 @@ final class TransportViewModel: ObservableObject {
 
         Task {
             let fromStationId = config.startStation?.id
-            notificationService.cancelNotification(id: "\(reminder.id)_fiveMinuteWarning")
-            notificationService.cancelNotification(id: "\(reminder.id)_exactTime")
 
             do {
                 try await notificationService.scheduleNotification(
@@ -997,11 +976,18 @@ final class TransportViewModel: ObservableObject {
                 )
 
                 if reminder.id != updatedReminder.id {
+                    notificationService.cancelNotification(id: "\(reminder.id)_fiveMinuteWarning")
+                    notificationService.cancelNotification(id: "\(reminder.id)_exactTime")
                     settingsManager.removeReminder(connectionId: reminder.id)
                 }
                 settingsManager.upsertReminder(updatedReminder)
             } catch {
-                // Keep current reminder if live resync fails.
+                // Keep current reminder if live resync fails and allow a retry on next refresh.
+                if reminder.id != liveConnection.id {
+                    notificationService.cancelNotification(id: "\(liveConnection.id)_fiveMinuteWarning")
+                    notificationService.cancelNotification(id: "\(liveConnection.id)_exactTime")
+                }
+                reminderResyncSignatures.remove(signature)
             }
         }
     }

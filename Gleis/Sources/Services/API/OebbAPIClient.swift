@@ -2,6 +2,9 @@ import Foundation
 
 actor OebbAPIClient {
     static let shared = OebbAPIClient()
+    private static let gateTrainTokenRegex = try? NSRegularExpression(
+        pattern: "\\b([A-Z]{1,6})\\s*([0-9]{1,5})\\b"
+    )
 
     private let baseURL = URL(string: "https://shop.oebbtickets.at")!
     private let fahrplanBaseURL = URL(string: "https://fahrplan.oebb.at")!
@@ -103,7 +106,12 @@ actor OebbAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let response = try await perform(request, decode: OebbGateResponse.self, retryAuth: false)
+        let response = try await perform(
+            request,
+            decode: OebbGateResponse.self,
+            retryAuth: false,
+            retryTransient: false
+        )
         if let err = response.err, err.uppercased() != "OK" { throw GleisError.apiError("Gate error: \(err)") }
         let service = response.svcResL?.first {
             ($0.meth ?? "").localizedCaseInsensitiveCompare("LocGeoPos") == .orderedSame
@@ -196,7 +204,7 @@ actor OebbAPIClient {
                         outTime: gateTimeFormatter.string(from: departure),
                         outDate: gateDateFormatter.string(from: departure),
                         getPasslist: true,
-                        getTariff: true,
+                        getTariff: false,
                         getPolyline: false,
                         numF: max(1, min(count, 30))
                     ),
@@ -211,7 +219,12 @@ actor OebbAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let response = try await perform(request, decode: OebbGateResponse.self, retryAuth: false)
+        let response = try await perform(
+            request,
+            decode: OebbGateResponse.self,
+            retryAuth: false,
+            retryTransient: false
+        )
         if let err = response.err, err.uppercased() != "OK" { throw GleisError.apiError("Gate error: \(err)") }
 
         let service = response.svcResL?.first {
@@ -422,13 +435,47 @@ actor OebbAPIClient {
         let name = gateNormalizedString(location?.name) ?? gateNormalizedString(fallbackName)
         guard let name else { return nil }
 
+        let scheduledDeparture = gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeS)
+        let scheduledArrival = gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeS)
+        let realtimeDeparture = gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeR)
+        let realtimeArrival = gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeR)
+
+        let normalizedDeparturePlatform = gateNormalizedString(stopRef.dPltfS?.txt) ?? gateNormalizedString(stopRef.dPltfR?.txt)
+        let normalizedArrivalPlatform = gateNormalizedString(stopRef.aPltfS?.txt) ?? gateNormalizedString(stopRef.aPltfR?.txt)
+        let realtimeDeparturePlatform = gateNormalizedString(stopRef.dPltfR?.txt)
+        let realtimeArrivalPlatform = gateNormalizedString(stopRef.aPltfR?.txt)
+        let departurePlatformDeviation: String? =
+            if let realtimeDeparturePlatform,
+               let normalizedDeparturePlatform,
+               realtimeDeparturePlatform != normalizedDeparturePlatform
+            {
+                realtimeDeparturePlatform
+            } else {
+                nil
+            }
+        let arrivalPlatformDeviation: String? =
+            if let realtimeArrivalPlatform,
+               let normalizedArrivalPlatform,
+               realtimeArrivalPlatform != normalizedArrivalPlatform
+            {
+                realtimeArrivalPlatform
+            } else {
+                nil
+            }
+
         return OebbConnectionStop(
             name: name,
             esn: gateNormalizedString(location?.extId).flatMap(Int.init) ?? fallbackEsn,
-            departure: gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeS),
-            arrival: gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeS),
-            departurePlatform: gateNormalizedString(stopRef.dPltfS?.txt),
-            arrivalPlatform: gateNormalizedString(stopRef.aPltfS?.txt)
+            departure: scheduledDeparture,
+            arrival: scheduledArrival,
+            departureRealtime: realtimeDeparture == scheduledDeparture ? nil : realtimeDeparture,
+            arrivalRealtime: realtimeArrival == scheduledArrival ? nil : realtimeArrival,
+            departureDelay: gateDelayMinutes(date: serviceDay, scheduledTime: stopRef.dTimeS, realtimeTime: stopRef.dTimeR),
+            arrivalDelay: gateDelayMinutes(date: serviceDay, scheduledTime: stopRef.aTimeS, realtimeTime: stopRef.aTimeR),
+            departurePlatform: normalizedDeparturePlatform,
+            arrivalPlatform: normalizedArrivalPlatform,
+            departurePlatformDeviation: departurePlatformDeviation,
+            arrivalPlatformDeviation: arrivalPlatformDeviation
         )
     }
 
@@ -450,46 +497,13 @@ actor OebbAPIClient {
         var refs = Set(sectionMessageRefs + connectionMessageRefs)
 
         // Some payload variants expose alert linkage via product.himIdL instead of msgL refs.
+        // Keep this fallback strict to avoid assigning a train-specific disruption to unrelated connections.
         if refs.isEmpty {
-            let himIndexById: [String: Int] = Dictionary(uniqueKeysWithValues: himByIndex.compactMap { index, him in
-                guard let hid = gateNormalizedString(him.hid) else { return nil }
-                return (hid, index)
-            })
-            let productRefs = Set((connection.secL ?? []).flatMap { section in
-                (section.jny?.prodL ?? []).compactMap(\.prodX)
-            })
-            for productRef in productRefs {
-                guard let product = productsByIndex[productRef] else { continue }
-                for productHimId in product.himIdL ?? [] {
-                    guard let normalizedId = gateNormalizedHimProductId(productHimId),
-                          let himIndex = himIndexById[normalizedId]
-                    else { continue }
-                    refs.insert(himIndex)
-                }
-            }
-        }
-
-        // Final fallback: infer relevance from alert location range overlap.
-        if refs.isEmpty {
-            let connectionLocIndices = Set((connection.secL ?? []).flatMap { section in
-                var indices: [Int] = []
-                if let depLocX = section.dep?.locX { indices.append(depLocX) }
-                if let arrLocX = section.arr?.locX { indices.append(arrLocX) }
-                indices.append(contentsOf: (section.jny?.stopL ?? []).compactMap(\.locX))
-                return indices
-            } + [connection.dep?.locX, connection.arr?.locX].compactMap { $0 })
-
-            if !connectionLocIndices.isEmpty {
-                for (index, him) in himByIndex {
-                    guard let fLoc = him.fLocX ?? him.tLocX else { continue }
-                    let tLoc = him.tLocX ?? him.fLocX ?? fLoc
-                    let lower = min(fLoc, tLoc)
-                    let upper = max(fLoc, tLoc)
-                    if connectionLocIndices.contains(where: { lower ... upper ~= $0 }) {
-                        refs.insert(index)
-                    }
-                }
-            }
+            refs = gateFallbackAlertRefs(
+                connection,
+                himByIndex: himByIndex,
+                productsByIndex: productsByIndex
+            )
         }
 
         guard !refs.isEmpty else { return nil }
@@ -535,6 +549,138 @@ actor OebbAPIClient {
             return candidate.isEmpty ? nil : candidate
         }
         return trimmed
+    }
+
+    private func gateFallbackAlertRefs(
+        _ connection: OebbGateTripConnection,
+        himByIndex: [Int: OebbGateHimMessage],
+        productsByIndex: [Int: OebbGateTripProduct]
+    ) -> Set<Int> {
+        var himIndicesById: [String: [Int]] = [:]
+        for (index, him) in himByIndex {
+            guard let hid = gateNormalizedString(him.hid) else { continue }
+            himIndicesById[hid, default: []].append(index)
+        }
+
+        let productRefs = Set((connection.secL ?? []).flatMap { section in
+            (section.jny?.prodL ?? []).compactMap(\.prodX)
+                + [section.dep?.dProdX, section.arr?.aProdX].compactMap { $0 }
+        } + [connection.dep?.dProdX, connection.arr?.aProdX].compactMap { $0 })
+        let connectionProducts = productRefs.compactMap { productsByIndex[$0] }
+        let connectionTrainTokens = Set(connectionProducts.flatMap(gateTrainTokens(for:)))
+        let connectionLocIndices = gateConnectionLocationIndices(connection)
+
+        var refs = Set<Int>()
+        for product in connectionProducts {
+            for productHimId in product.himIdL ?? [] {
+                guard let normalizedId = gateNormalizedHimProductId(productHimId),
+                      let himIndices = himIndicesById[normalizedId]
+                else { continue }
+                for himIndex in himIndices {
+                    guard let him = himByIndex[himIndex],
+                          gateFallbackAlertMatchesConnection(
+                              him,
+                              connectionTrainTokens: connectionTrainTokens,
+                              connectionLocIndices: connectionLocIndices
+                          )
+                    else { continue }
+                    refs.insert(himIndex)
+                }
+            }
+        }
+
+        return refs
+    }
+
+    private func gateConnectionLocationIndices(_ connection: OebbGateTripConnection) -> Set<Int> {
+        Set((connection.secL ?? []).flatMap { section in
+            var indices: [Int] = []
+            if let depLocX = section.dep?.locX { indices.append(depLocX) }
+            if let arrLocX = section.arr?.locX { indices.append(arrLocX) }
+            indices.append(contentsOf: (section.jny?.stopL ?? []).compactMap(\.locX))
+            return indices
+        } + [connection.dep?.locX, connection.arr?.locX].compactMap { $0 })
+    }
+
+    private func gateFallbackAlertMatchesConnection(
+        _ him: OebbGateHimMessage,
+        connectionTrainTokens: Set<String>,
+        connectionLocIndices: Set<Int>
+    ) -> Bool {
+        let alertTrainTokens = gateTrainTokens(in: "\(him.head ?? "") \(him.text ?? "")")
+        if !alertTrainTokens.isEmpty {
+            return !connectionTrainTokens.isDisjoint(with: alertTrainTokens)
+        }
+
+        if let fromLocX = him.fLocX, let toLocX = him.tLocX, fromLocX != toLocX {
+            return connectionLocIndices.contains(fromLocX) && connectionLocIndices.contains(toLocX)
+        }
+
+        if let fromLocX = him.fLocX { return connectionLocIndices.contains(fromLocX) }
+        if let toLocX = him.tLocX { return connectionLocIndices.contains(toLocX) }
+        return true
+    }
+
+    private func gateTrainTokens(for product: OebbGateTripProduct) -> [String] {
+        var tokens = Set<String>()
+        let categoryTokens = [
+            gateNormalizedString(product.prodCtx?.catOutS),
+            gateNormalizedString(product.prodCtx?.catIn),
+        ].compactMap { $0?.uppercased() }
+        let numberTokens = [
+            gateNormalizedString(product.number),
+            gateNormalizedString(product.prodCtx?.num),
+        ].compactMap { $0?.uppercased() }
+
+        for category in categoryTokens {
+            for number in numberTokens where !number.isEmpty {
+                tokens.insert("\(category)\(number)")
+            }
+        }
+
+        tokens.formUnion(gateTrainTokens(in: product.name))
+        tokens.formUnion(gateTrainTokens(in: product.nameS))
+        return Array(tokens)
+    }
+
+    private func gateTrainTokens(in value: String?) -> Set<String> {
+        guard
+            let regex = Self.gateTrainTokenRegex,
+            let value = gateNormalizedString(value)
+        else {
+            return []
+        }
+
+        let uppercased = value.uppercased()
+        let nsRange = NSRange(uppercased.startIndex..<uppercased.endIndex, in: uppercased)
+        var tokens = Set<String>()
+
+        for match in regex.matches(in: uppercased, range: nsRange) where match.numberOfRanges == 3 {
+            guard
+                let categoryRange = Range(match.range(at: 1), in: uppercased),
+                let numberRange = Range(match.range(at: 2), in: uppercased)
+            else { continue }
+            let category = String(uppercased[categoryRange])
+            let number = String(uppercased[numberRange])
+            tokens.insert("\(category)\(number)")
+        }
+
+        return tokens
+    }
+
+    private func gateDelayMinutes(date: String?, scheduledTime: String?, realtimeTime: String?) -> Int? {
+        guard
+            let scheduled = gateDateTime(date: date, time: scheduledTime),
+            let realtime = gateDateTime(date: date, time: realtimeTime)
+        else {
+            return nil
+        }
+
+        var normalizedRealtime = realtime
+        if normalizedRealtime < scheduled {
+            normalizedRealtime = normalizedRealtime.addingTimeInterval(86_400)
+        }
+        return max(0, Int(normalizedRealtime.timeIntervalSince(scheduled) / 60))
     }
 
     private func gateDurationMillis(_ rawValue: String?) -> Int? {

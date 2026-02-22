@@ -144,7 +144,7 @@ final class WidgetRefreshService {
         let departure = departureQueryDate(for: context.dayScope, now: now)
 
         do {
-            let connections = try await TransportService.shared.fetchConnectionsWithoutDetails(
+            let connections = try await TransportService.shared.fetchConnections(
                 from: context.fromStation,
                 to: context.toStation,
                 transportType: .trainCommute,

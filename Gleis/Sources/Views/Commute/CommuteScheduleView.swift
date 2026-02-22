@@ -90,7 +90,7 @@ struct CommuteScheduleView: View {
                     }
                 }
                 .accessibilityLabel("Commute options")
-            }.padding(.horizontal).padding(.top, 13).padding(.bottom, 12)
+            }.padding(.horizontal).padding(.top, 13).padding(.bottom, 6)
 
             List {
                 stationsSection
@@ -198,7 +198,7 @@ struct CommuteScheduleView: View {
     }
 
     private var stationsSection: some View {
-        Section {
+        Group {
             RouteHeader(
                 transportType: viewModel.transportType,
                 startStation: viewModel.currentFromStation,
@@ -230,8 +230,10 @@ struct CommuteScheduleView: View {
                 swapAccessibilityValue: directionLabel
             )
             .padding(.horizontal, 8)
-            .padding(.top, 8)
             .padding(.bottom, 4)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             if viewModel.hasSchedules {
                 HStack(spacing: 8) {
@@ -248,8 +250,11 @@ struct CommuteScheduleView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-        }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+        }
     }
 
     private var scheduleSection: some View {
