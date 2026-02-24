@@ -82,11 +82,24 @@ struct TransportView: View {
 
                 // My Journey section - shown separately when pinned
                 if let pinnedJourney = settingsManager.pinnedJourney, !pinnedJourney.shouldAutoUnpin() {
+                    let travel = viewModel.config.travelTime(for: pinnedJourney.departureStation.id)
+                        ?? viewModel.config.walkingTimeMinutes
+                    let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
+                        ?? viewModel.config.bufferTimeMinutes
+                    let effectiveDeparture =
+                        if viewModel.config.usesDelayInLeaveTime, pinnedJourney.delay > 0 {
+                            pinnedJourney.departureTime.addingTimeInterval(TimeInterval(pinnedJourney.delay * 60))
+                        } else {
+                            pinnedJourney.departureTime
+                        }
+                    let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
                     MyJourneyCard(
-                        journey: pinnedJourney
-                    ) {
-                        viewModel.unpinJourney()
-                    }
+                        journey: pinnedJourney,
+                        onUnpin: {
+                            viewModel.unpinJourney()
+                        },
+                        leaveTime: pinnedLeaveTime
+                    )
                 }
 
                 connectionsSection

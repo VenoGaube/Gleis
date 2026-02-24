@@ -129,8 +129,7 @@ struct ConnectionDetailSheet: View {
                         let walkDurationMinutes = ConnectionTransferPlanner.walkingDurationMinutes(for: transition.walkingLegs)
                         TransferRow(
                             stationName: leg.to.name,
-                            transferMinutes: walkDurationMinutes
-                                ?? ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
+                            transferMinutes: ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
                             walkDurationMinutes: walkDurationMinutes,
                             nextLineNumber: transition.targetLeg.lineNumber,
                             nextLineColors: transition.targetLeg.lineColors,
@@ -579,8 +578,11 @@ struct TransferRow: View {
         return "Walk transfer at \(stationName)"
     }
     private var compactWalkingMeta: String? {
+        if let walkDurationMinutes, let transferMinutes, transferMinutes != walkDurationMinutes {
+            return "\(walkDurationMinutes) min walk · \(transferMinutes) min transfer"
+        }
         if let walkDurationMinutes { return "\(walkDurationMinutes) min walk" }
-        if let transferMinutes { return "\(transferMinutes) min walk" }
+        if let transferMinutes { return "\(transferMinutes) min transfer" }
         return nil
     }
     private var shouldShowMetaRow: Bool { platformChangeText != nil || nextDepartureTime != nil }
@@ -592,13 +594,13 @@ struct TransferRow: View {
     private var compactWalkingBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 12)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
                 Circle().stroke(Color.secondary, lineWidth: 2).frame(width: 12, height: 12).overlay(
                     Image(systemName: "figure.walk")
                         .font(.system(size: 6, weight: .semibold))
                         .foregroundStyle(Color.secondary)
                 )
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 12)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
             }.frame(width: 20)
 
             HStack(spacing: 8) {
@@ -626,7 +628,7 @@ struct TransferRow: View {
     private var fullTransferBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 12)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
 
                 ZStack {
                     Circle().stroke(indicatorColor, lineWidth: 2).frame(width: 12, height: 12)
@@ -634,7 +636,7 @@ struct TransferRow: View {
                         indicatorColor)
                 }
 
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 12)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
             }.frame(width: 20)
 
             VStack(alignment: .leading, spacing: 6) {
