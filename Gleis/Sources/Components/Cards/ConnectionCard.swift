@@ -9,6 +9,25 @@ struct ConnectionCard: View {
     let onPin: () -> Void
     let onUnpin: () -> Void
     let onTap: () -> Void
+    let showLayoutDebug: Bool
+
+    init(
+        displayConnection: DisplayConnection,
+        onSchedule: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onPin: @escaping () -> Void,
+        onUnpin: @escaping () -> Void,
+        onTap: @escaping () -> Void,
+        showLayoutDebug: Bool = false
+    ) {
+        self.displayConnection = displayConnection
+        self.onSchedule = onSchedule
+        self.onCancel = onCancel
+        self.onPin = onPin
+        self.onUnpin = onUnpin
+        self.onTap = onTap
+        self.showLayoutDebug = showLayoutDebug
+    }
 
     @Environment(\.colorScheme) var colorScheme
     @State private var isExpanded = false
@@ -82,12 +101,15 @@ struct ConnectionCard: View {
             Spacer()
             Text("GO!").font(.caption.weight(.bold)).foregroundStyle(.secondary)
             Image(systemName: "chevron.down").font(.caption).foregroundStyle(.tertiary)
-        }.padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6)
+        }.padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6).debugLayoutBox(showLayoutDebug, color: .gray)
     }
 
     private var headerSection: some View {
         HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+            LineBadge(line: connection.lineNumber, colors: connection.lineColors).debugLayoutBox(
+                showLayoutDebug,
+                color: .indigo
+            )
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(connection.departureStation.name).font(.subheadline.weight(.medium)).scalableText(
@@ -98,50 +120,129 @@ struct ConnectionCard: View {
                     Image(systemName: "arrow.right").font(.caption2)
                     Text(connection.arrivalStation.name).font(.caption).scalableText(minimumScale: 0.8)
                 }.foregroundStyle(.secondary)
-            }
+            }.debugLayoutBox(showLayoutDebug, color: .mint)
             Spacer()
-            if connection.hasServiceAlerts { ServiceAlertBadge() }
-            if connection.isDelayed { DelayBadge(minutes: connection.delay) }
-        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
+            headerStatusBadges.debugLayoutBox(showLayoutDebug, color: .pink)
+        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12).debugLayoutBox(showLayoutDebug, color: .blue)
+    }
+
+    @ViewBuilder
+    private var headerStatusBadges: some View {
+        if connection.hasServiceAlerts, connection.isDelayed {
+            VStack(alignment: .trailing, spacing: 6) {
+                ServiceAlertBadge()
+                DelayBadge(minutes: connection.delay)
+            }
+        } else if connection.hasServiceAlerts {
+            ServiceAlertBadge()
+                .frame(minHeight: 40, alignment: .center)
+        } else if connection.isDelayed {
+            DelayBadge(minutes: connection.delay)
+                .frame(minHeight: 40, alignment: .center)
+        }
     }
 
     private var timeInfoSection: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Departs").font(.caption2.weight(.medium)).foregroundStyle(.secondary).textCase(.uppercase)
-                Text(connection.departureTime, style: .time).font(.headline.weight(.semibold).monospacedDigit())
-            }
-            VStack(spacing: 4) {
-                Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-                Text("\(Int(connection.duration / 60)) min").font(.caption2).foregroundStyle(.secondary)
-                if let stops = connection.totalStopCount, stops > 0 {
-                    Text("\(stops) stops").font(.caption2).foregroundStyle(.blue)
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                VStack(spacing: 6) {
+                    Text("DEPARTS")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(connection.departureTime, style: .time)
+                        .font(.headline.weight(.semibold).monospacedDigit())
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
-                if connection.transfers > 0 {
-                    Text("\(connection.transfers)×").font(.caption2).foregroundStyle(.orange)
+                .frame(minWidth: 66, alignment: .center)
+                .layoutPriority(2)
+                .debugLayoutBox(showLayoutDebug, color: .cyan)
+                VStack(spacing: 6) {
+                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                    Text("\(Int(connection.duration / 60)) min").font(.caption2).foregroundStyle(.secondary)
+                    if let stops = connection.totalStopCount, stops > 0 {
+                        Text("\(stops) \(stops == 1 ? "stop" : "stops")")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .multilineTextAlignment(.center)
+                    }
+                    if connection.transfers == 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Direct")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.12), in: Capsule())
+                        .accessibilityLabel("Direct connection with no transfers")
+                    } else {
+                        HStack(spacing: 3) {
+                            Text("\(connection.transfers)")
+                            Image(systemName: "arrow.triangle.branch")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(connection.transfers >= 2 ? .red : .orange)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            (connection.transfers >= 2 ? Color.red : Color.orange).opacity(0.15),
+                            in: Capsule()
+                        )
+                        .accessibilityLabel(
+                            connection.transfers == 1
+                                ? "1 transfer"
+                                : "\(connection.transfers) transfers"
+                        )
+                    }
+
                 }
-            }
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("Arrives").font(.caption2.weight(.medium)).foregroundStyle(.secondary).textCase(.uppercase)
-                Text(connection.arrivalTime, style: .time).font(.headline.weight(.semibold).monospacedDigit())
-            }
-            Spacer(minLength: 0)
-            Divider().frame(height: 40).padding(.leading, 4)
+                .frame(minWidth: 64, maxWidth: .infinity)
+                .debugLayoutBox(showLayoutDebug, color: .orange)
+                VStack(spacing: 6) {
+                    Text("ARRIVES")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(connection.arrivalTime, style: .time)
+                        .font(.headline.weight(.semibold).monospacedDigit())
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .frame(minWidth: 66, alignment: .center)
+                .layoutPriority(2)
+                .debugLayoutBox(showLayoutDebug, color: .green)
+            }.frame(maxWidth: .infinity)
+            Divider().frame(height: 40).padding(2)
             VStack(spacing: 2) {
                 Text("Platform").font(.caption2).foregroundStyle(.secondary)
                 Text(connection.platform ?? "—").font(
                     connection.platform != nil ? .headline.weight(.semibold).monospacedDigit() : .caption2
                 ).foregroundStyle(connection.platform != nil ? .primary : .tertiary)
-            }.frame(width: 50)
+            }.frame(width: 58).debugLayoutBox(showLayoutDebug, color: .purple)
             Button {
                 Haptics.selection()
                 onTap()
             } label: {
                 Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
-                    .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).padding(8).contentShape(
+                    .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).contentShape(
                         Rectangle())
-            }.buttonStyle(.borderless)
-        }.padding(.horizontal, 16).padding(.vertical, 12)
+            }.buttonStyle(.borderless).debugLayoutBox(showLayoutDebug, color: .teal)
+        }.padding(.horizontal, 16).padding(.vertical, 12).debugLayoutBox(showLayoutDebug, color: .yellow)
     }
 
     private var leaveTimeSection: some View {
@@ -167,11 +268,14 @@ struct ConnectionCard: View {
                         Text("to leave").font(.system(size: 8)).foregroundStyle(.secondary)
                     }
                 }
-            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel)
+            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel).debugLayoutBox(
+                showLayoutDebug,
+                color: .orange
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text("Leave at").font(.caption).foregroundStyle(.secondary)
                 Text(leaveTime, style: .time).font(.headline.monospacedDigit()).foregroundStyle(urgencyColor)
-            }
+            }.debugLayoutBox(showLayoutDebug, color: .green)
             Spacer()
 
             // Pin button
@@ -184,7 +288,7 @@ struct ConnectionCard: View {
                         isPinned ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle()
                     )
             }.disabled(timeRemaining < 0 && !isPinned).accessibilityLabel(
-                isPinned ? "Unpin journey" : "Pin as My Journey")
+                isPinned ? "Unpin journey" : "Pin as My Journey").debugLayoutBox(showLayoutDebug, color: .red)
 
             // Reminder button
             Button {
@@ -201,7 +305,11 @@ struct ConnectionCard: View {
                 isSelected ? "Cancel reminder" : "Set reminder"
             ).accessibilityHint(
                 isSelected ? "Removes the departure notification" : "Notifies you when it's time to leave")
-        }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
+                .debugLayoutBox(showLayoutDebug, color: .blue)
+        }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08)).debugLayoutBox(
+            showLayoutDebug,
+            color: .mint
+        )
     }
 
     private var countdownAccessibilityLabel: String {
@@ -224,6 +332,20 @@ struct ConnectionCard: View {
             return "\(hours)h\(minutes)m"
         }
         return "\(minutes)m"
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func debugLayoutBox(_ enabled: Bool, color: Color) -> some View {
+        if enabled {
+            self
+                .padding(2)
+                .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.65), lineWidth: 1))
+        } else {
+            self
+        }
     }
 }
 
@@ -265,7 +387,7 @@ struct DelayBadge: View {
         HStack(spacing: 4) {
             Image(systemName: "clock.badge.exclamationmark")
             Text("+\(minutes)'")
-        }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 8).padding(.vertical, 4)
+        }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 6).padding(.vertical, 4)
             .background(Color.orange.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
     }
 }
@@ -280,7 +402,7 @@ struct ServiceAlertBadge: View {
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.red)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(Color.red.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
     }
@@ -299,4 +421,89 @@ struct PinBadge: View {
             Color.accentColor, in: Capsule()
         )
     }
+}
+
+#Preview("Connection Card") {
+    let now = Date()
+    let departure = now.addingTimeInterval(20 * 60)
+    let arrival = departure.addingTimeInterval(34 * 60)
+
+    let from = Station(
+        id: "wien-meidling",
+        name: "Wien Meidling",
+        coordinate: nil,
+        transportTypes: [.trainCommute],
+        lines: []
+    )
+    let to = Station(
+        id: "wien-hbf",
+        name: "Wien Hbf",
+        coordinate: nil,
+        transportTypes: [.trainCommute],
+        lines: []
+    )
+
+    let leg = ConnectionLeg(
+        from: from,
+        to: to,
+        departureTime: departure,
+        arrivalTime: arrival,
+        platform: "5",
+        lineNumber: "RJX 160",
+        trainType: TrainType(id: "RJX", shortName: "RJX", displayName: "Railjet Xpress"),
+        lineColors: TrainLineColors(backgroundHex: "#D71920", foregroundHex: "#FFFFFF"),
+        isWalking: false,
+        duration: arrival.timeIntervalSince(departure),
+        finalDestination: to.name,
+        stopCount: 4
+    )
+
+    let connection = TrainConnection(
+        id: "preview-connection-card",
+        lineNumber: "RJX 160",
+        trainType: TrainType(id: "RJX", shortName: "RJX", displayName: "Railjet Xpress"),
+        lineColors: TrainLineColors(backgroundHex: "#D71920", foregroundHex: "#FFFFFF"),
+        departureTime: departure,
+        arrivalTime: arrival,
+        departureStation: from,
+        arrivalStation: to,
+        platform: "11A-B",
+        delay: 10,
+        status: .delayed,
+        transfers: 1,
+        legs: [leg],
+        serviceAlerts: [
+            ServiceAlert(
+                id: "preview-alert",
+                title: "Platform change",
+                message: "Platform changed due to operations.",
+                startsAt: nil,
+                endsAt: nil,
+                priority: 1,
+                isActive: true
+            ),
+        ]
+    )
+
+    let displayConnection = DisplayConnection(
+        connection: connection,
+        leaveTime: departure.addingTimeInterval(-9 * 60),
+        isSelected: true,
+        isPinned: false,
+        currentTime: now
+    )
+
+    ScrollView {
+        ConnectionCard(
+            displayConnection: displayConnection,
+            onSchedule: {},
+            onCancel: {},
+            onPin: {},
+            onUnpin: {},
+            onTap: {},
+            showLayoutDebug: true
+        )
+        .padding()
+    }
+    .background(Color(.systemGroupedBackground))
 }

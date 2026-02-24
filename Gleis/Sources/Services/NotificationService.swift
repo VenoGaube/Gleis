@@ -17,12 +17,13 @@ final class NotificationService: NotificationServiceProtocol {
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { throw GleisError.notificationPermissionDenied }
 
+        let preview = notificationPreview(for: connection, config: config, type: type)
         let content = UNMutableNotificationContent()
-        content.title = type == .fiveMinuteWarning ? "⏰ 5 Minutes" : "🚨 GO!"
-        content.body = notificationBody(for: connection, config: config, type: type)
+        content.title = preview.title
+        content.body = preview.body
         content.sound = config.notificationSettings.soundEnabled ? .default : nil
         content.categoryIdentifier = config.transportType.rawValue
-        content.interruptionLevel = type == .exactTime ? .timeSensitive : .active
+        content.interruptionLevel = preview.interruptionLevel
 
         let leaveTime = config.leaveTime(for: connection, fromStationId: fromStationId)
         let triggerDate = type == .fiveMinuteWarning ? leaveTime.addingTimeInterval(-5 * 60) : leaveTime
@@ -34,6 +35,17 @@ final class NotificationService: NotificationServiceProtocol {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         try await center.add(
             UNNotificationRequest(identifier: "\(connection.id)_\(type)", content: content, trigger: trigger))
+    }
+
+    func notificationPreview(
+        for connection: TrainConnection,
+        config: RouteConfiguration,
+        type: NotificationType
+    ) -> (title: String, body: String, interruptionLevel: UNNotificationInterruptionLevel) {
+        let title = type == .fiveMinuteWarning ? "⏰ 5 Minutes" : "🚨 GO!"
+        let body = notificationBody(for: connection, config: config, type: type)
+        let interruptionLevel: UNNotificationInterruptionLevel = type == .exactTime ? .timeSensitive : .active
+        return (title: title, body: body, interruptionLevel: interruptionLevel)
     }
 
     func scheduleServiceAlertNotification(

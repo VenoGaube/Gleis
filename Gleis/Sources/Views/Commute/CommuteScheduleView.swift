@@ -100,12 +100,8 @@ struct CommuteScheduleView: View {
                     endStation: viewModel.currentToStation,
                     travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
                     travelTimeToEnd: viewModel.config.travelTime(for: viewModel.currentToStation?.id),
-                    suggestedTravelTimeToStart: viewModel.currentFromStation.flatMap {
-                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
-                    },
-                    suggestedTravelTimeToEnd: viewModel.currentToStation.flatMap {
-                        viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: $0.id)
-                    },
+                    suggestedTravelTimeToStart: nil,
+                    suggestedTravelTimeToEnd: nil,
                     bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
                     bufferTimeToEnd: viewModel.config.bufferTime(for: viewModel.currentToStation?.id),
                     onSwap: {
@@ -120,7 +116,6 @@ struct CommuteScheduleView: View {
                         activeTimingSheet = .buffer(station)
                     },
                     swapIcon: directionIcon,
-                    showsAutoSelectionControl: false,
                     swapAccessibilityLabel: "Switch direction",
                     swapAccessibilityValue: directionLabel
                 )
@@ -173,8 +168,8 @@ struct CommuteScheduleView: View {
                 StationPickerSheet(
                     title: "From Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
                     favoriteStations: viewModel.favoriteStations,
-                    nearbyStations: viewModel.nearbyStationService.nearbyStations,
-                    stationDistances: viewModel.nearbyStationService.stationDistances,
+                    nearbyStations: [],
+                    stationDistances: [:],
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
@@ -187,8 +182,8 @@ struct CommuteScheduleView: View {
                 StationPickerSheet(
                     title: "To Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
                     favoriteStations: viewModel.favoriteStations,
-                    nearbyStations: viewModel.nearbyStationService.nearbyStations,
-                    stationDistances: viewModel.nearbyStationService.stationDistances,
+                    nearbyStations: [],
+                    stationDistances: [:],
                     searchHandler: { await viewModel.searchStations($0) },
                     onToggleFavorite: { viewModel.toggleFavorite($0) },
                     selection: Binding(
@@ -215,10 +210,9 @@ struct CommuteScheduleView: View {
             }.sheet(item: $activeTimingSheet) { sheet in
                 switch sheet {
                 case let .travel(station):
-                    TravelTimeSheet(
-                        station: station, currentValue: viewModel.config.travelTime(for: station.id),
-                        suggestedValue: viewModel.nearbyStationService.suggestedTravelTimeMinutes(for: station.id)
-                    ) { time in viewModel.saveTravelTime(time, for: station) }
+                    TravelTimeSheet(station: station, currentValue: viewModel.config.travelTime(for: station.id)) {
+                        time in viewModel.saveTravelTime(time, for: station)
+                    }
                 case let .buffer(station):
                     BufferTimeSheet(
                         station: station, currentValue: viewModel.config.bufferTime(for: station.id)
@@ -723,7 +717,7 @@ struct DayScheduleRow: View {
             if s.transfers > 0 {
                 HStack(spacing: 3) {
                     Text("\(s.transfers)")
-                    Image(systemName: "arrow.triangle.swap")
+                    Image(systemName: "arrow.triangle.branch")
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.orange)
@@ -1240,7 +1234,12 @@ struct TrainSelectionRow: View {
                         Text("\(stops) stops").font(.subheadline).foregroundStyle(.blue)
                     }
                     if connection.transfers > 0 {
-                        Text("\(connection.transfers)×").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
+                        HStack(spacing: 3) {
+                            Text("\(connection.transfers)")
+                            Image(systemName: "arrow.triangle.branch")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.orange)
                     }
                 }
             }
@@ -1254,5 +1253,4 @@ struct TrainSelectionRow: View {
 #Preview {
     CommuteScheduleView(transportType: .trainCommute)
         .environmentObject(SettingsManager.shared)
-        .environmentObject(LocationService.shared)
 }

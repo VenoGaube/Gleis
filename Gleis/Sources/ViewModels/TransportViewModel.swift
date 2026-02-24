@@ -1,5 +1,4 @@
 import Combine
-import CoreLocation
 import Foundation
 import WidgetKit
 
@@ -42,12 +41,10 @@ final class TransportViewModel: ObservableObject {
 
     let transportType: TransportType
     let toastManager = ToastManager()
-    let nearbyStationService: NearbyStationService
 
     private let transportService: TransportServiceProtocol
     private let notificationService: NotificationServiceProtocol
     private let settingsManager: SettingsManager
-    private let locationService: LocationService
     private let searchService: StationSearchService
     private let connectionCache = ConnectionCache.shared
     private var cancellables = Set<AnyCancellable>()
@@ -81,28 +78,18 @@ final class TransportViewModel: ObservableObject {
     init(
         transportType: TransportType, transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
-        settingsManager: SettingsManager? = nil, locationService: LocationService = LocationService.shared
+        settingsManager: SettingsManager? = nil
     ) {
         self.transportType = transportType
         self.transportService = transportService
         self.notificationService = notificationService
         self.settingsManager = settingsManager ?? SettingsManager.shared
-        self.locationService = locationService
-        nearbyStationService = NearbyStationService(
-            transportService: transportService,
-            locationService: locationService
-        )
-        searchService = StationSearchService(
-            transportService: transportService,
-            nearbyStationService: nearbyStationService
-        )
+        searchService = StationSearchService(transportService: transportService)
 
         Task {
             await loadStations()
-            await nearbyStationService.refreshIfNeeded(transportType: transportType, knownStations: stations)
         }
         observeConfigChanges()
-        observeLocationChanges()
     }
 
     private func observeConfigChanges() {
@@ -130,26 +117,12 @@ final class TransportViewModel: ObservableObject {
         }.store(in: &cancellables)
     }
 
-    private func observeLocationChanges() {
-        locationService.$currentLocation.dropFirst().debounce(for: .seconds(1), scheduler: RunLoop.main).sink {
-            [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.nearbyStationService.refreshIfNeeded(
-                    transportType: self.transportType,
-                    knownStations: self.stations
-                )
-            }
-        }.store(in: &cancellables)
-    }
-
     func loadStations() async {
         guard !isLoadingStations else { return }
         isLoadingStations = true
         defer { isLoadingStations = false }
         do {
             stations = try await transportService.fetchStations(for: transportType)
-            nearbyStationService.updateDistances(for: stations)
         } catch {
             if !(error is CancellationError) { handleError(error) }
         }

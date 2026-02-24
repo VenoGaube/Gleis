@@ -4,7 +4,6 @@ struct ContentView: View {
     @Binding var selectedTab: Int
     @Binding var deepLinkConnectionId: String?
     @StateObject private var settingsManager = SettingsManager.shared
-    @StateObject private var locationService = LocationService.shared
     @StateObject private var commuteViewModel = CommuteScheduleViewModel(transportType: .trainCommute)
     @State private var showOnboarding = false
     @State private var didPrewarmRepeatTab = false
@@ -54,25 +53,29 @@ struct ContentView: View {
                     }
                 }
             }
-        }.ignoresSafeArea(edges: [.top, .bottom]).tint(.trainBlue).environmentObject(settingsManager).environmentObject(
-            locationService
-        ).task(priority: .utility) {
+        }
+        .ignoresSafeArea(edges: [.top, .bottom])
+        .tint(.trainBlue)
+        .environmentObject(settingsManager)
+        .task(priority: .utility) {
             guard !didPrewarmRepeatTab else { return }
             didPrewarmRepeatTab = true
             commuteViewModel.onAppear()
-            await commuteViewModel.loadStationsIfNeeded(refreshNearbyAfterLoad: false)
+            await commuteViewModel.loadStationsIfNeeded()
         }.onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }.onChange(
             of: deepLinkConnectionId
         ) { _, newValue in
             if newValue != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { deepLinkConnectionId = nil } }
         }.fullScreenCover(isPresented: $showOnboarding) {
-            OnboardingView(isPresented: $showOnboarding).onDisappear {
-                var settings = settingsManager.appSettings
-                settings.hasCompletedOnboarding = true
-                settingsManager.updateAppSettings(settings)
-            }
+            OnboardingView(isPresented: $showOnboarding)
+                .environmentObject(settingsManager)
+                .onDisappear {
+                    var settings = settingsManager.appSettings
+                    settings.hasCompletedOnboarding = true
+                    settingsManager.updateAppSettings(settings)
+                }
         }
     }
 }
 
-#Preview { ContentView().environmentObject(SettingsManager.shared).environmentObject(LocationService.shared) }
+#Preview { ContentView().environmentObject(SettingsManager.shared) }

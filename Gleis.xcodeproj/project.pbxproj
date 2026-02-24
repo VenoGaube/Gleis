@@ -13,7 +13,6 @@
 		B004 /* TransportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004; };
 		B005 /* ServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005; };
 		B006 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006; };
-		B007 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007; };
 		B008 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008; };
 		B009 /* TransportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009; };
 		B046 /* CameraService2.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046; };
@@ -44,7 +43,6 @@
 		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035; };
 		B039 /* DisplayConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039; };
 		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041; };
-		B042 /* NearbyStationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F042; };
 		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043; };
 		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044; };
 		W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01; };
@@ -86,7 +84,6 @@
 		F004 /* TransportViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportViewModel.swift; sourceTree = "<group>"; };
 		F005 /* ServiceProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceProtocols.swift; sourceTree = "<group>"; };
 		F006 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
-		F007 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		F008 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		F009 /* TransportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportService.swift; sourceTree = "<group>"; };
 		F046 /* CameraService2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
@@ -117,7 +114,6 @@
 		F035 /* MyJourneyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyJourneyCard.swift; sourceTree = "<group>"; };
 		F039 /* DisplayConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConnection.swift; sourceTree = "<group>"; };
 		F041 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
-		F042 /* NearbyStationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyStationService.swift; sourceTree = "<group>"; };
 		F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
 		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
 		F100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -281,12 +277,10 @@
 				G017 /* API */,
 				G018 /* Mappers */,
 				F006 /* StorageService.swift */,
-				F007 /* LocationService.swift */,
 				F008 /* NotificationService.swift */,
 				F009 /* TransportService.swift */,
 				F046 /* CameraService2.swift */,
 				F033 /* WidgetRefreshService.swift */,
-				F042 /* NearbyStationService.swift */,
 				F043 /* StationSearchService.swift */,
 			);
 			path = Services;
@@ -495,7 +489,6 @@
 				B004,
 				B005,
 				B006,
-				B007,
 				B008,
 				B009,
 				B046,
@@ -526,7 +519,6 @@
 				B035,
 				B039,
 				B041,
-				B042,
 				B043,
 				B044,
 			);

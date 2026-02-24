@@ -674,16 +674,6 @@ struct OebbGateTripRGBColor: Decodable {
     let b: Int?
 }
 
-struct OebbNearbyLocation {
-    let id: String
-    let name: String
-    let latitude: Int?
-    let longitude: Int?
-    let distanceMeters: Int?
-    let durationSeconds: Int?
-    let countryCode: String?
-}
-
 // MARK: - OebbDecoding
 
 enum OebbDecoding {

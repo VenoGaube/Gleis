@@ -7,7 +7,6 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var transportType: TransportType
     var startStation: Station?
     var endStation: Station?
-    var isStartStationManuallySelected: Bool
     var walkingTimeMinutes: Int
     var bufferTimeMinutes: Int
     var useDelayInLeaveTime: Bool?
@@ -24,7 +23,6 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     init(transportType: TransportType) {
         id = UUID()
         self.transportType = transportType
-        isStartStationManuallySelected = false
         walkingTimeMinutes = 0
         bufferTimeMinutes = 0
         useDelayInLeaveTime = false

@@ -1,51 +1,5 @@
 import SwiftUI
 
-// MARK: - StationPickerAutoSelectionOptions
-
-struct StationPickerAutoSelectionOptions {
-    let preferredStationIds: Set<String>
-    let excludedStationIds: Set<String>
-    let onSetPreferred: ((Station) -> Void)?
-    let onToggleExcluded: ((Station) -> Void)?
-
-    static let disabled = StationPickerAutoSelectionOptions()
-
-    init(
-        preferredStationIds: Set<String> = [],
-        excludedStationIds: Set<String> = [],
-        onSetPreferred: ((Station) -> Void)? = nil,
-        onToggleExcluded: ((Station) -> Void)? = nil
-    ) {
-        self.preferredStationIds = preferredStationIds
-        self.excludedStationIds = excludedStationIds
-        self.onSetPreferred = onSetPreferred
-        self.onToggleExcluded = onToggleExcluded
-    }
-}
-
-// MARK: - StationRowAutoSelectionActions
-
-struct StationRowAutoSelectionActions {
-    let isPreferred: Bool
-    let isExcluded: Bool
-    let onSetPreferred: (() -> Void)?
-    let onToggleExcluded: (() -> Void)?
-
-    static let disabled = StationRowAutoSelectionActions()
-
-    init(
-        isPreferred: Bool = false,
-        isExcluded: Bool = false,
-        onSetPreferred: (() -> Void)? = nil,
-        onToggleExcluded: (() -> Void)? = nil
-    ) {
-        self.isPreferred = isPreferred
-        self.isExcluded = isExcluded
-        self.onSetPreferred = onSetPreferred
-        self.onToggleExcluded = onToggleExcluded
-    }
-}
-
 // MARK: - StationPickerSheet
 
 struct StationPickerSheet: View {
@@ -55,7 +9,6 @@ struct StationPickerSheet: View {
     let favoriteStations: [Station]
     let nearbyStations: [Station]
     let stationDistances: [String: Double]
-    let autoSelection: StationPickerAutoSelectionOptions
     let searchHandler: (String) async -> [Station]
     let onToggleFavorite: (Station) -> Void
     @Binding var selection: Station?
@@ -63,7 +16,6 @@ struct StationPickerSheet: View {
     init(
         title: String, stations: [Station], recentStations: [Station], favoriteStations: [Station],
         nearbyStations: [Station], stationDistances: [String: Double] = [:],
-        autoSelection: StationPickerAutoSelectionOptions = .disabled,
         searchHandler: @escaping (String) async -> [Station], onToggleFavorite: @escaping (Station) -> Void,
         selection: Binding<Station?>
     ) {
@@ -73,7 +25,6 @@ struct StationPickerSheet: View {
         self.favoriteStations = favoriteStations
         self.nearbyStations = nearbyStations
         self.stationDistances = stationDistances
-        self.autoSelection = autoSelection
         self.searchHandler = searchHandler
         self.onToggleFavorite = onToggleFavorite
         _selection = selection
@@ -141,13 +92,7 @@ struct StationPickerSheet: View {
                 selection = station
                 dismiss()
             },
-            onFavorite: { onToggleFavorite(station) },
-            autoSelectionActions: StationRowAutoSelectionActions(
-                isPreferred: autoSelection.preferredStationIds.contains(station.id),
-                isExcluded: autoSelection.excludedStationIds.contains(station.id),
-                onSetPreferred: { autoSelection.onSetPreferred?(station) },
-                onToggleExcluded: { autoSelection.onToggleExcluded?(station) }
-            )
+            onFavorite: { onToggleFavorite(station) }
         )
     }
 
@@ -184,7 +129,6 @@ struct StationRow: View {
     let distance: Double?
     let onTap: () -> Void
     let onFavorite: (() -> Void)?
-    let autoSelectionActions: StationRowAutoSelectionActions
 
     init(
         station: Station,
@@ -192,8 +136,7 @@ struct StationRow: View {
         isFavorite: Bool,
         distance: Double? = nil,
         onTap: @escaping () -> Void,
-        onFavorite: (() -> Void)? = nil,
-        autoSelectionActions: StationRowAutoSelectionActions = .disabled
+        onFavorite: (() -> Void)? = nil
     ) {
         self.station = station
         self.isSelected = isSelected
@@ -201,28 +144,11 @@ struct StationRow: View {
         self.distance = distance
         self.onTap = onTap
         self.onFavorite = onFavorite
-        self.autoSelectionActions = autoSelectionActions
     }
 
     private var distanceText: String? {
         guard let distance else { return nil }
         if distance < 1000 { return "\(Int(distance))m" } else { return String(format: "%.1fkm", distance / 1000) }
-    }
-
-    private var hasAutoSelectionActions: Bool {
-        autoSelectionActions.onSetPreferred != nil || autoSelectionActions.onToggleExcluded != nil
-    }
-
-    private var autoActionIcon: String {
-        if autoSelectionActions.isPreferred { return "location.fill" }
-        if autoSelectionActions.isExcluded { return "location.slash.fill" }
-        return "ellipsis.circle"
-    }
-
-    private var autoActionColor: Color {
-        if autoSelectionActions.isPreferred { return .green }
-        if autoSelectionActions.isExcluded { return .orange }
-        return .secondary
     }
 
     var body: some View {
@@ -235,18 +161,6 @@ struct StationRow: View {
                             Text(distanceText).font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(
                                 .vertical, 2
                             ).background(Color.secondary.opacity(0.1), in: Capsule())
-                        }
-                        if autoSelectionActions.isPreferred {
-                            Image(systemName: "location.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                                .accessibilityLabel("Preferred for auto-select")
-                        }
-                        if autoSelectionActions.isExcluded {
-                            Image(systemName: "location.slash.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                                .accessibilityLabel("Excluded from auto-select")
                         }
                     }
                     if !station.lines.isEmpty {
@@ -271,31 +185,6 @@ struct StationRow: View {
                     Image(systemName: isFavorite ? "star.fill" : "star").foregroundStyle(
                         isFavorite ? .yellow : .secondary)
                 }.buttonStyle(.plain).accessibilityLabel(isFavorite ? "Remove from favorites" : "Add to favorites")
-            }
-            if hasAutoSelectionActions {
-                Menu {
-                    if let onSetPreferred = autoSelectionActions.onSetPreferred {
-                        Button {
-                            onSetPreferred()
-                        } label: {
-                            Label("Prefer For Auto-Select Here", systemImage: "location.fill")
-                        }
-                    }
-                    if let onToggleExcluded = autoSelectionActions.onToggleExcluded {
-                        Button {
-                            onToggleExcluded()
-                        } label: {
-                            Label(
-                                autoSelectionActions.isExcluded ? "Allow Auto-Select" : "Never Auto-Select",
-                                systemImage: autoSelectionActions.isExcluded ? "location" : "location.slash"
-                            )
-                        }
-                    }
-                } label: {
-                    Image(systemName: autoActionIcon).foregroundStyle(autoActionColor)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Auto-select options")
             }
             if isSelected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
         }.accessibilityLabel("\(station.name)\(isSelected ? ", selected" : "")")

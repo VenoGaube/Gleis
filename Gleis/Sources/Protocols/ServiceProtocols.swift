@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 
 // MARK: - FetchLimits
@@ -6,7 +5,6 @@ import Foundation
 enum FetchLimits {
     static let connectionBatchSize = 6
     static let stationSearchCount = 25
-    static let nearbyStationSearchCount = 15
     static let stationResolveCandidateCount = 5
     static let widgetRefreshConnectionCount = 5
     static let commuteSuggestionConnectionCount = 5
@@ -27,22 +25,6 @@ protocol TransportServiceProtocol: Sendable {
     ) async throws -> [TrainConnection]
     func fetchStations(for transportType: TransportType) async throws -> [Station]
     func searchStations(matching query: String, transportType: TransportType) async throws -> [Station]
-    func searchStationsNearby(
-        latitude: Double, longitude: Double, transportType: TransportType
-    ) async throws -> [Station]
-}
-
-// MARK: - LocationServiceProtocol
-
-protocol LocationServiceProtocol {
-    var currentLocation: CLLocation? { get }
-    var authorizationStatus: CLAuthorizationStatus { get }
-    func requestAuthorization()
-    func startUpdatingLocation()
-    func stopUpdatingLocation()
-    func findNearestStation(from stations: [Station]) -> Station?
-    func distance(to station: Station) -> CLLocationDistance?
-    func calculateDistances(to stations: [Station]) -> [(station: Station, distance: CLLocationDistance)]
 }
 
 // MARK: - NotificationServiceProtocol
@@ -87,7 +69,6 @@ enum GleisError: LocalizedError {
     case stationNotFound
     case noConnectionsAvailable
     case noRouteConfigured
-    case locationNotAvailable
     case notificationPermissionDenied
     case storageError(String)
     case unknown(String)
@@ -107,7 +88,6 @@ enum GleisError: LocalizedError {
         case .stationNotFound: "Station not found"
         case .noConnectionsAvailable: "No connections available"
         case .noRouteConfigured: "No route configured"
-        case .locationNotAvailable: "Location unavailable"
         case .notificationPermissionDenied: "Notifications disabled"
         case let .storageError(msg): "Storage error: \(msg)"
         case let .unknown(msg): msg
@@ -129,8 +109,6 @@ enum GleisError: LocalizedError {
             return "No Connections Available"
         case .noRouteConfigured:
             return "Route Not Configured"
-        case .locationNotAvailable:
-            return "Location Unavailable"
         case .notificationPermissionDenied:
             return "Notifications Disabled"
         case .storageError:
@@ -161,8 +139,6 @@ enum GleisError: LocalizedError {
             return "No departures are available for this route right now."
         case .noRouteConfigured:
             return "Select both start and destination stations to load departures."
-        case .locationNotAvailable:
-            return "Location access is unavailable. Enable location permissions in Settings."
         case .notificationPermissionDenied:
             return "Enable notifications in Settings to receive journey alerts."
         case .storageError:
@@ -188,7 +164,6 @@ enum GleisError: LocalizedError {
         case .networkError: "Check your internet connection"
         case .apiError: "The server may be temporarily unavailable"
         case .noRouteConfigured: "Select start and end stations"
-        case .locationNotAvailable: "Enable location in Settings"
         case .notificationPermissionDenied: "Enable in device Settings"
         default: "Try again later"
         }

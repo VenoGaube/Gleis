@@ -197,43 +197,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func searchStationsNearby(
-        latitude: Double, longitude: Double, transportType: TransportType
-    ) async throws -> [Station] {
-        do {
-            let nearby = try await apiClient.searchStationsNearbyWithDistance(
-                latitude: latitude, longitude: longitude, count: FetchLimits.nearbyStationSearchCount
-            )
-            let mapped = nearby.map { location in
-                let coordinate: Station.Coordinate? =
-                    if let lat = location.latitude, let lon = location.longitude, lat != 0, lon != 0 {
-                        Station.Coordinate(latitude: Double(lat) / 1_000_000, longitude: Double(lon) / 1_000_000)
-                    } else {
-                        nil
-                    }
-
-                return Station(
-                    id: location.id, name: location.name, coordinate: coordinate, transportTypes: [transportType],
-                    lines: [], countryCode: location.countryCode,
-                    nearbyDistanceMeters: location.distanceMeters.map(Double.init),
-                    nearbyDurationSeconds: location.durationSeconds.map(Double.init)
-                )
-            }
-            if !mapped.isEmpty { return mapped }
-
-            return try await apiClient.searchStationsNearby(
-                latitude: latitude,
-                longitude: longitude,
-                count: FetchLimits.nearbyStationSearchCount
-            ).map {
-                ConnectionMapper.mapStation($0, transportType: transportType)
-            }
-        } catch {
-            if isCancellation(error) { throw CancellationError() }
-            throw mapError(error)
-        }
-    }
-
     // MARK: - Private
 
     private struct ResolvedStation {

@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 
 // MARK: - StorageKey
@@ -147,22 +146,6 @@ final class SettingsManager: ObservableObject {
         var cfg = config(for: transportType)
         cfg.addRecentStation(station)
         updateConfig(cfg)
-    }
-
-    func setPreferredAutoSelectionStation(_ station: Station, at location: CLLocation) {
-        var settings = appSettings
-        settings.setPreferredAutoStation(stationId: station.id, stationName: station.name, location: location)
-        settings.setAutoSelectionExcluded(station.id, excluded: false)
-        updateAppSettings(settings)
-    }
-
-    @discardableResult
-    func toggleAutoSelectionExclusion(for station: Station) -> Bool {
-        let wasExcluded = appSettings.autoSelectionPreferences.excludedStationIds.contains(station.id)
-        var settings = appSettings
-        settings.setAutoSelectionExcluded(station.id, excluded: !wasExcluded)
-        updateAppSettings(settings)
-        return !wasExcluded
     }
 
     func updateSavedCommuteRoute(_ route: SavedCommuteRoute) {

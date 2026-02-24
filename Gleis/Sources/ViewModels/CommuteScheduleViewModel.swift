@@ -1,5 +1,3 @@
-import Combine
-import CoreLocation
 import Foundation
 
 @MainActor
@@ -11,7 +9,6 @@ final class CommuteScheduleViewModel: ObservableObject {
     @Published var selectedDirection: CommuteDirection = .toWork
 
     let toastManager = ToastManager()
-    let nearbyStationService: NearbyStationService
 
     // MARK: - Dependencies
 
@@ -19,12 +16,9 @@ final class CommuteScheduleViewModel: ObservableObject {
     private let transportService: TransportServiceProtocol
     private let notificationService: NotificationServiceProtocol
     private let settingsManager: SettingsManager
-    private let locationService: LocationService
     private let searchService: StationSearchService
-    private var cancellables = Set<AnyCancellable>()
     private var hasLoadedStations = false
     private var isLoadingStations = false
-    private var isObservingLocationChanges = false
 
     // MARK: - Computed
 
@@ -41,45 +35,21 @@ final class CommuteScheduleViewModel: ObservableObject {
         transportType: TransportType = .trainCommute,
         transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
-        settingsManager: SettingsManager? = nil,
-        locationService: LocationService = LocationService.shared
+        settingsManager: SettingsManager? = nil
     ) {
         self.transportType = transportType
         self.transportService = transportService
         self.notificationService = notificationService
         self.settingsManager = settingsManager ?? SettingsManager.shared
-        self.locationService = locationService
-        nearbyStationService = NearbyStationService(
-            transportService: transportService,
-            locationService: locationService
-        )
-        searchService = StationSearchService(
-            transportService: transportService,
-            nearbyStationService: nearbyStationService
-        )
+        searchService = StationSearchService(transportService: transportService)
     }
 
     // MARK: - Lifecycle
 
     func onAppear() { route = settingsManager.savedCommuteRoute }
 
-    func loadStationsIfNeeded(refreshNearbyAfterLoad: Bool = true) async {
-        if refreshNearbyAfterLoad {
-            locationService.startUpdatingLocation()
-            observeLocationChanges()
-            nearbyStationService.updateDistances(for: routeContextStations())
-        }
-
-        if hasLoadedStations {
-            guard refreshNearbyAfterLoad else { return }
-            let knownStations = nearbyContextStations(includeLoadedStations: true)
-            nearbyStationService.updateDistances(for: knownStations)
-            await nearbyStationService.refreshIfNeeded(
-                transportType: transportType,
-                knownStations: knownStations
-            )
-            return
-        }
+    func loadStationsIfNeeded() async {
+        if hasLoadedStations { return }
 
         guard !isLoadingStations else { return }
         isLoadingStations = true
@@ -91,14 +61,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         } catch {
             return
         }
-
-        guard refreshNearbyAfterLoad else { return }
-        let knownStations = nearbyContextStations(includeLoadedStations: true)
-        nearbyStationService.updateDistances(for: knownStations)
-        await nearbyStationService.refreshIfNeeded(
-            transportType: transportType,
-            knownStations: knownStations
-        )
     }
 
     // MARK: - Station Search
@@ -350,41 +312,4 @@ final class CommuteScheduleViewModel: ObservableObject {
             .replacingOccurrences(of: " ", with: "")
     }
 
-    private func observeLocationChanges() {
-        guard !isObservingLocationChanges else { return }
-        isObservingLocationChanges = true
-
-        locationService.$currentLocation
-            .dropFirst()
-            .debounce(for: .seconds(1), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                Task {
-                    await self.nearbyStationService.refreshIfNeeded(
-                        transportType: self.transportType,
-                        knownStations: self.stations
-                    )
-                }
-            }
-            .store(in: &cancellables)
-    }
-
-    private func routeContextStations() -> [Station] {
-        var routeStations: [Station] = []
-        if let home = route.homeStation { routeStations.append(home) }
-        if let work = route.workStation, routeStations.contains(where: { $0.id == work.id }) == false {
-            routeStations.append(work)
-        }
-        return routeStations
-    }
-
-    private func nearbyContextStations(includeLoadedStations: Bool) -> [Station] {
-        var knownStations = routeContextStations()
-        guard includeLoadedStations else { return knownStations }
-
-        for station in stations.prefix(40) where knownStations.contains(where: { $0.id == station.id }) == false {
-            knownStations.append(station)
-        }
-        return knownStations
-    }
 }

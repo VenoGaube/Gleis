@@ -5,7 +5,6 @@ import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var settingsManager: SettingsManager
-    @EnvironmentObject private var locationService: LocationService
     @Environment(\.colorScheme) var colorScheme
     @State private var repeatScheduleToRemove: (day: Weekday, direction: CommuteDirection)?
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
@@ -18,7 +17,6 @@ struct SettingsView: View {
             }.padding(.horizontal).padding(.top, 13).padding(.bottom, 12)
 
             List {
-                locationSection
                 notificationSection
                 remindersSection
                 aboutSection
@@ -34,156 +32,6 @@ struct SettingsView: View {
     private func checkNotificationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async { notificationStatus = settings.authorizationStatus }
-        }
-    }
-
-    private var isLocationEnabled: Bool {
-        locationService.authorizationStatus == .authorizedWhenInUse
-            || locationService.authorizationStatus == .authorizedAlways
-    }
-
-    private enum LocationUsageState {
-        case active
-        case paused
-        case denied
-    }
-
-    private var locationUsageState: LocationUsageState {
-        guard isLocationEnabled else { return .denied }
-        guard settingsManager.appSettings.useLocationForStartStation, locationService.isUpdatingLocation else {
-            return .paused
-        }
-        return .active
-    }
-
-    private var locationUsageTitle: String {
-        switch locationUsageState {
-        case .active: "Active"
-        case .paused: "Paused"
-        case .denied: "Disabled"
-        }
-    }
-
-    private var locationUsageColor: Color {
-        switch locationUsageState {
-        case .active: .green
-        case .paused: .orange
-        case .denied: .red
-        }
-    }
-
-    private var locationSection: some View {
-        Section {
-            // Permission Status (opens Settings)
-            Button {
-                handleLocationToggle()
-            } label: {
-                HStack {
-                    SettingsRow(icon: "antenna.radiowaves.left.and.right", title: "Location Permission", color: .green)
-                    Spacer()
-                    Text(isLocationEnabled ? "Allowed" : "Denied").font(.caption).foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                }
-            }.buttonStyle(.plain)
-
-            HStack {
-                SettingsRow(icon: "location.fill", title: "Location Services", color: .blue)
-                Spacer()
-                Circle().fill(locationUsageColor).frame(width: 8, height: 8)
-                Text(locationUsageTitle).font(.caption).foregroundStyle(.secondary)
-            }
-
-            // Feature Toggles (only show if permission granted)
-            if isLocationEnabled {
-                Toggle(
-                    isOn: Binding(
-                        get: { settingsManager.appSettings.useLocationForStartStation },
-                        set: { newValue in
-                            var settings = settingsManager.appSettings
-                            settings.useLocationForStartStation = newValue
-                            settingsManager.updateAppSettings(settings)
-                            if newValue {
-                                locationService.startUpdatingLocation()
-                            } else {
-                                locationService.stopUpdatingLocation()
-                            }
-                        }
-                    )
-                ) { SettingsRow(icon: "mappin.and.ellipse", title: "Auto-Select Nearest Station", color: .blue) }
-
-                if settingsManager.appSettings.useLocationForStartStation {
-                    Toggle(
-                        isOn: Binding(
-                            get: { settingsManager.appSettings.useSmartStationSwap },
-                            set: { newValue in
-                                var settings = settingsManager.appSettings
-                                settings.useSmartStationSwap = newValue
-                                settingsManager.updateAppSettings(settings)
-                            }
-                        )
-                    ) {
-                        SettingsRow(icon: "arrow.left.arrow.right.circle", title: "Smart Station Swap", color: .purple)
-                    }
-
-                    // Show button to clear manual override if user has manually selected a station
-                    if settingsManager.trainCommuteConfig.isStartStationManuallySelected {
-                        Button {
-                            var config = settingsManager.trainCommuteConfig
-                            config.isStartStationManuallySelected = false
-                            settingsManager.updateConfig(config)
-                        } label: {
-                            SettingsRow(
-                                icon: "arrow.counterclockwise", title: "Resume Auto-Selection", color: .orange
-                            )
-                        }.buttonStyle(.plain)
-                    }
-                }
-            } else {
-                Button {
-                    handleLocationToggle()
-                } label: {
-                    SettingsRow(icon: "location.circle", title: "Turn On Location Services", color: .blue)
-                }.buttonStyle(.plain)
-            }
-
-            if isLocationEnabled, !settingsManager.appSettings.useLocationForStartStation {
-                Button {
-                    var settings = settingsManager.appSettings
-                    settings.useLocationForStartStation = true
-                    settingsManager.updateAppSettings(settings)
-                    locationService.startUpdatingLocation()
-                } label: {
-                    SettingsRow(icon: "location.circle.fill", title: "Turn Location Back On", color: .green)
-                }.buttonStyle(.plain)
-            }
-        } header: {
-            Text("Location")
-        } footer: {
-            if locationUsageState == .active {
-                Text("Location services are active. Nearby stations and travel-time suggestions are updating.")
-            } else if locationUsageState == .paused {
-                Text("Location permission is granted, but active location features are paused.")
-            } else if !isLocationEnabled {
-                Text("Enable location permission to auto-detect your nearest station. Tap to open Settings.")
-            } else if !settingsManager.appSettings.useLocationForStartStation {
-                Text("Location permission is granted but auto-selection is disabled.")
-            } else if settingsManager.trainCommuteConfig.isStartStationManuallySelected {
-                Text("You manually selected a station. Tap 'Resume Auto-Selection' to use nearest station again.")
-            } else if !settingsManager.appSettings.useSmartStationSwap {
-                Text(
-                    "Auto-selection is active. Smart swap ensures the nearest station is always your starting point when swapping routes."
-                )
-            } else {
-                Text("Auto-selection and smart swap are active.")
-            }
-        }
-    }
-
-    private func handleLocationToggle() {
-        if locationService.authorizationStatus == .notDetermined {
-            locationService.requestAuthorization()
-        } else if let url = URL(string: UIApplication.openSettingsURLString) {
-            UIApplication.shared.open(url)
         }
     }
 
@@ -357,4 +205,4 @@ struct SettingsRow: View {
     }
 }
 
-#Preview { SettingsView().environmentObject(SettingsManager.shared).environmentObject(LocationService.shared) }
+#Preview { SettingsView().environmentObject(SettingsManager.shared) }

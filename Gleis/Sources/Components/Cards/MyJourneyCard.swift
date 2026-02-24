@@ -5,6 +5,13 @@ import SwiftUI
 struct MyJourneyCard: View {
     let journey: PinnedJourney
     let onUnpin: () -> Void
+    let showLayoutDebug: Bool
+
+    init(journey: PinnedJourney, onUnpin: @escaping () -> Void, showLayoutDebug: Bool = false) {
+        self.journey = journey
+        self.onUnpin = onUnpin
+        self.showLayoutDebug = showLayoutDebug
+    }
 
     @Environment(\.colorScheme) var colorScheme
     @State private var isExpanded = true
@@ -42,36 +49,65 @@ struct MyJourneyCard: View {
     private var headerSection: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                LineBadge(line: journey.lineNumber, colors: journey.lineColors)
+                LineBadge(line: journey.lineNumber, colors: journey.lineColors).debugJourneyLayoutBox(
+                    showLayoutDebug,
+                    color: .indigo
+                )
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text("MY JOURNEY").font(.caption.weight(.bold)).foregroundStyle(.white).padding(.horizontal, 8)
-                            .padding(.vertical, 4).background(Color.accentColor, in: Capsule())
+                        Text("MY JOURNEY")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor, in: Capsule())
 
-                        Text(statusText).font(.caption2.weight(.medium)).foregroundStyle(statusColor)
+                        Text(statusText)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(statusColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: true, vertical: false)
 
                         if journey.transfers > 0 {
-                            Text("\(journey.transfers)×").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                            HStack(spacing: 3) {
+                                Text("\(journey.transfers)")
+                                Image(systemName: "arrow.triangle.branch")
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .accessibilityLabel(
+                                journey.transfers == 1
+                                    ? "1 transfer"
+                                    : "\(journey.transfers) transfers"
+                            )
                         }
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .leading).debugJourneyLayoutBox(showLayoutDebug, color: .mint)
 
                     Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)").font(
                         .subheadline.weight(.medium)
-                    ).scalableText(minimumScale: 0.8)
-                }
+                    ).scalableText(minimumScale: 0.8).debugJourneyLayoutBox(showLayoutDebug, color: .cyan)
+                }.layoutPriority(1).debugJourneyLayoutBox(showLayoutDebug, color: .blue)
 
                 Spacer()
 
-                if journey.delay > 0 { DelayBadge(minutes: journey.delay) }
+                if journey.delay > 0 {
+                    DelayBadge(minutes: journey.delay).debugJourneyLayoutBox(showLayoutDebug, color: .orange)
+                }
 
                 Button {
                     Haptics.impact(.light)
                     onUnpin()
                 } label: {
                     Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
-                }
-            }
+                }.debugJourneyLayoutBox(showLayoutDebug, color: .pink)
+            }.debugJourneyLayoutBox(showLayoutDebug, color: .green)
 
             // Progress bar for in-progress journeys
             if journey.isInProgress {
@@ -90,7 +126,7 @@ struct MyJourneyCard: View {
                         Text("Arriving \(journey.arrivalTime, style: .time)").font(.caption2.weight(.medium))
                             .foregroundStyle(.primary)
                     }
-                }
+                }.debugJourneyLayoutBox(showLayoutDebug, color: .yellow)
             } else if !journey.hasDeparted {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -104,7 +140,7 @@ struct MyJourneyCard: View {
                             Text(platform).font(.headline.monospacedDigit())
                         }
                     }
-                }
+                }.debugJourneyLayoutBox(showLayoutDebug, color: .yellow)
             }
 
             // Expand/collapse button
@@ -115,8 +151,8 @@ struct MyJourneyCard: View {
                     Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down").font(.caption)
                 }.foregroundStyle(.secondary)
-            }
-        }.padding(16)
+            }.debugJourneyLayoutBox(showLayoutDebug, color: .teal)
+        }.padding(16).debugJourneyLayoutBox(showLayoutDebug, color: .purple)
     }
 
     private var timelineSection: some View {
@@ -170,6 +206,20 @@ struct MyJourneyCard: View {
             lineColors: journey.lineColors, isWalking: false,
             duration: journey.arrivalTime.timeIntervalSince(journey.departureTime)
         )
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func debugJourneyLayoutBox(_ enabled: Bool, color: Color) -> some View {
+        if enabled {
+            self
+                .padding(2)
+                .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.65), lineWidth: 1))
+        } else {
+            self
+        }
     }
 }
 
@@ -524,4 +574,58 @@ private struct JourneyStopRow: View {
             )
         ) {}.padding()
     }.background(Color(.systemGroupedBackground))
+}
+
+#Preview("My Journey Header Compact") {
+    ScrollView {
+        MyJourneyCard(
+            journey: PinnedJourney(
+                connectionId: "compact-header",
+                lineNumber: "RJX 134",
+                departureTime: Date().addingTimeInterval(4 * 60),
+                arrivalTime: Date().addingTimeInterval(2 * 60 * 60 + 41 * 60),
+                departureStation: Station(
+                    id: "graz",
+                    name: "Graz",
+                    coordinate: nil,
+                    transportTypes: [.trainCommute],
+                    lines: []
+                ),
+                arrivalStation: Station(
+                    id: "stadlau",
+                    name: "Stadlau (Wien)",
+                    coordinate: nil,
+                    transportTypes: [.trainCommute],
+                    lines: []
+                ),
+                platform: "3",
+                delay: 1,
+                pinnedAt: Date(),
+                legs: [
+                    ConnectionLeg(
+                        from: Station(id: "graz", name: "Graz", coordinate: nil, transportTypes: [.trainCommute], lines: []),
+                        to: Station(
+                            id: "stadlau",
+                            name: "Stadlau (Wien)",
+                            coordinate: nil,
+                            transportTypes: [.trainCommute],
+                            lines: []
+                        ),
+                        departureTime: Date().addingTimeInterval(4 * 60),
+                        arrivalTime: Date().addingTimeInterval(2 * 60 * 60 + 41 * 60),
+                        platform: "3",
+                        lineNumber: "RJX 134",
+                        isWalking: false,
+                        duration: 2 * 60 * 60 + 37 * 60
+                    ),
+                ],
+                transfers: 1
+            ),
+            onUnpin: {},
+            showLayoutDebug: true
+        )
+        .padding()
+    }
+    .background(Color(.systemGroupedBackground))
+    .frame(width: 380)
 }

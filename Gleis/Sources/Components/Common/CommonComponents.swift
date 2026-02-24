@@ -467,9 +467,6 @@ struct RouteHeader: View {
     let bufferTimeToStart: Int?
     let bufferTimeToEnd: Int?
     let onSwap: () -> Void
-    let isAutoSelectionEnabled: Bool
-    let autoSelectionStatusMessage: String?
-    let onToggleAutoSelection: () -> Void
     let onStartTap: () -> Void
     let onEndTap: () -> Void
     let onSetTravelTime: (Station) -> Void
@@ -477,7 +474,7 @@ struct RouteHeader: View {
     let swapIcon: String
     let swapRotationStep: Double
     let swapAnimation: Animation
-    let showsAutoSelectionControl: Bool
+    let showsTimingControls: Bool
     let swapAccessibilityLabel: String
     let swapAccessibilityValue: String?
     @Environment(\.colorScheme) var colorScheme
@@ -495,9 +492,6 @@ struct RouteHeader: View {
         bufferTimeToStart: Int?,
         bufferTimeToEnd: Int?,
         onSwap: @escaping () -> Void,
-        isAutoSelectionEnabled: Bool = false,
-        autoSelectionStatusMessage: String? = nil,
-        onToggleAutoSelection: @escaping () -> Void = {},
         onStartTap: @escaping () -> Void,
         onEndTap: @escaping () -> Void,
         onSetTravelTime: @escaping (Station) -> Void,
@@ -505,7 +499,7 @@ struct RouteHeader: View {
         swapIcon: String = "arrow.left.arrow.right",
         swapRotationStep: Double = 180,
         swapAnimation: Animation = .spring(response: 0.3),
-        showsAutoSelectionControl: Bool = true,
+        showsTimingControls: Bool = true,
         swapAccessibilityLabel: String = "Swap stations",
         swapAccessibilityValue: String? = nil
     ) {
@@ -519,9 +513,6 @@ struct RouteHeader: View {
         self.bufferTimeToStart = bufferTimeToStart
         self.bufferTimeToEnd = bufferTimeToEnd
         self.onSwap = onSwap
-        self.isAutoSelectionEnabled = isAutoSelectionEnabled
-        self.autoSelectionStatusMessage = autoSelectionStatusMessage
-        self.onToggleAutoSelection = onToggleAutoSelection
         self.onStartTap = onStartTap
         self.onEndTap = onEndTap
         self.onSetTravelTime = onSetTravelTime
@@ -529,7 +520,7 @@ struct RouteHeader: View {
         self.swapIcon = swapIcon
         self.swapRotationStep = swapRotationStep
         self.swapAnimation = swapAnimation
-        self.showsAutoSelectionControl = showsAutoSelectionControl
+        self.showsTimingControls = showsTimingControls
         self.swapAccessibilityLabel = swapAccessibilityLabel
         self.swapAccessibilityValue = swapAccessibilityValue
     }
@@ -552,7 +543,7 @@ struct RouteHeader: View {
                 }.layoutPriority(1)
             }
             HStack(spacing: 12) {
-                if let station = startStation {
+                if showsTimingControls, let station = startStation {
                     if let time = travelTimeToStart {
                         Button {
                             onSetTravelTime(station)
@@ -575,34 +566,6 @@ struct RouteHeader: View {
                         .buttonStyle(.plain)
                     } else {
                         bufferTimeHintButton(for: station)
-                    }
-                }
-                if showsAutoSelectionControl {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Button {
-                            Haptics.selection()
-                            onToggleAutoSelection()
-                        } label: {
-                            Label(isAutoSelectionEnabled ? "Auto On" : "Auto Off", systemImage: autoIndicatorIcon)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(isAutoSelectionEnabled ? .green : .orange)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    (isAutoSelectionEnabled ? Color.green : Color.orange).opacity(
-                                        colorScheme == .dark ? 0.18 : 0.12
-                                    ),
-                                    in: Capsule()
-                                )
-                        }.buttonStyle(.plain)
-
-                        if let autoSelectionStatusMessage {
-                            Text(autoSelectionStatusMessage)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
                     }
                 }
                 Spacer()
@@ -635,10 +598,6 @@ struct RouteHeader: View {
         } else {
             button
         }
-    }
-
-    private var autoIndicatorIcon: String {
-        isAutoSelectionEnabled ? "location.fill" : "location.slash.fill"
     }
 
     private func travelTimeHintButton(for station: Station) -> some View {

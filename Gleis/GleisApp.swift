@@ -95,9 +95,6 @@ private final class AppLaunchBootstrapper: ObservableObject {
         let trainConfig = settings.trainCommuteConfig
         let savedCommuteRoute = settings.savedCommuteRoute
 
-        statusText = "Preparing location..."
-        LocationService.shared.startUpdatingLocation()
-
         statusText = "Preloading stations and routes..."
         backgroundPreloadTask = Task.detached(priority: .utility) {
             await withTaskGroup(of: Void.self) { group in

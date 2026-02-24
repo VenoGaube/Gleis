@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 
 struct Station: Identifiable, Codable, Equatable, Hashable {
@@ -8,18 +7,15 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
     let transportTypes: [TransportType]
     let lines: [String]
     let countryCode: String?
-    let nearbyDistanceMeters: Double?
-    let nearbyDurationSeconds: Double?
 
     struct Coordinate: Codable, Equatable, Hashable {
         let latitude: Double
         let longitude: Double
-        var clLocation: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: latitude, longitude: longitude) }
     }
 
     init(
         id: String, name: String, coordinate: Coordinate?, transportTypes: [TransportType], lines: [String] = [],
-        countryCode: String? = nil, nearbyDistanceMeters: Double? = nil, nearbyDurationSeconds: Double? = nil
+        countryCode: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -27,8 +23,6 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
         self.transportTypes = transportTypes
         self.lines = lines
         self.countryCode = countryCode
-        self.nearbyDistanceMeters = nearbyDistanceMeters
-        self.nearbyDurationSeconds = nearbyDurationSeconds
     }
 
     var flagEmoji: String? {
