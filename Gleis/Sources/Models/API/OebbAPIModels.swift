@@ -631,6 +631,14 @@ struct OebbGateTripStopRef: Decodable {
 struct OebbGateTextValue: Decodable {
     let txt: String?
     let type: String?
+
+    enum CodingKeys: String, CodingKey { case txt, type }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        txt = OebbDecoding.stringIfPresent(container, forKey: .txt)
+        type = OebbDecoding.stringIfPresent(container, forKey: .type)
+    }
 }
 
 struct OebbGateTripProduct: Decodable {
@@ -700,6 +708,19 @@ enum OebbDecoding {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if ["true", "yes", "y", "1"].contains(trimmed) { return true }
             if ["false", "no", "n", "0"].contains(trimmed) { return false }
+        }
+        return nil
+    }
+
+    static func stringIfPresent<K: CodingKey>(_ container: KeyedDecodingContainer<K>, forKey key: K) -> String? {
+        if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let value = try? container.decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        if let value = try? container.decodeIfPresent(Double.self, forKey: key) {
+            let rendered = String(value)
+            return rendered.isEmpty ? nil : rendered
         }
         return nil
     }

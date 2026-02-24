@@ -126,18 +126,17 @@ struct ConnectionDetailSheet: View {
                 }
                 if index < legs.count - 1, !(leg.isWalking && index > 0) {
                     if let transition = ConnectionTransferPlanner.context(after: index, legs: legs) {
-                        let walkDurationMinutes = ConnectionTransferPlanner.walkingDurationMinutes(for: transition.walkingLegs)
                         TransferRow(
                             stationName: leg.to.name,
                             transferMinutes: ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
-                            walkDurationMinutes: walkDurationMinutes,
                             nextLineNumber: transition.targetLeg.lineNumber,
                             nextLineColors: transition.targetLeg.lineColors,
                             currentPlatform: normalizedPlatform(leg.arrivalPlatform) ?? normalizedPlatform(leg.platform),
                             nextPlatform: normalizedPlatform(transition.targetLeg.platform),
+                            destinationPlatform: normalizedPlatform(transition.targetLeg.arrivalPlatform),
                             incomingDelayMinutes: leg.delayMinutes,
                             nextDepartureTime: transition.targetLeg.departureTime,
-                            lineColor: transition.nextLegIsWalking ? .gray : legLineColor(transition.targetLeg),
+                            lineColor: transition.hasUpcomingTransitLeg ? legLineColor(transition.targetLeg) : .gray,
                             isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
                             involvesWalking: transition.involvesWalking,
                             nextLegIsWalking: transition.nextLegIsWalking,
@@ -459,11 +458,11 @@ struct ConnectionLegRow: View {
 struct TransferRow: View {
     let stationName: String
     let transferMinutes: Int?
-    let walkDurationMinutes: Int?
     let nextLineNumber: String
     let nextLineColors: TrainLineColors?
     let currentPlatform: String?
     let nextPlatform: String?
+    let destinationPlatform: String?
     let incomingDelayMinutes: Int?
     let nextDepartureTime: Date?
     let lineColor: Color
@@ -512,7 +511,7 @@ struct TransferRow: View {
     }
 
     private var urgency: TransferUrgency {
-        if involvesWalking { return .walking }
+        if involvesWalking && !hasUpcomingTransitLeg { return .walking }
         guard let transferMinutes else { return .unknown }
         let effectiveTransfer = max(0, transferMinutes - max(0, incomingDelayMinutes ?? 0))
         if effectiveTransfer <= 3 { return .critical }
@@ -529,14 +528,12 @@ struct TransferRow: View {
         return trimmed
     }
     private var transferTitle: String {
-        if nextLegIsWalking {
-            return hasUpcomingTransitLeg ? "Walk to your next train" : "Walk to destination"
-        }
-        return "Change to \(normalizedNextLine ?? "next connection")"
+        if nextLegIsWalking, !hasUpcomingTransitLeg { return "Walk to destination" }
+        return "Transfer at \(stationName)"
     }
-    private var riskBadgeText: String {
-        guard let transferMinutes else { return urgency.label }
-        return "\(urgency.label) · \(transferMinutes) min"
+    private var riskBadgeText: String? {
+        guard let transferMinutes else { return nil }
+        return "\(transferMinutes) min"
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }
@@ -555,15 +552,30 @@ struct TransferRow: View {
         guard let trimmed, !trimmed.isEmpty else { return nil }
         return trimmed
     }
+    private var normalizedDestinationPlatform: String? {
+        let trimmed = destinationPlatform?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
     private var platformChangeText: String? {
         guard let from = normalizedCurrentPlatform, let to = normalizedNextPlatform, from != to else { return nil }
-        return "Pl. \(from) -> \(to)"
+        return "Platform \(from) -> \(to)"
     }
     private var detailsText: String {
-        if let nextPlatform = normalizedNextPlatform {
-            return "at \(stationName) · board from Platform \(nextPlatform)"
+        if involvesWalking, hasUpcomingTransitLeg {
+            if let platform = normalizedNextPlatform, let line = normalizedNextLine {
+                return "Walk to Platform \(platform) for \(line)"
+            }
+            if let platform = normalizedNextPlatform { return "Walk to Platform \(platform)" }
+            if let line = normalizedNextLine { return "Walk to \(line)" }
+            return "Walk to your next train"
         }
-        return "at \(stationName)"
+
+        let changeText = "Change to \(normalizedNextLine ?? "next connection")"
+        if let nextPlatform = normalizedNextPlatform {
+            return "\(changeText) · board from Platform \(nextPlatform)"
+        }
+        return changeText
     }
     private var compactWalkingTitle: String {
         if !hasUpcomingTransitLeg {
@@ -571,36 +583,42 @@ struct TransferRow: View {
             return "Walk to destination"
         }
         if let platform = normalizedNextPlatform, let line = normalizedNextLine {
-            return "Walk to Pl. \(platform) for \(line)"
+            return "Walk to Platform \(platform) for \(line)"
         }
         if let platform = normalizedNextPlatform { return "Walk to Platform \(platform)" }
         if let line = normalizedNextLine { return "Walk to \(line)" }
         return "Walk transfer at \(stationName)"
     }
-    private var compactWalkingMeta: String? {
-        if let walkDurationMinutes, let transferMinutes, transferMinutes != walkDurationMinutes {
-            return "\(walkDurationMinutes) min walk · \(transferMinutes) min transfer"
-        }
-        if let walkDurationMinutes { return "\(walkDurationMinutes) min walk" }
-        if let transferMinutes { return "\(transferMinutes) min transfer" }
-        return nil
-    }
+    private var connectorSegmentHeight: CGFloat { 24 }
     private var shouldShowMetaRow: Bool { platformChangeText != nil || nextDepartureTime != nil }
 
     var body: some View {
-        if involvesWalking { compactWalkingBody } else { fullTransferBody }
+        Group {
+            if involvesWalking && !hasUpcomingTransitLeg {
+                compactWalkingBody
+            } else {
+                fullTransferBody
+            }
+        }
+        .padding(.vertical, 3)
     }
 
     private var compactWalkingBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
+                    width: 2,
+                    height: connectorSegmentHeight
+                )
                 Circle().stroke(Color.secondary, lineWidth: 2).frame(width: 12, height: 12).overlay(
                     Image(systemName: "figure.walk")
                         .font(.system(size: 6, weight: .semibold))
                         .foregroundStyle(Color.secondary)
                 )
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
+                    width: 2,
+                    height: connectorSegmentHeight
+                )
             }.frame(width: 20)
 
             HStack(spacing: 8) {
@@ -610,12 +628,6 @@ struct TransferRow: View {
                     .lineLimit(1)
 
                 Spacer()
-
-                if let compactWalkingMeta {
-                    Text(compactWalkingMeta)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -628,7 +640,10 @@ struct TransferRow: View {
     private var fullTransferBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
+                    width: 2,
+                    height: connectorSegmentHeight
+                )
 
                 ZStack {
                     Circle().stroke(indicatorColor, lineWidth: 2).frame(width: 12, height: 12)
@@ -636,7 +651,10 @@ struct TransferRow: View {
                         indicatorColor)
                 }
 
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(width: 2, height: 16)
+                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
+                    width: 2,
+                    height: connectorSegmentHeight
+                )
             }.frame(width: 20)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -652,12 +670,14 @@ struct TransferRow: View {
 
                     Spacer()
 
-                    Text(riskBadgeText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(indicatorColor)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(indicatorColor.opacity(colorScheme == .dark ? 0.2 : 0.12), in: Capsule())
+                    if let riskBadgeText {
+                        Text(riskBadgeText)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(indicatorColor)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(indicatorColor.opacity(colorScheme == .dark ? 0.2 : 0.12), in: Capsule())
+                    }
                 }
 
                 Text(detailsText)
@@ -687,27 +707,19 @@ struct TransferRow: View {
                     }
                 }
 
-                if let nextLine = normalizedNextLine {
+                if let normalizedDestinationPlatform {
                     HStack(spacing: 6) {
-                        Text("Board").font(.caption2).foregroundStyle(.secondary)
-
-                        let style = Color.lineBadgeStyle(for: nextLine, apiColors: nextLineColors)
-                        Text(nextLine)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(style.foreground)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(style.background, in: RoundedRectangle(cornerRadius: 3))
-                            .overlay {
-                                if let border = style.border {
-                                    RoundedRectangle(cornerRadius: 3).stroke(border.opacity(0.7), lineWidth: 1)
-                                }
-                            }
+                        Text("Destination").font(.caption2).foregroundStyle(.secondary)
+                        Text("Platform \(normalizedDestinationPlatform)")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(isPassed ? .secondary : .primary)
+                            .lineLimit(1)
+                        Spacer()
                     }
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10).fill(indicatorColor.opacity(colorScheme == .dark ? 0.16 : 0.1))
             )

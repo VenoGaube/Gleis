@@ -364,10 +364,10 @@ actor OebbAPIClient {
         let realtimeDeparture = gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeR)
         let realtimeArrival = gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeR)
 
-        let normalizedDeparturePlatform = gateNormalizedString(stopRef.dPltfS?.txt) ?? gateNormalizedString(stopRef.dPltfR?.txt)
-        let normalizedArrivalPlatform = gateNormalizedString(stopRef.aPltfS?.txt) ?? gateNormalizedString(stopRef.aPltfR?.txt)
-        let realtimeDeparturePlatform = gateNormalizedString(stopRef.dPltfR?.txt)
-        let realtimeArrivalPlatform = gateNormalizedString(stopRef.aPltfR?.txt)
+        let normalizedDeparturePlatform = gatePlatformText(stopRef.dPltfS) ?? gatePlatformText(stopRef.dPltfR)
+        let normalizedArrivalPlatform = gatePlatformText(stopRef.aPltfS) ?? gatePlatformText(stopRef.aPltfR)
+        let realtimeDeparturePlatform = gatePlatformText(stopRef.dPltfR)
+        let realtimeArrivalPlatform = gatePlatformText(stopRef.aPltfR)
         let departurePlatformDeviation: String? =
             if let realtimeDeparturePlatform,
                let normalizedDeparturePlatform,
@@ -689,6 +689,12 @@ actor OebbAPIClient {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, !trimmed.isEmpty else { return nil }
         return trimmed
+    }
+
+    private func gatePlatformText(_ value: OebbGateTextValue?) -> String? {
+        guard let value else { return nil }
+        if let type = gateNormalizedString(value.type), type.uppercased() != "PL" { return nil }
+        return gateNormalizedString(value.txt)
     }
 
     private func gateLeadingLetters(in value: String?) -> String? {

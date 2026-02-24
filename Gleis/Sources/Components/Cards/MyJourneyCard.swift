@@ -23,6 +23,13 @@ struct MyJourneyCard: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var isExpanded = true
 
+    private func normalizedPlatformValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
     private var journeyProgress: Double {
         let now = Date()
         let total = journey.arrivalTime.timeIntervalSince(journey.departureTime)
@@ -105,7 +112,6 @@ struct MyJourneyCard: View {
     private struct TransferSummary {
         let stationName: String
         let transferMinutes: Int
-        let walkMinutes: Int?
     }
 
     private var nextTransferSummary: TransferSummary? {
@@ -120,15 +126,30 @@ struct MyJourneyCard: View {
             guard let transferMinutes = ConnectionTransferPlanner.transferMinutes(from: currentLeg, to: transition.targetLeg)
             else { continue }
             if let nextDeparture = transition.targetLeg.departureTime, nextDeparture < now { continue }
-            let walkMinutes = ConnectionTransferPlanner.walkingDurationMinutes(for: transition.walkingLegs)
             return TransferSummary(
                 stationName: currentLeg.to.name,
-                transferMinutes: transferMinutes,
-                walkMinutes: walkMinutes
+                transferMinutes: transferMinutes
             )
         }
 
         return nil
+    }
+
+    private var travelLegs: [ConnectionLeg] {
+        let legs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
+        let transitLegs = legs.filter { !$0.isWalking }
+        return transitLegs.isEmpty ? legs : transitLegs
+    }
+
+    private var firstTravelLeg: ConnectionLeg? { travelLegs.first }
+    private var lastTravelLeg: ConnectionLeg? { travelLegs.last }
+
+    private var departurePlatformLabel: String? {
+        normalizedPlatformValue(firstTravelLeg?.platform) ?? normalizedPlatformValue(journey.platform)
+    }
+
+    private var finalArrivalPlatformLabel: String? {
+        normalizedPlatformValue(lastTravelLeg?.arrivalPlatform)
     }
 
     @ViewBuilder
@@ -158,52 +179,13 @@ struct MyJourneyCard: View {
                     .strikethrough()
                 Text(journey.arrivalTime, style: .time)
                     .font(.headline.monospacedDigit())
+                    .fontWeight(.bold)
                     .foregroundStyle(.orange)
             }
-        } else {
-            Text(journey.arrivalTime, style: .time).font(.headline.monospacedDigit())
-        }
-    }
-
-    @ViewBuilder
-    private var compactDepartureTimeValue: some View {
-        if let scheduledDeparture {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(scheduledDeparture, style: .time)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .strikethrough()
-                Text(journey.departureTime, style: .time)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.orange)
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-        } else {
-            Text(journey.departureTime, style: .time)
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var compactArrivalTimeValue: some View {
-        if let plannedArrival {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(plannedArrival, style: .time)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .strikethrough()
-                Text(journey.arrivalTime, style: .time)
-                    .font(.subheadline.monospacedDigit().weight(.bold))
-                    .foregroundStyle(.orange)
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
         } else {
             Text(journey.arrivalTime, style: .time)
-                .font(.subheadline.monospacedDigit().weight(.bold))
-                .foregroundStyle(.primary)
+                .font(.headline.monospacedDigit())
+                .fontWeight(.bold)
         }
     }
 
@@ -211,9 +193,15 @@ struct MyJourneyCard: View {
         VStack(spacing: 0) {
             headerSection
             if isExpanded {
-                Divider().background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
-                    .padding(.horizontal, 16)
-                timelineSection
+                VStack(spacing: 0) {
+                    Divider().background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
+                        .padding(.horizontal, 16)
+                    timelineSection
+                }
+                .clipped()
+                .transition(
+                    .asymmetric(insertion: .topDownReveal, removal: .opacity)
+                )
             }
         }.background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)).clipShape(
             RoundedRectangle(cornerRadius: 16)
@@ -249,21 +237,6 @@ struct MyJourneyCard: View {
                             .minimumScaleFactor(0.8)
                             .fixedSize(horizontal: true, vertical: false)
 
-                        if journey.transfers > 0 {
-                            HStack(spacing: 3) {
-                                Text("\(journey.transfers)")
-                                Image(systemName: "arrow.triangle.branch")
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .accessibilityLabel(
-                                journey.transfers == 1
-                                    ? "1 transfer"
-                                    : "\(journey.transfers) transfers"
-                            )
-                        }
                     }.frame(maxWidth: .infinity, alignment: .leading).debugJourneyLayoutBox(showLayoutDebug, color: .mint)
 
                     Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)").font(
@@ -287,46 +260,39 @@ struct MyJourneyCard: View {
             // Journey timing section
             VStack(spacing: 8) {
                 if journey.isInProgress {
-                    VStack(spacing: 4) {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.2))
-                                RoundedRectangle(cornerRadius: 4).fill(Color.accentColor).frame(
-                                    width: geo.size.width * journeyProgress)
-                            }
-                        }.frame(height: 6)
-
-                        if !isExpanded {
-                            HStack {
-                                compactDepartureTimeValue
-                                Spacer()
-                                compactArrivalTimeValue
-                            }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.2))
+                            RoundedRectangle(cornerRadius: 4).fill(Color.accentColor).frame(
+                                width: geo.size.width * journeyProgress)
                         }
-                    }
+                    }.frame(height: 6)
                 }
 
-                // Detailed labeled times are shown when route details are visible, or for non-active journeys.
-                if !journey.isInProgress || isExpanded {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Departs").font(.caption2).foregroundStyle(.secondary)
-                            departureTimeValue
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Departs").font(.caption2).foregroundStyle(.secondary)
+                        departureTimeValue
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        if let departurePlatformLabel {
+                            Text("Platform \(departurePlatformLabel)")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
                         }
+                    }
 
-                        Spacer()
+                    Spacer(minLength: 16)
 
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("Arrival").font(.caption2).foregroundStyle(.secondary)
-                            arrivalTimeValue
-                        }
-
-                        if let platform = journey.platform {
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("Platform").font(.caption2).foregroundStyle(.secondary)
-                                Text(platform).font(.headline.monospacedDigit())
-                            }
-                            .frame(minWidth: 56, alignment: .trailing)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Arrival").font(.caption2).foregroundStyle(.secondary)
+                        arrivalTimeValue
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        if let finalArrivalPlatformLabel {
+                            Text("Platform \(finalArrivalPlatformLabel)")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -369,10 +335,7 @@ struct MyJourneyCard: View {
                         Image(systemName: "arrow.triangle.branch")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.orange)
-                        Text(
-                            "Transfer at \(transfer.stationName): \(transfer.transferMinutes) min"
-                            + (transfer.walkMinutes.map { " (\($0) min walk)" } ?? "")
-                        )
+                        Text("Transfer at \(transfer.stationName): \(transfer.transferMinutes) min")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -384,7 +347,7 @@ struct MyJourneyCard: View {
 
             // Expand/collapse button
             Button {
-                withAnimation(.spring(response: 0.3)) { isExpanded.toggle() }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.88, blendDuration: 0.12)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 4) {
                     Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
@@ -402,14 +365,16 @@ struct MyJourneyCard: View {
                 // Show leg with its stops
                 JourneyLegSection(
                     leg: leg, isFirstLeg: legIndex == 0, isLastLeg: legIndex == legs.count - 1,
-                    departureStation: legIndex == 0 ? journey.departureStation : nil,
-                    arrivalStation: legIndex == legs.count - 1 ? journey.arrivalStation : nil
+                    departureStation: leg.isWalking
+                        ? nil : (legIndex == 0 ? journey.departureStation : leg.from),
+                    arrivalStation: leg.isWalking
+                        ? nil : (legIndex == legs.count - 1 ? journey.arrivalStation : leg.to),
+                    arrivalPlatformOverride: legIndex == legs.count - 1 ? finalArrivalPlatformLabel : nil
                 )
 
                 // Show transfer indicator between legs
                 if legIndex < legs.count - 1, !(leg.isWalking && legIndex > 0) {
                     if let transition = ConnectionTransferPlanner.context(after: legIndex, legs: legs) {
-                        let walkDurationMinutes = ConnectionTransferPlanner.walkingDurationMinutes(for: transition.walkingLegs)
                         let transferMinutes = ConnectionTransferPlanner.transferMinutes(
                             from: leg,
                             to: transition.targetLeg
@@ -417,18 +382,18 @@ struct MyJourneyCard: View {
                         TransferRow(
                             stationName: leg.to.name,
                             transferMinutes: transferMinutes,
-                            walkDurationMinutes: walkDurationMinutes,
                             nextLineNumber: transition.targetLeg.lineNumber,
                             nextLineColors: transition.targetLeg.lineColors,
                             currentPlatform: leg.arrivalPlatform ?? leg.platform,
                             nextPlatform: transition.targetLeg.platform,
+                            destinationPlatform: transition.targetLeg.arrivalPlatform,
                             incomingDelayMinutes: leg.delayMinutes,
                             nextDepartureTime: transition.targetLeg.departureTime,
-                            lineColor: transition.nextLegIsWalking
-                                ? .gray : Color.lineColor(
+                            lineColor: transition.hasUpcomingTransitLeg
+                                ? Color.lineColor(
                                     for: transition.targetLeg.lineNumber,
                                     apiColors: transition.targetLeg.lineColors
-                                ),
+                                ) : .gray,
                             isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
                             involvesWalking: transition.involvesWalking,
                             nextLegIsWalking: transition.nextLegIsWalking,
@@ -472,6 +437,7 @@ private struct JourneyLegSection: View {
     let isLastLeg: Bool
     let departureStation: Station?
     let arrivalStation: Station?
+    let arrivalPlatformOverride: String?
 
     @Environment(\.colorScheme) var colorScheme
 
@@ -492,7 +458,8 @@ private struct JourneyLegSection: View {
         if hasArrived { return [] }
         if hasDeparted {
             let maxVisibleUpcomingStops = 3
-            return Array(upcomingIntermediateStops.prefix(maxVisibleUpcomingStops))
+            let upcoming = Array(upcomingIntermediateStops.prefix(maxVisibleUpcomingStops))
+            return passedIntermediateStops + upcoming
         }
         return leg.intermediateStops
     }
@@ -503,25 +470,18 @@ private struct JourneyLegSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Departure point (only show for first leg or after transfer)
-            if isFirstLeg || departureStation != nil {
+            // Show departure endpoint for each transit leg.
+            if departureStation != nil {
                 JourneyStopRow(
                     name: departureStation?.name ?? leg.from.name, time: leg.departureTime, platform: leg.platform,
                     delay: leg.delayMinutes, lineNumber: leg.lineNumber, lineColors: leg.lineColors, isEndpoint: true,
                     isPassed: leg.departureTime.map { now >= $0 } ?? false, showTopConnector: false,
-                    showBottomConnector: true, lineColor: legLineColor
+                    showBottomConnector: true, lineColor: legLineColor, isTransferBoundary: !isFirstLeg
                 )
             }
 
             // Intermediate stops
             if !leg.isWalking {
-                if hasDeparted, !passedIntermediateStops.isEmpty {
-                    JourneyCollapsedStopsRow(
-                        text: "\(passedIntermediateStops.count) stops passed", systemImage: "checkmark.circle.fill",
-                        lineColor: legLineColor
-                    )
-                }
-
                 ForEach(visibleIntermediateStops) { stop in
                     JourneyStopRow(
                         name: stop.name, time: stop.arrivalTime, platform: nil, delay: stop.arrivalDelay,
@@ -539,14 +499,15 @@ private struct JourneyLegSection: View {
                 }
             }
 
-            // Arrival point (only show for last leg)
-            if isLastLeg {
+            // Show arrival endpoint for each transit leg.
+            if arrivalStation != nil {
                 JourneyStopRow(
-                    name: arrivalStation?.name ?? leg.to.name, time: leg.arrivalTime, platform: leg.arrivalPlatform,
+                    name: arrivalStation?.name ?? leg.to.name, time: leg.arrivalTime,
+                    platform: arrivalPlatformOverride ?? leg.arrivalPlatform,
                     delay: nil,
                     lineNumber: nil, lineColors: nil, isEndpoint: true,
                     isPassed: leg.arrivalTime.map { now >= $0 } ?? false, showTopConnector: true,
-                    showBottomConnector: false, lineColor: legLineColor
+                    showBottomConnector: false, lineColor: legLineColor, isTransferBoundary: !isLastLeg
                 )
             }
         }
@@ -596,8 +557,13 @@ private struct JourneyStopRow: View {
     let showTopConnector: Bool
     let showBottomConnector: Bool
     let lineColor: Color
+    var isTransferBoundary: Bool = false
 
     @Environment(\.colorScheme) var colorScheme
+
+    private var endpointConnectorHeight: CGFloat { isTransferBoundary ? 6 : 8 }
+    private var endpointNodeDiameter: CGFloat { isTransferBoundary ? 10 : 12 }
+    private var endpointNodeStroke: CGFloat { isTransferBoundary ? 1.5 : 2 }
 
     var body: some View {
         let connectorColor = isPassed ? lineColor : lineColor.opacity(0.35)
@@ -607,14 +573,18 @@ private struct JourneyStopRow: View {
         HStack(alignment: .center, spacing: 12) {
             // Timeline indicator
             VStack(spacing: 0) {
-                Rectangle().fill(showTopConnector ? connectorColor : .clear).frame(width: 2, height: isEndpoint ? 8 : 10)
+                Rectangle().fill(showTopConnector ? connectorColor : .clear).frame(
+                    width: 2, height: isEndpoint ? endpointConnectorHeight : 10
+                )
 
-                Circle().fill(nodeFillColor).frame(width: isEndpoint ? 12 : 6, height: isEndpoint ? 12 : 6).overlay(
-                    Circle().stroke(lineColor, lineWidth: isEndpoint ? 2 : 1)
+                Circle().fill(nodeFillColor).frame(
+                    width: isEndpoint ? endpointNodeDiameter : 6, height: isEndpoint ? endpointNodeDiameter : 6
+                ).overlay(
+                    Circle().stroke(lineColor, lineWidth: isEndpoint ? endpointNodeStroke : 1)
                 )
 
                 Rectangle().fill(showBottomConnector ? connectorColor : .clear).frame(
-                    width: 2, height: isEndpoint ? 8 : 10
+                    width: 2, height: isEndpoint ? endpointConnectorHeight : 10
                 )
             }.frame(width: 20)
 
@@ -636,9 +606,17 @@ private struct JourneyStopRow: View {
 
             // Stop info
             VStack(alignment: .leading, spacing: 1) {
-                Text(name).font(isEndpoint ? .subheadline.weight(.semibold) : .caption).foregroundStyle(
-                    isPassed ? .secondary : .primary
-                ).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(name).font(isEndpoint ? .subheadline.weight(.semibold) : .caption).foregroundStyle(
+                        isPassed ? .secondary : .primary
+                    )
+                    if isTransferBoundary {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .lineLimit(1)
 
                 if let time {
                     HStack(spacing: 4) {
@@ -656,11 +634,31 @@ private struct JourneyStopRow: View {
             Spacer()
 
             if let platform, isEndpoint {
-                Text("Pl. \(platform)").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(
+                Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(
                     .vertical, 2
                 ).background(Color.secondary.opacity(0.1), in: Capsule())
             }
         }.padding(.vertical, isEndpoint ? 4 : 1)
+    }
+}
+
+private struct TopDownRevealModifier: ViewModifier {
+    let progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(x: 1, y: max(0.001, progress), anchor: .top)
+            .opacity(progress)
+            .clipped()
+    }
+}
+
+private extension AnyTransition {
+    static var topDownReveal: AnyTransition {
+        .modifier(
+            active: TopDownRevealModifier(progress: 0),
+            identity: TopDownRevealModifier(progress: 1)
+        )
     }
 }
 
