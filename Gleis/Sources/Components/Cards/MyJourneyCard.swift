@@ -109,32 +109,6 @@ struct MyJourneyCard: View {
         return "in \(minutes) min"
     }
 
-    private struct TransferSummary {
-        let stationName: String
-        let transferMinutes: Int
-    }
-
-    private var nextTransferSummary: TransferSummary? {
-        let legs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
-        let now = Date()
-        guard legs.count >= 2 else { return nil }
-
-        for index in 0 ..< (legs.count - 1) {
-            let currentLeg = legs[index]
-            guard !currentLeg.isWalking else { continue }
-            guard let transition = ConnectionTransferPlanner.context(after: index, legs: legs) else { continue }
-            guard let transferMinutes = ConnectionTransferPlanner.transferMinutes(from: currentLeg, to: transition.targetLeg)
-            else { continue }
-            if let nextDeparture = transition.targetLeg.departureTime, nextDeparture < now { continue }
-            return TransferSummary(
-                stationName: currentLeg.to.name,
-                transferMinutes: transferMinutes
-            )
-        }
-
-        return nil
-    }
-
     private var travelLegs: [ConnectionLeg] {
         let legs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
         let transitLegs = legs.filter { !$0.isWalking }
@@ -330,19 +304,6 @@ struct MyJourneyCard: View {
                     Spacer(minLength: 0)
                 }
 
-                if let transfer = nextTransferSummary {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                        Text("Transfer at \(transfer.stationName): \(transfer.transferMinutes) min")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        Spacer(minLength: 0)
-                    }
-                }
             }.debugJourneyLayoutBox(showLayoutDebug, color: .yellow)
 
             // Expand/collapse button

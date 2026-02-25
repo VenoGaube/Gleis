@@ -552,25 +552,11 @@ struct TransferRow: View {
         guard let trimmed, !trimmed.isEmpty else { return nil }
         return trimmed
     }
-    private var normalizedDestinationPlatform: String? {
-        let trimmed = destinationPlatform?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
     private var platformChangeText: String? {
         guard let from = normalizedCurrentPlatform, let to = normalizedNextPlatform, from != to else { return nil }
         return "Platform \(from) -> \(to)"
     }
     private var detailsText: String {
-        if involvesWalking, hasUpcomingTransitLeg {
-            if let platform = normalizedNextPlatform, let line = normalizedNextLine {
-                return "Walk to Platform \(platform) for \(line)"
-            }
-            if let platform = normalizedNextPlatform { return "Walk to Platform \(platform)" }
-            if let line = normalizedNextLine { return "Walk to \(line)" }
-            return "Walk to your next train"
-        }
-
         let changeText = "Change to \(normalizedNextLine ?? "next connection")"
         if let nextPlatform = normalizedNextPlatform {
             return "\(changeText) · board from Platform \(nextPlatform)"
@@ -707,21 +693,11 @@ struct TransferRow: View {
                     }
                 }
 
-                if let normalizedDestinationPlatform {
-                    HStack(spacing: 6) {
-                        Text("Destination").font(.caption2).foregroundStyle(.secondary)
-                        Text("Platform \(normalizedDestinationPlatform)")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(isPassed ? .secondary : .primary)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 10).fill(indicatorColor.opacity(colorScheme == .dark ? 0.16 : 0.1))
+                RoundedRectangle(cornerRadius: 10).fill(indicatorColor.opacity(colorScheme == .dark ? 0.18 : 0.1))
             )
         }
     }
