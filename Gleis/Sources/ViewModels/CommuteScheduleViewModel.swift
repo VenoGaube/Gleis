@@ -258,12 +258,12 @@ final class CommuteScheduleViewModel: ObservableObject {
             return makeSchedule(from: exact)
         }
 
-        let normalizedTemplateLine = normalizedLineIdentifier(template.lineNumber)
+        let normalizedTemplateLine = normalizeLine(template.lineNumber)
         let templateMinutes = template.departureHour * 60 + template.departureMinute
         let calendar = Calendar.current
 
         let sameLineMatches: [(TrainConnection, Int)] = eligibleConnections.compactMap { connection in
-            guard normalizedLineIdentifier(connection.lineNumber) == normalizedTemplateLine else { return nil }
+            guard normalizeLine(connection.lineNumber) == normalizedTemplateLine else { return nil }
             let hour = calendar.component(.hour, from: connection.departureTime)
             let minute = calendar.component(.minute, from: connection.departureTime)
             let diff = abs((hour * 60 + minute) - templateMinutes)
@@ -290,7 +290,7 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     private func connectionMatchesTemplate(_ connection: TrainConnection, template: DaySchedule) -> Bool {
         let calendar = Calendar.current
-        return normalizedLineIdentifier(connection.lineNumber) == normalizedLineIdentifier(template.lineNumber)
+        return normalizeLine(connection.lineNumber) == normalizeLine(template.lineNumber)
             && calendar.component(.hour, from: connection.departureTime) == template.departureHour
             && calendar.component(.minute, from: connection.departureTime) == template.departureMinute
     }
@@ -306,6 +306,13 @@ final class CommuteScheduleViewModel: ObservableObject {
             isDailyRepeat: false,
             transfers: connection.transfers
         )
+    }
+
+    private func normalizeLine(_ line: String) -> String {
+        line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
     }
 
 }

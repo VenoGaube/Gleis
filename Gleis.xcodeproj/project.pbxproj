@@ -43,15 +43,12 @@
 		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035; };
 		B039 /* DisplayConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039; };
 		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041; };
-			B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043; };
-			B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044; };
-			B047 /* WidgetJourneyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047; };
-			W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01; };
-			W002 /* SharedWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF02; };
-			W006 /* WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023; };
-			W007 /* WidgetJourneyComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047; };
-			W003 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF03; };
-			W004 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF04; };
+		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043; };
+		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044; };
+		W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01; };
+		W002 /* SharedWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF02; };
+		W003 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF03; };
+		W004 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF04; };
 		W005 /* GleisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = WF00; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -117,11 +114,10 @@
 		F035 /* MyJourneyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyJourneyCard.swift; sourceTree = "<group>"; };
 		F039 /* DisplayConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConnection.swift; sourceTree = "<group>"; };
 		F041 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
-			F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
-			F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
-			F047 /* WidgetJourneyComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetJourneyComponents.swift; sourceTree = "<group>"; };
-			F100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-			F101 /* Gleis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gleis.entitlements; sourceTree = "<group>"; };
+		F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
+		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
+		F100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F101 /* Gleis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gleis.entitlements; sourceTree = "<group>"; };
 		WF00 /* GleisWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GleisWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		WF01 /* GleisWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GleisWidget.swift; sourceTree = "<group>"; };
 		WF02 /* SharedWidgetModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedWidgetModels.swift; sourceTree = "<group>"; };
@@ -344,16 +340,15 @@
 			path = Cards;
 			sourceTree = "<group>";
 		};
-			G024 /* Common */ = {
-				isa = PBXGroup;
-				children = (
-					F026 /* CommonComponents.swift */,
-					F027 /* OnboardingView.swift */,
-					F047 /* WidgetJourneyComponents.swift */,
-				);
-				path = Common;
-				sourceTree = "<group>";
-			};
+		G024 /* Common */ = {
+			isa = PBXGroup;
+			children = (
+				F026 /* CommonComponents.swift */,
+				F027 /* OnboardingView.swift */,
+			);
+			path = Common;
+			sourceTree = "<group>";
+		};
 		G025 /* Pickers */ = {
 			isa = PBXGroup;
 			children = (
@@ -524,23 +519,20 @@
 				B035,
 				B039,
 				B041,
-					B043,
-					B044,
-					B047,
-				);
-				runOnlyForDeploymentPostprocessing = 0;
-			};
-			W301 /* Sources */ = {
-				isa = PBXSourcesBuildPhase;
-				buildActionMask = 2147483647;
-				files = (
-					W001,
-					W002,
-					W006,
-					W007,
-				);
-				runOnlyForDeploymentPostprocessing = 0;
-			};
+				B043,
+				B044,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		W301 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				W001,
+				W002,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

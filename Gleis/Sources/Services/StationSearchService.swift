@@ -1,11 +1,35 @@
 import Foundation
 
-enum StationSearchRanker {
-    static func rank(
-        _ stations: [Station],
-        query: String,
-        preferShortNamesInTies: Bool = true
-    ) -> [Station] {
+@MainActor
+final class StationSearchService {
+    private let transportService: TransportServiceProtocol
+
+    init(transportService: TransportServiceProtocol = TransportService.shared) {
+        self.transportService = transportService
+    }
+
+    func searchStations(_ query: String, transportType: TransportType) async -> [Station] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        do {
+            var candidates = try await transportService.searchStations(matching: trimmed, transportType: transportType)
+
+            // Add cached popular stations as a fallback pool when API results are sparse.
+            if candidates.count < 8 {
+                let cached = (try? await transportService.fetchStations(for: transportType)) ?? []
+                candidates = mergeStations(primary: candidates, secondary: cached)
+            }
+
+            let ranked = rankStations(candidates, query: trimmed)
+            return ranked
+        } catch {
+            if !(error is CancellationError) { /* logged silently */ }
+            return []
+        }
+    }
+
+    private func rankStations(_ stations: [Station], query: String) -> [Station] {
         let normalizedQuery = normalize(query)
         let queryTokens = normalizedQuery.split(separator: " ").map(String.init).filter { !$0.isEmpty }
 
@@ -20,7 +44,7 @@ enum StationSearchRanker {
         return scored
             .sorted { lhs, rhs in
                 if lhs.score != rhs.score { return lhs.score < rhs.score }
-                if preferShortNamesInTies, lhs.station.name.count != rhs.station.name.count {
+                if lhs.station.name.count != rhs.station.name.count {
                     return lhs.station.name.count < rhs.station.name.count
                 }
                 return lhs.station.name.localizedCaseInsensitiveCompare(rhs.station.name) == .orderedAscending
@@ -28,16 +52,7 @@ enum StationSearchRanker {
             .map(\.station)
     }
 
-    static func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
-        var merged = primary
-        var seen = Set(primary.map(\.id))
-        for station in secondary where seen.insert(station.id).inserted {
-            merged.append(station)
-        }
-        return merged
-    }
-
-    private static func matchScore(
+    private func matchScore(
         name: String,
         words: [String],
         query: String,
@@ -62,40 +77,19 @@ enum StationSearchRanker {
         return nil
     }
 
-    private static func normalize(_ value: String) -> String {
+    private func normalize(_ value: String) -> String {
         value
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
-}
 
-@MainActor
-final class StationSearchService {
-    private let transportService: TransportServiceProtocol
-
-    init(transportService: TransportServiceProtocol = TransportService.shared) {
-        self.transportService = transportService
-    }
-
-    func searchStations(_ query: String, transportType: TransportType) async -> [Station] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        do {
-            var candidates = try await transportService.searchStations(matching: trimmed, transportType: transportType)
-
-            // Add cached popular stations as a fallback pool when API results are sparse.
-            if candidates.count < 8 {
-                let cached = (try? await transportService.fetchStations(for: transportType)) ?? []
-                candidates = StationSearchRanker.mergeStations(primary: candidates, secondary: cached)
-            }
-
-            let ranked = StationSearchRanker.rank(candidates, query: trimmed, preferShortNamesInTies: true)
-            return ranked
-        } catch {
-            if !(error is CancellationError) { /* logged silently */ }
-            return []
+    private func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
+        var merged = primary
+        var seen = Set(primary.map(\.id))
+        for station in secondary where seen.insert(station.id).inserted {
+            merged.append(station)
         }
+        return merged
     }
 }

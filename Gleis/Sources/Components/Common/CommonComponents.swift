@@ -134,7 +134,6 @@ enum Haptics {
 // MARK: - SkeletonBox
 
 struct SkeletonBox: View {
-    private static let shimmerDuration: Double = 0.8
     var width: CGFloat?
     var height: CGFloat = 16
     var cornerRadius: CGFloat = 4
@@ -150,10 +149,7 @@ struct SkeletonBox: View {
                     colors: [.clear, Color.white.opacity(0.3), .clear], startPoint: .leading, endPoint: .trailing
                 ).frame(width: geo.size.width * 0.6).offset(x: shimmer ? geo.size.width : -geo.size.width * 0.6)
             }.mask(RoundedRectangle(cornerRadius: cornerRadius))
-        ).onAppear {
-            shimmer = false
-            withAnimation(.linear(duration: Self.shimmerDuration).repeatForever(autoreverses: false)) { shimmer = true }
-        }
+        ).onAppear { withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) { shimmer = true } }
     }
 }
 

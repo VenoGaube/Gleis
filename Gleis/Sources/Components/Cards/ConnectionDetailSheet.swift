@@ -1,11 +1,5 @@
 import SwiftUI
 
-private func normalizedPlatformValue(_ value: String?) -> String? {
-    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let trimmed, !trimmed.isEmpty else { return nil }
-    return trimmed
-}
-
 // MARK: - ConnectionDetailSheet
 
 struct ConnectionDetailSheet: View {
@@ -137,10 +131,9 @@ struct ConnectionDetailSheet: View {
                             transferMinutes: ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
                             nextLineNumber: transition.targetLeg.lineNumber,
                             nextLineColors: transition.targetLeg.lineColors,
-                            currentPlatform: normalizedPlatformValue(leg.arrivalPlatform)
-                                ?? normalizedPlatformValue(leg.platform),
-                            nextPlatform: normalizedPlatformValue(transition.targetLeg.platform),
-                            destinationPlatform: normalizedPlatformValue(transition.targetLeg.arrivalPlatform),
+                            currentPlatform: normalizedPlatform(leg.arrivalPlatform) ?? normalizedPlatform(leg.platform),
+                            nextPlatform: normalizedPlatform(transition.targetLeg.platform),
+                            destinationPlatform: normalizedPlatform(transition.targetLeg.arrivalPlatform),
                             incomingDelayMinutes: leg.delayMinutes,
                             nextDepartureTime: transition.targetLeg.departureTime,
                             lineColor: transition.hasUpcomingTransitLeg ? legLineColor(transition.targetLeg) : .gray,
@@ -213,11 +206,17 @@ struct ConnectionDetailSheet: View {
     }
 
     private var summaryDeparturePlatform: String? {
-        normalizedPlatformValue(firstTravelLeg?.platform) ?? normalizedPlatformValue(resolvedConnection.platform)
+        normalizedPlatform(firstTravelLeg?.platform) ?? normalizedPlatform(resolvedConnection.platform)
     }
 
     private var summaryArrivalPlatform: String? {
-        normalizedPlatformValue(lastTravelLeg?.arrivalPlatform)
+        normalizedPlatform(lastTravelLeg?.arrivalPlatform)
+    }
+
+    private func normalizedPlatform(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     private func legLineColor(_ leg: ConnectionLeg) -> Color {
@@ -249,11 +248,11 @@ struct ConnectionLegRow: View {
     }
 
     private var departurePlatform: String? {
-        normalizedPlatformValue(leg.platform)
+        normalizedPlatform(leg.platform)
     }
 
     private var arrivalPlatform: String? {
-        normalizedPlatformValue(leg.arrivalPlatform)
+        normalizedPlatform(leg.arrivalPlatform)
     }
 
     private var stopEntries: [LegStopEntry] {
@@ -296,6 +295,12 @@ struct ConnectionLegRow: View {
     }
 
     private var now: Date { Date() }
+
+    private func normalizedPlatform(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
 
     private var walkingDurationMinutes: Int? {
         ConnectionTransferPlanner.walkingDurationMinutes(for: leg)
@@ -672,6 +677,19 @@ struct TransferRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 10).fill(indicatorColor.opacity(colorScheme == .dark ? 0.18 : 0.1))
             )
+        }
+    }
+}
+
+// MARK: - TimeText
+
+struct TimeText: View {
+    let date: Date?
+    var body: some View {
+        if let date {
+            Text(date, style: .time).font(.subheadline.monospacedDigit())
+        } else {
+            Text("--").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
         }
     }
 }

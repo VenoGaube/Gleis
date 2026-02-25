@@ -68,7 +68,6 @@ final class TransportViewModel: ObservableObject {
     private var automaticRefreshBackoffUntil: Date?
     private var alertStabilityByConnectionID: [String: AlertStabilityState] = [:]
     private var lastCommuteNotificationReconcileDay: Date?
-    private var suppressNextRouteConfigRefresh = false
 
     private struct AlertStabilityState {
         var activeAlerts: [ServiceAlert]
@@ -107,10 +106,6 @@ final class TransportViewModel: ObservableObject {
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                if suppressNextRouteConfigRefresh {
-                    suppressNextRouteConfigRefresh = false
-                    return
-                }
                 // Immediately invalidate widget route snapshots to avoid showing the old station pair
                 // while the new route fetch is still in progress.
                 updateWidget(with: [], forceRefreshContexts: true)
@@ -154,10 +149,6 @@ final class TransportViewModel: ObservableObject {
     private func refreshDisplayAndWidgetSelectionState() {
         rebuildDisplayConnections()
         refreshWidgetsFromLoadedConnections()
-    }
-
-    func prepareForManualRouteRefreshTransition() {
-        suppressNextRouteConfigRefresh = true
     }
 
     func loadStations() async {
@@ -241,7 +232,7 @@ final class TransportViewModel: ObservableObject {
         {
             isShowingCachedData = true
             markServiceDegradedState(retryAt: backoffUntil)
-            updateWidgetIfNeeded(with: existing, forceRefreshContexts: isRouteChange)
+            updateWidgetIfNeeded(with: existing)
             return
         }
 
@@ -255,7 +246,7 @@ final class TransportViewModel: ObservableObject {
                 if stillFuture.count != existing.count {
                     setConnections(stillFuture)
                     evaluateReminderReliability(with: stillFuture)
-                    updateWidgetIfNeeded(with: stillFuture, forceRefreshContexts: isRouteChange)
+                    updateWidgetIfNeeded(with: stillFuture)
                 }
                 // If route data is complete and still fresh, skip network fetch.
                 // Otherwise continue so service alerts and live status remain reliable.
@@ -281,7 +272,7 @@ final class TransportViewModel: ObservableObject {
                 evaluateReminderReliability(with: futureCached)
                 isShowingCachedData = true
                 lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
-                updateWidgetIfNeeded(with: futureCached, forceRefreshContexts: isRouteChange)
+                updateWidgetIfNeeded(with: futureCached)
                 existingConnections = futureCached
             }
         }
@@ -301,7 +292,7 @@ final class TransportViewModel: ObservableObject {
             isShowingCachedData = true
             clearServiceDegradedState()
             lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
-            updateWidgetIfNeeded(with: futureConnections, forceRefreshContexts: isRouteChange)
+            updateWidgetIfNeeded(with: futureConnections)
             return
         }
 
@@ -343,7 +334,7 @@ final class TransportViewModel: ObservableObject {
             lastUpdated = Date()
             isShowingCachedData = false
             if showFeedback { toastManager.show("Updated", type: .success) }
-            updateWidgetIfNeeded(with: merged, forceRefreshContexts: isRouteChange)
+            updateWidgetIfNeeded(with: merged)
             consecutiveAutomaticFetchFailures = 0
             automaticRefreshBackoffUntil = nil
             clearServiceDegradedState()
@@ -355,7 +346,7 @@ final class TransportViewModel: ObservableObject {
                     toastManager.show("Update failed, showing previous data", type: .info)
                 }
                 isShowingCachedData = true
-                updateWidgetIfNeeded(with: existing, forceRefreshContexts: isRouteChange)
+                updateWidgetIfNeeded(with: existing)
                 return
             }
             if let cached = await connectionCache.load(for: transportType, from: start, to: end) {
@@ -370,7 +361,7 @@ final class TransportViewModel: ObservableObject {
                 evaluateReminderReliability(with: futureConnections)
                 isShowingCachedData = true
                 lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
-                updateWidgetIfNeeded(with: futureConnections, forceRefreshContexts: isRouteChange)
+                updateWidgetIfNeeded(with: futureConnections)
             } else {
                 connections = .error(GleisError.from(error))
                 connectionRecovery = nil
@@ -1015,8 +1006,8 @@ final class TransportViewModel: ObservableObject {
         let futureConnections = connections.filter { $0.departureTime > now }
         guard !futureConnections.isEmpty else { return nil }
 
-        let normalizedReminderLine = normalizedLineIdentifier(reminder.lineNumber)
-        let sameLine = futureConnections.filter { normalizedLineIdentifier($0.lineNumber) == normalizedReminderLine }
+        let normalizedReminderLine = normalizeLine(reminder.lineNumber)
+        let sameLine = futureConnections.filter { normalizeLine($0.lineNumber) == normalizedReminderLine }
         if let closestSameLine = sameLine.min(by: {
             abs($0.departureTime.timeIntervalSince(reminder.departureTime))
                 < abs($1.departureTime.timeIntervalSince(reminder.departureTime))
@@ -1129,6 +1120,13 @@ final class TransportViewModel: ObservableObject {
                 reminderResyncSignatures.remove(signature)
             }
         }
+    }
+
+    private func normalizeLine(_ line: String) -> String {
+        line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
     }
 
     private func normalizePlatform(_ platform: String?) -> String {

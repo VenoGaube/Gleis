@@ -80,7 +80,7 @@ struct WidgetData: Codable {
         connections: [
             WidgetConnection(
                 id: "placeholder", lineNumber: "S1", departureTime: Date().addingTimeInterval(900),
-                arrivalTime: Date().addingTimeInterval(2100), destination: "Wien Mitte", platform: "3", transfers: 0,
+                arrivalTime: Date().addingTimeInterval(2100), destination: "Destination", platform: "3", transfers: 0,
                 delay: 0, stopCount: 5
             ),
         ],
@@ -88,76 +88,6 @@ struct WidgetData: Codable {
         updatedAt: Date(),
         state: .fresh
     )
-
-    static let delayedPlaceholder = WidgetData(
-        transportType: .trainCommute,
-        connections: [
-            WidgetConnection(
-                id: "delayed", lineNumber: "REX3", departureTime: Date().addingTimeInterval(1200),
-                arrivalTime: Date().addingTimeInterval(3000), destination: "Bratislava hl.st.", platform: "7",
-                transfers: 0, delay: 5, stopCount: 8, hasReminder: false, isPinned: false
-            ),
-        ],
-        leaveTimes: [Date().addingTimeInterval(900)],
-        updatedAt: Date(),
-        state: .fresh
-    )
-
-    func connection(at date: Date) -> (connection: WidgetConnection, leaveTime: Date)? {
-        // Find the next regular (non-pinned) connection by leave time.
-        var nextRegularIndex: Int?
-        for (index, leaveTime) in leaveTimes.enumerated() where date < leaveTime && !connections[index].isPinned {
-            nextRegularIndex = index
-            break
-        }
-
-        // Priority 1: pinned journey when it's relevant to the current window.
-        for (index, connection) in connections.enumerated() where connection.isPinned && connection.arrivalTime > date {
-            let pinnedLeaveTime = leaveTimes[index]
-            if pinnedLeaveTime <= date { return (connection, pinnedLeaveTime) }
-            guard let regularIndex = nextRegularIndex else { return (connection, pinnedLeaveTime) }
-
-            let regularLeaveTime = leaveTimes[regularIndex]
-            let timeDifference = abs(pinnedLeaveTime.timeIntervalSince(regularLeaveTime))
-            if timeDifference <= 20 * 60 { return (connection, pinnedLeaveTime) }
-        }
-
-        // Priority 2: active reminder connection until departure.
-        for (index, connection) in connections.enumerated() where connection.hasReminder && connection.departureTime > date {
-            return (connection, leaveTimes[index])
-        }
-
-        // Priority 3: next connection by leave time.
-        for (index, leaveTime) in leaveTimes.enumerated() where date < leaveTime {
-            return (connections[index], leaveTime)
-        }
-
-        // Priority 4: keep showing final connection until departure.
-        if let lastIndex = connections.indices.last, connections[lastIndex].departureTime > date {
-            return (connections[lastIndex], leaveTimes[lastIndex])
-        }
-        return nil
-    }
-
-    var isStale: Bool {
-        if state == .stale { return true }
-        let now = Date()
-        if now.timeIntervalSince(updatedAt) > 6 * 60 * 60 { return true }
-        guard let lastConnection = connections.last else { return true }
-        return lastConnection.departureTime < now
-    }
-
-    var isFallback: Bool { state == .fallback }
-
-    func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        var result: [(WidgetConnection, Date)] = []
-        for (index, connection) in connections.enumerated() {
-            if connection.departureTime > date || leaveTimes[index] > date {
-                result.append((connection, leaveTimes[index]))
-            }
-        }
-        return result
-    }
 }
 
 // MARK: - WidgetDataStorageKey

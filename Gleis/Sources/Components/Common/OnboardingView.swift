@@ -778,11 +778,71 @@ struct JourneySetupStepView: View {
                 matching: trimmed,
                 transportType: .trainCommute
             )
-            let merged = StationSearchRanker.mergeStations(primary: remote, secondary: popularStations)
-            return StationSearchRanker.rank(merged, query: trimmed, preferShortNamesInTies: false)
+            return rankStationsForQuery(mergeStations(primary: remote, secondary: popularStations), query: trimmed)
         } catch {
             return []
         }
+    }
+
+    private func rankStationsForQuery(_ stations: [Station], query: String) -> [Station] {
+        let normalizedQuery = normalize(query)
+        let queryTokens = normalizedQuery.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+
+        let scored: [(station: Station, score: Int)] = stations.compactMap { station in
+            let name = normalize(station.name)
+            let words = name.split(separator: " ").map(String.init)
+            guard let score = matchScore(name: name, words: words, query: normalizedQuery, queryTokens: queryTokens)
+            else { return nil }
+            return (station, score)
+        }
+
+        return scored
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score < rhs.score }
+                return lhs.station.name.localizedCaseInsensitiveCompare(rhs.station.name) == .orderedAscending
+            }
+            .map(\.station)
+    }
+
+    private func matchScore(
+        name: String,
+        words: [String],
+        query: String,
+        queryTokens: [String]
+    ) -> Int? {
+        if name == query { return 0 }
+        if name.hasPrefix(query) { return 1 }
+        if words.contains(where: { $0.hasPrefix(query) }) { return 2 }
+        if name.contains(query) { return 3 }
+
+        guard !queryTokens.isEmpty else { return nil }
+
+        let allTokensPrefix = queryTokens.allSatisfy { token in words.contains(where: { $0.hasPrefix(token) }) }
+        if allTokensPrefix { return 4 }
+
+        let allTokensContained = queryTokens.allSatisfy { token in name.contains(token) }
+        if allTokensContained { return 5 }
+
+        if queryTokens.contains(where: { token in words.contains(where: { $0.hasPrefix(token) }) }) { return 6 }
+        if queryTokens.contains(where: { token in name.contains(token) }) { return 7 }
+
+        return nil
+    }
+
+    private func normalize(_ value: String) -> String {
+        value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
+        var merged = primary
+        var seen = Set(primary.map(\.id))
+        for station in secondary where seen.insert(station.id).inserted {
+            merged.append(station)
+        }
+        return merged
     }
 
     private func sampleConnections(from origin: Station, to destination: Station) -> [TrainConnection] {
@@ -1296,19 +1356,45 @@ struct OnboardingSmallWidgetView: View {
     var body: some View {
         if let data = entry.data, let current = onboardingCurrentWidgetConnection(for: data, at: entry.date) {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            WidgetJourneySmallCardContent(
-                routeText: onboardingWidgetRouteText(for: data),
-                connection: current.connection,
-                leaveTime: current.leaveTime,
-                referenceDate: entry.date
-            )
+            let conn = current.connection
+
+            VStack(spacing: 0) {
+                Text(onboardingWidgetRouteText(for: data))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.62)
+                    .allowsTightening(true)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+
+                OnboardingWidgetLineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small)
+                    .padding(.top, 6)
+
+                Spacer(minLength: 0)
+
+                OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+
+                Spacer(minLength: 0)
+
+                VStack(spacing: 4) {
+                    OnboardingWidgetDepartureInfo(connection: conn, size: .small)
+                    if conn.hasServiceAlert {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text("Service alert")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.red)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
             .background(onboardingWidgetGradient(remaining: remaining))
         } else {
-            WidgetJourneyEmptyState(
-                size: .small,
-                data: entry.data,
-                subtitle: onboardingEmptyHintText(for: entry.data)
-            )
+            OnboardingWidgetEmptyState(size: .small, data: entry.data)
         }
     }
 }
@@ -1319,28 +1405,305 @@ struct OnboardingMediumWidgetView: View {
     var body: some View {
         if let data = entry.data, let current = onboardingCurrentWidgetConnection(for: data, at: entry.date) {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            WidgetJourneyMediumCardContent(
-                routeText: onboardingWidgetRouteText(for: data),
-                connection: current.connection,
-                leaveTime: current.leaveTime,
-                referenceDate: entry.date
-            )
+            let conn = current.connection
+
+            HStack(spacing: 0) {
+                VStack(spacing: 4) {
+                    OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+
+                    if remaining > 0 {
+                        Text("Leave at \(current.leaveTime, style: .time)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .scalableText(minimumScale: 0.8)
+                    }
+                }
+                .frame(width: 95)
+                .frame(maxHeight: .infinity)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(onboardingWidgetRouteText(for: data))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.7)
+                        .allowsTightening(true)
+
+                    HStack(spacing: 8) {
+                        OnboardingWidgetLineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(conn.destination)
+                                .font(.subheadline.weight(.semibold))
+                                .scalableText(minimumScale: 0.8)
+
+                            if conn.isPinned {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "pin.fill").font(.system(size: 7))
+                                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+
+                    Spacer(minLength: 0)
+
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                if conn.isDelayed {
+                                    Text(onboardingScheduledTime(conn.departureTime, delay: conn.delay))
+                                        .font(.title3.weight(.medium).monospacedDigit())
+                                        .strikethrough()
+                                        .foregroundStyle(.secondary)
+                                        .scalableText(minimumScale: 0.7)
+                                    Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
+                                        .font(.title2.weight(.bold).monospacedDigit())
+                                        .foregroundStyle(.orange)
+                                        .scalableText(minimumScale: 0.7)
+                                } else {
+                                    Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
+                                        .font(.title2.weight(.bold).monospacedDigit())
+                                        .scalableText(minimumScale: 0.7)
+                                }
+                            }
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                            Text(conn.platform ?? "–")
+                                .font(.title2.weight(.bold).monospacedDigit())
+                                .scalableText(minimumScale: 0.7)
+                        }
+                    }
+
+                    if conn.isDelayed {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                            Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(.orange)
+                    }
+
+                    if conn.hasServiceAlert {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                            Text("Service alert").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.red)
+                    }
+                }
+                .padding(14)
+            }
             .background(onboardingWidgetGradient(remaining: remaining))
         } else {
-            WidgetJourneyEmptyState(
-                size: .medium,
-                data: entry.data,
-                subtitle: onboardingEmptyHintText(for: entry.data)
-            )
+            OnboardingWidgetEmptyState(size: .medium, data: entry.data)
         }
     }
 }
+
+struct OnboardingWidgetLineBadge: View {
+    let line: String
+    let lineColors: TrainLineColors?
+    let size: BadgeSize
+
+    enum BadgeSize {
+        case small
+        case medium
+
+        var font: Font {
+            switch self {
+            case .small:
+                .system(size: 12, weight: .bold)
+            case .medium:
+                .system(size: 14, weight: .bold)
+            }
+        }
+
+        var verticalPadding: CGFloat { self == .small ? 4 : 5 }
+        var horizontalPadding: CGFloat { self == .small ? 8 : 10 }
+    }
+
+    var body: some View {
+        let style = Color.lineBadgeStyle(for: line, apiColors: lineColors)
+        return Text(line)
+            .font(size.font)
+            .foregroundStyle(style.foreground)
+            .scalableText(minimumScale: 0.7)
+            .padding(.vertical, size.verticalPadding)
+            .padding(.horizontal, size.horizontalPadding)
+            .background(style.background, in: Capsule())
+    }
+}
+
+struct OnboardingWidgetCountdownDisplay: View {
+    let remaining: TimeInterval
+    let leaveTime: Date
+    let size: CountdownSize
+
+    enum CountdownSize {
+        case medium
+
+        var mainFont: Font { .system(size: 28, weight: .bold, design: .rounded) }
+        var labelFont: Font { .system(size: 10) }
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            if remaining <= 0 {
+                Text("GO!")
+                    .font(size.mainFont)
+                    .foregroundStyle(.secondary)
+                    .scalableText(minimumScale: 0.6)
+            } else if remaining <= 60 {
+                Text(leaveTime, style: .timer)
+                    .font(size.mainFont.monospacedDigit())
+                    .foregroundStyle(onboardingUrgencyColor(remaining))
+                    .multilineTextAlignment(.center)
+                    .scalableText(minimumScale: 0.6)
+                Text("leave now")
+                    .font(size.labelFont.weight(.medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(onboardingFormatCountdown(remaining))
+                    .font(size.mainFont.monospacedDigit())
+                    .foregroundStyle(onboardingUrgencyColor(remaining))
+                    .scalableText(minimumScale: 0.6)
+                Text("to leave")
+                    .font(size.labelFont.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct OnboardingWidgetDepartureInfo: View {
+    let connection: WidgetConnection
+    let size: InfoSize
+
+    enum InfoSize {
+        case small
+        case medium
+
+        var labelFont: Font { .system(size: 9, weight: .semibold) }
+        var departureLabel: String { self == .small ? "DEP" : "DEPARTURE" }
+        var platformLabel: String { self == .small ? "PL" : "PLATFORM" }
+        var valueFont: Font {
+            self == .small
+                ? .subheadline.weight(.bold).monospacedDigit()
+                : .title2.weight(.bold).monospacedDigit()
+        }
+
+        var delayFont: Font {
+            self == .small
+                ? .system(size: 10, weight: .bold)
+                : .caption.weight(.bold)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(size.departureLabel).font(size.labelFont).foregroundStyle(.secondary)
+                if connection.isDelayed {
+                    HStack(spacing: 4) {
+                        Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
+                            .font(size.valueFont)
+                            .foregroundStyle(.orange)
+                            .scalableText(minimumScale: 0.7)
+                        Text("+\(connection.delay)'")
+                            .font(size.delayFont)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
+                        .font(size.valueFont)
+                        .scalableText(minimumScale: 0.7)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
+                Text(connection.platform ?? "–").font(size.valueFont).scalableText(minimumScale: 0.7)
+            }
+        }
+    }
+}
+
+struct OnboardingWidgetEmptyState: View {
+    enum Size { case small, medium }
+
+    let size: Size
+    let data: WidgetData?
+
+    var body: some View {
+        let accentColor: Color = switch data?.state {
+        case .fallback: .orange
+        case .stale: .secondary
+        default: .trainBlue
+        }
+        let title = switch data?.state {
+        case .fallback: "Offline data"
+        case .stale: "No departures"
+        default: "Set up route"
+        }
+
+        switch size {
+        case .small:
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(accentColor.opacity(0.1)).frame(width: 48, height: 48)
+                    Image(systemName: "tram.fill").font(.title3).foregroundStyle(accentColor)
+                }
+                Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .medium:
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle().fill(accentColor.opacity(0.1)).frame(width: 56, height: 56)
+                    Image(systemName: "tram.fill").font(.title2).foregroundStyle(accentColor)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.headline)
+                    Text(onboardingEmptyHintText(for: data)).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+    }
+}
+
+private let onboardingWidgetTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.timeStyle = .short
+    return formatter
+}()
 
 private func onboardingCurrentWidgetConnection(
     for data: WidgetData,
     at date: Date
 ) -> (connection: WidgetConnection, leaveTime: Date)? {
-    data.connection(at: date)
+    let indexed = Array(zip(data.connections.indices, data.connections))
+    for (index, connection) in indexed where index < data.leaveTimes.count {
+        let leave = data.leaveTimes[index]
+        if date < leave { return (connection, leave) }
+    }
+    if let lastIndex = data.connections.indices.last, lastIndex < data.leaveTimes.count {
+        let connection = data.connections[lastIndex]
+        if connection.departureTime > date {
+            return (connection, data.leaveTimes[lastIndex])
+        }
+    }
+    return nil
 }
 
 private func onboardingWidgetRouteText(for data: WidgetData) -> String {
@@ -1348,6 +1711,11 @@ private func onboardingWidgetRouteText(for data: WidgetData) -> String {
     let to = data.toStationName?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let from, !from.isEmpty, let to, !to.isEmpty { return "\(from) → \(to)" }
     return "From → To"
+}
+
+private func onboardingScheduledTime(_ actual: Date, delay: Int) -> String {
+    let scheduled = actual.addingTimeInterval(TimeInterval(-delay * 60))
+    return onboardingWidgetTimeFormatter.string(from: scheduled)
 }
 
 private func onboardingEmptyHintText(for data: WidgetData?) -> String {
@@ -1362,8 +1730,27 @@ private func onboardingEmptyHintText(for data: WidgetData?) -> String {
     }
 }
 
+private func onboardingFormatCountdown(_ seconds: TimeInterval) -> String {
+    let totalMinutes = Int(ceil(max(0, seconds) / 60))
+    let hours = totalMinutes / 60
+    let minutes = totalMinutes % 60
+
+    if hours > 0 {
+        if minutes == 0 { return "\(hours)h" }
+        return "\(hours)h \(minutes)m"
+    }
+    return "\(minutes)m"
+}
+
+private func onboardingUrgencyColor(_ remaining: TimeInterval) -> Color {
+    if remaining <= 0 { return .secondary }
+    if remaining < 120 { return .red }
+    if remaining < 300 { return .orange }
+    return .green
+}
+
 private func onboardingWidgetGradient(remaining: TimeInterval) -> some View {
-    let color = widgetJourneyUrgencyColor(remaining)
+    let color = onboardingUrgencyColor(remaining)
     return LinearGradient(
         colors: [color.opacity(0.45), color.opacity(0.1), .clear],
         startPoint: .trailing,

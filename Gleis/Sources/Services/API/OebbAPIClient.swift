@@ -13,7 +13,6 @@ actor OebbAPIClient {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private var authSession: OebbAuthSession?
-    private let gateAidInfoKey = "GLEIS_GATE_AID"
 
     private lazy var dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -102,8 +101,6 @@ actor OebbAPIClient {
     private func fetchTimetableViaGateTripSearch(
         from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
     ) async throws -> OebbTimetableResponse {
-        guard let gateAid = configuredGateAid() else { throw GleisError.apiError("Gate AID not configured") }
-
         var components = URLComponents(url: fahrplanBaseURL.appendingPathComponent("gate"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "rnd", value: String(Int(Date().timeIntervalSince1970 * 1000)))
@@ -114,7 +111,7 @@ actor OebbAPIClient {
             id: makeGateRequestId(),
             ver: "1.88",
             lang: "deu",
-            auth: .init(type: "AID", aid: gateAid),
+            auth: .init(type: "AID", aid: "5vHavmuWPWIfetEe"),
             client: .init(id: "OEBB", type: "WEB", name: "webapp", l: "vs_webapp", v: 21901),
             formatted: false,
             ext: "OEBB.14",
@@ -834,20 +831,6 @@ actor OebbAPIClient {
     private func makeGateRequestId() -> String {
         let chars = Array("abcdefghijklmnopqrstuvwxyz0123456789")
         return String((0 ..< 16).map { _ in chars.randomElement()! })
-    }
-
-    private func configuredGateAid() -> String? {
-        if let envValue = ProcessInfo.processInfo.environment[gateAidInfoKey]?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ),
-            !envValue.isEmpty
-        {
-            return envValue
-        }
-
-        guard let plistValue = Bundle.main.object(forInfoDictionaryKey: gateAidInfoKey) as? String else { return nil }
-        let trimmed = plistValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func isCancellation(_ error: Error) -> Bool {

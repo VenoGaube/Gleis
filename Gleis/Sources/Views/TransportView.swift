@@ -247,25 +247,17 @@ struct TransportView: View {
         endStation = viewModel.config.endStation
     }
 
-    private func updateConfig(start: Station?, end: Station?, refreshNow: Bool = false) {
+    private func updateConfig(start: Station?, end: Station?) {
         var config = viewModel.config
         let oldStart = config.startStation
         let oldEnd = config.endStation
         let routeChanged = oldStart?.id != start?.id || oldEnd?.id != end?.id
         let changed = oldStart != start || oldEnd != end
         if changed { viewModel.selectedConnection = nil }
-        if routeChanged, refreshNow {
-            viewModel.prepareForManualRouteRefreshTransition()
-        }
         config.startStation = start
         config.endStation = end
         settingsManager.updateConfig(config)
-        if routeChanged {
-            viewModel.cancelCurrentFetch()
-            if refreshNow {
-                Task { await viewModel.refreshConnections(isUserInitiated: true) }
-            }
-        }
+        if routeChanged { viewModel.cancelCurrentFetch() }
     }
 
     private func swapStations() {
@@ -277,7 +269,7 @@ struct TransportView: View {
         }
         Task { @MainActor in
             isSwapping = false
-            updateConfig(start: startStation, end: endStation, refreshNow: true)
+            updateConfig(start: startStation, end: endStation)
         }
     }
 

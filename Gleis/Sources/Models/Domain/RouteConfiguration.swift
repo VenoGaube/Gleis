@@ -141,12 +141,3 @@ enum Weekday: Int, CaseIterable, Codable, Identifiable {
     static var workweek: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday] }
     static var weekend: [Weekday] { [.saturday, .sunday] }
 }
-
-// MARK: - Shared Normalization
-
-func normalizedLineIdentifier(_ line: String) -> String {
-    line
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .uppercased()
-        .replacingOccurrences(of: " ", with: "")
-}
