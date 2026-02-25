@@ -67,8 +67,28 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var usesDelayInLeaveTime: Bool { useDelayInLeaveTime ?? false }
 
     func effectiveDepartureTime(for connection: TrainConnection) -> Date {
-        guard usesDelayInLeaveTime, connection.delay > 0 else { return connection.departureTime }
-        return connection.departureTime.addingTimeInterval(TimeInterval(connection.delay * 60))
+        effectiveDepartureTime(
+            baseDepartureTime: connection.departureTime,
+            delayMinutes: connection.delay,
+            realtimeDepartureHint: connection.legs.first(where: { !$0.isWalking })?.departureTime
+        )
+    }
+
+    func effectiveDepartureTime(
+        baseDepartureTime: Date,
+        delayMinutes: Int,
+        realtimeDepartureHint: Date?
+    ) -> Date {
+        guard usesDelayInLeaveTime, delayMinutes > 0 else { return baseDepartureTime }
+
+        // If departure is already realtime, delay has already been applied.
+        if let realtimeDepartureHint,
+           abs(realtimeDepartureHint.timeIntervalSince(baseDepartureTime)) < 30
+        {
+            return baseDepartureTime
+        }
+
+        return baseDepartureTime.addingTimeInterval(TimeInterval(delayMinutes * 60))
     }
 
     func leaveTime(for connection: TrainConnection) -> Date {

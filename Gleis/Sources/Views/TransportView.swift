@@ -87,12 +87,11 @@ struct TransportView: View {
                         ?? viewModel.config.walkingTimeMinutes
                     let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
                         ?? viewModel.config.bufferTimeMinutes
-                    let effectiveDeparture =
-                        if viewModel.config.usesDelayInLeaveTime, pinnedJourney.delay > 0 {
-                            pinnedJourney.departureTime.addingTimeInterval(TimeInterval(pinnedJourney.delay * 60))
-                        } else {
-                            pinnedJourney.departureTime
-                        }
+                    let effectiveDeparture = viewModel.config.effectiveDepartureTime(
+                        baseDepartureTime: pinnedJourney.departureTime,
+                        delayMinutes: pinnedJourney.delay,
+                        realtimeDepartureHint: pinnedJourney.legs.first(where: { !$0.isWalking })?.departureTime
+                    )
                     let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
                     MyJourneyCard(
                         journey: pinnedJourney,

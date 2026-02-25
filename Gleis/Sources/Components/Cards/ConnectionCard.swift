@@ -41,6 +41,14 @@ struct ConnectionCard: View {
     private var isMissed: Bool { displayConnection.isMissed }
     private var isSelected: Bool { displayConnection.isSelected }
     private var isPinned: Bool { displayConnection.isPinned }
+    private var scheduledDepartureTime: Date? {
+        guard connection.delay > 0 else { return nil }
+        return connection.departureTime.addingTimeInterval(TimeInterval(-connection.delay * 60))
+    }
+    private var scheduledArrivalTime: Date? {
+        guard connection.delay > 0 else { return nil }
+        return connection.arrivalTime.addingTimeInterval(TimeInterval(-connection.delay * 60))
+    }
 
     var body: some View {
         cardContent
@@ -152,11 +160,23 @@ struct ConnectionCard: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    Text(connection.departureTime, style: .time)
-                        .font(.headline.weight(.semibold).monospacedDigit())
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                    if let scheduledDepartureTime {
+                        VStack(spacing: 2) {
+                            Text(scheduledDepartureTime, style: .time)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .strikethrough()
+                            Text(connection.departureTime, style: .time)
+                                .font(.headline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.orange)
+                        }
+                    } else {
+                        Text(connection.departureTime, style: .time)
+                            .font(.headline.weight(.semibold).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
                 }
                 .frame(minWidth: 66, alignment: .center)
                 .layoutPriority(2)
@@ -217,11 +237,23 @@ struct ConnectionCard: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    Text(connection.arrivalTime, style: .time)
-                        .font(.headline.weight(.semibold).monospacedDigit())
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                    if let scheduledArrivalTime {
+                        VStack(spacing: 2) {
+                            Text(scheduledArrivalTime, style: .time)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .strikethrough()
+                            Text(connection.arrivalTime, style: .time)
+                                .font(.headline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.orange)
+                        }
+                    } else {
+                        Text(connection.arrivalTime, style: .time)
+                            .font(.headline.weight(.semibold).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
                 }
                 .frame(minWidth: 66, alignment: .center)
                 .layoutPriority(2)

@@ -490,11 +490,15 @@ struct TransferRow: View {
 
     private var urgency: TransferUrgency {
         if involvesWalking && !hasUpcomingTransitLeg { return .walking }
-        guard let transferMinutes else { return .unknown }
-        let effectiveTransfer = max(0, transferMinutes - max(0, incomingDelayMinutes ?? 0))
-        if effectiveTransfer <= 3 { return .critical }
-        if effectiveTransfer <= 7 { return .tight }
+        guard let effectiveTransferMinutes else { return .unknown }
+        let effectiveTransfer = effectiveTransferMinutes
+        if effectiveTransfer < 5 { return .critical }
+        if effectiveTransfer <= 8 { return .tight }
         return .comfortable
+    }
+    private var effectiveTransferMinutes: Int? {
+        guard let transferMinutes else { return nil }
+        return max(0, transferMinutes - max(0, incomingDelayMinutes ?? 0))
     }
     private var indicatorColor: Color { urgency.color }
     private var transferIconName: String { urgency.icon }
@@ -510,8 +514,8 @@ struct TransferRow: View {
         return "Transfer at \(stationName)"
     }
     private var riskBadgeText: String? {
-        guard let transferMinutes else { return nil }
-        return "\(transferMinutes) min"
+        guard let effectiveTransferMinutes else { return nil }
+        return "\(effectiveTransferMinutes) min"
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }

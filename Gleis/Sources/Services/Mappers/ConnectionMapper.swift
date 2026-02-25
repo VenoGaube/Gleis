@@ -18,9 +18,30 @@ enum ConnectionMapper {
         _ connection: OebbConnection, from: Station, to: Station, transportType: TransportType
     ) -> TrainConnection {
         let sections = connection.sections ?? []
-        let departureTime = parseDate(connection.from.departure) ?? parseDate(sections.first?.from.departure) ?? Date()
+        let scheduledDeparture =
+            parseDate(connection.from.departure)
+            ?? parseDate(sections.first?.from.departure)
+        let departureDelay =
+            connection.from.departureDelay
+            ?? sections.first?.from.departureDelay
+        let departureTime =
+            parseDate(connection.from.departureRealtime)
+            ?? parseDate(sections.first?.from.departureRealtime)
+            ?? delayedDate(base: scheduledDeparture, delayMinutes: departureDelay)
+            ?? scheduledDeparture
+            ?? Date()
+
+        let scheduledArrival =
+            parseDate(connection.to.arrival)
+            ?? parseDate(sections.last?.to.arrival)
+        let arrivalDelay =
+            connection.to.arrivalDelay
+            ?? sections.last?.to.arrivalDelay
         let arrivalTime =
-            parseDate(connection.to.arrival) ?? parseDate(sections.last?.to.arrival)
+            parseDate(connection.to.arrivalRealtime)
+            ?? parseDate(sections.last?.to.arrivalRealtime)
+            ?? delayedDate(base: scheduledArrival, delayMinutes: arrivalDelay)
+            ?? scheduledArrival
             ?? departureTime.addingTimeInterval(TimeInterval((connection.duration ?? 0) / 1000))
         let platform =
             connection.from.departurePlatformDeviation ?? connection.from.departurePlatform ?? sections.first?.from
@@ -432,6 +453,13 @@ enum ConnectionMapper {
             return max(0, Int(realtime.timeIntervalSince(scheduled) / 60))
         }
         return 0
+    }
+
+    private static func delayedDate(base: Date?, delayMinutes: Int?) -> Date? {
+        guard let base else { return nil }
+        let minutes = max(0, delayMinutes ?? 0)
+        guard minutes > 0 else { return base }
+        return base.addingTimeInterval(TimeInterval(minutes * 60))
     }
 
     private static func normalizeConnectionChronology(
