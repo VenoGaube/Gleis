@@ -38,3 +38,8 @@ fastlane/test_output/
 # Simulator artifacts
 *.simdevicetype
 *.simruntime
+
+# Local AI/dev tooling settings
+.claude/
+.env
+.env.*
