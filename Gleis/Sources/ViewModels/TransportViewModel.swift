@@ -120,10 +120,7 @@ final class TransportViewModel: ObservableObject {
                 && old.excludedTrainTypes == new.excludedTrainTypes
         }.debounce(for: .milliseconds(100), scheduler: RunLoop.main).sink { [weak self] _ in
             guard let self else { return }
-            rebuildDisplayConnections()
-            if let loadedConnections = connections.value {
-                updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
-            }
+            refreshDisplayAndWidgetSelectionState()
         }.store(in: &cancellables)
 
         // Keep card selection state and widgets in sync when reminders are edited from
@@ -134,10 +131,7 @@ final class TransportViewModel: ObservableObject {
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                rebuildDisplayConnections()
-                if let loadedConnections = connections.value {
-                    updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
-                }
+                refreshDisplayAndWidgetSelectionState()
             }
             .store(in: &cancellables)
 
@@ -147,12 +141,14 @@ final class TransportViewModel: ObservableObject {
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                rebuildDisplayConnections()
-                if let loadedConnections = connections.value {
-                    updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
-                }
+                refreshDisplayAndWidgetSelectionState()
             }
             .store(in: &cancellables)
+    }
+
+    private func refreshDisplayAndWidgetSelectionState() {
+        rebuildDisplayConnections()
+        refreshWidgetsFromLoadedConnections()
     }
 
     func loadStations() async {
@@ -405,9 +401,7 @@ final class TransportViewModel: ObservableObject {
             }
             settingsManager.upsertReminder(reminder)
             rebuildDisplayConnections()
-            if case let .loaded(conns) = connections {
-                updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
-            }
+            refreshWidgetsFromLoadedConnections()
         } catch {
             if let gleisError = error as? GleisError, case .notificationPermissionDenied = gleisError {
                 do {
@@ -451,9 +445,7 @@ final class TransportViewModel: ObservableObject {
         }
 
         rebuildDisplayConnections()
-        if case let .loaded(conns) = connections {
-            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
-        }
+        refreshWidgetsFromLoadedConnections()
     }
 
     func acceptConnectionRecovery() {
@@ -485,18 +477,14 @@ final class TransportViewModel: ObservableObject {
         settingsManager.pinJourney(connection)
         toastManager.show("Pinned as My Journey", type: .success)
         rebuildDisplayConnections()
-        if case let .loaded(conns) = connections {
-            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
-        }
+        refreshWidgetsFromLoadedConnections()
     }
 
     func unpinJourney() {
         settingsManager.unpinJourney()
         toastManager.show("Unpinned journey", type: .info)
         rebuildDisplayConnections()
-        if case let .loaded(conns) = connections {
-            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
-        }
+        refreshWidgetsFromLoadedConnections()
     }
 
     func isPinned(_ connectionId: String) -> Bool { settingsManager.isPinned(connectionId) }
@@ -634,7 +622,7 @@ final class TransportViewModel: ObservableObject {
             let leaveTime = calculateLeaveTime(for: connection)
             let isSelected =
                 settingsManager.isReminderSet(for: connection.id)
-                || hasActiveRepeatReminder(for: connection, route: route)
+                || route.hasActiveReminder(for: connection)
             let isPinned = settingsManager.isPinned(connection.id)
 
             return DisplayConnection(
@@ -731,6 +719,11 @@ final class TransportViewModel: ObservableObject {
 
     // MARK: - Widget
 
+    private func refreshWidgetsFromLoadedConnections(forceRefreshContexts: Bool = true) {
+        guard case let .loaded(loadedConnections) = connections else { return }
+        updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: forceRefreshContexts)
+    }
+
     private func updateWidgetIfNeeded(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
         if !forceRefreshContexts,
@@ -747,33 +740,26 @@ final class TransportViewModel: ObservableObject {
         let now = Date()
         let futureConnections = connections.filter { $0.departureTime > now }
         let route = settingsManager.savedCommuteRoute
+        let rankedConnections = futureConnections
+            .map { connection in
+                let isPinned = settingsManager.isPinned(connection.id)
+                let hasReminder =
+                    settingsManager.isReminderSet(for: connection.id)
+                    || route.hasActiveReminder(for: connection)
+                return (connection, isPinned, hasReminder)
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 }
+                if lhs.2 != rhs.2 { return lhs.2 }
+                if lhs.0.departureTime != rhs.0.departureTime {
+                    return lhs.0.departureTime < rhs.0.departureTime
+                }
+                return lhs.0.id < rhs.0.id
+            }
 
-        let widgetConnections = futureConnections.map { conn -> WidgetConnection in
-            let stopCount = conn.legs.first { !$0.isWalking }?.stopCount
-            let hasReminder =
-                settingsManager.isReminderSet(for: conn.id)
-                || hasActiveRepeatReminder(for: conn, route: route)
-            let isPinned = settingsManager.isPinned(conn.id)
-            return WidgetConnection(
-                id: conn.id, lineNumber: conn.lineNumber, lineColors: conn.lineColors, departureTime: conn.departureTime,
-                arrivalTime: conn.arrivalTime, destination: conn.arrivalStation.name, platform: conn.platform,
-                transfers: conn.transfers, delay: conn.delay, stopCount: stopCount, hasReminder: hasReminder,
-                isPinned: isPinned,
-                hasServiceAlert: (conn.serviceAlerts ?? []).contains(where: \.isActive)
-            )
-        }
-
-        let sorted = widgetConnections.sorted { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
-            if lhs.hasReminder != rhs.hasReminder { return lhs.hasReminder }
-            return lhs.departureTime < rhs.departureTime
-        }
-        let topConnections = Array(sorted.prefix(3))
-
-        let sortedConnections = topConnections.compactMap {
-            widgetConn in futureConnections.first { $0.id == widgetConn.id }
-        }
-        let leaveTimes = sortedConnections.map { calculateLeaveTime(for: $0) }
+        let topRankedConnections = Array(rankedConnections.prefix(3))
+        let topConnections = topRankedConnections.map(makeWidgetConnection)
+        let leaveTimes = topRankedConnections.map { calculateLeaveTime(for: $0.0) }
         let isRouteConfigured = config.startStation != nil && config.endStation != nil
         let state: WidgetDataState
         let message: String?
@@ -806,6 +792,28 @@ final class TransportViewModel: ObservableObject {
             await WidgetRefreshService.shared.refreshWidgetData(force: forceRefreshContexts)
         }
         WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
+    }
+
+    private func makeWidgetConnection(
+        _ rankedConnection: (connection: TrainConnection, isPinned: Bool, hasReminder: Bool)
+    ) -> WidgetConnection {
+        let connection = rankedConnection.connection
+        let stopCount = connection.legs.first { !$0.isWalking }?.stopCount
+        return WidgetConnection(
+            id: connection.id,
+            lineNumber: connection.lineNumber,
+            lineColors: connection.lineColors,
+            departureTime: connection.departureTime,
+            arrivalTime: connection.arrivalTime,
+            destination: connection.arrivalStation.name,
+            platform: connection.platform,
+            transfers: connection.transfers,
+            delay: connection.delay,
+            stopCount: stopCount,
+            hasReminder: rankedConnection.hasReminder,
+            isPinned: rankedConnection.isPinned,
+            hasServiceAlert: (connection.serviceAlerts ?? []).contains(where: \.isActive)
+        )
     }
 
     // MARK: - Reminder Reliability
@@ -897,7 +905,7 @@ final class TransportViewModel: ObservableObject {
 
         for (day, schedule) in route.toWorkSchedules where route.isDayActive(day, direction: .toWork) {
             if day == todayWeekday,
-               (skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toWork))
+               skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toWork)
             {
                 continue
             }
@@ -908,7 +916,7 @@ final class TransportViewModel: ObservableObject {
 
         for (day, schedule) in route.toHomeSchedules where route.isDayActive(day, direction: .toHome) {
             if day == todayWeekday,
-               (skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toHome))
+               skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toHome)
             {
                 continue
             }
@@ -916,14 +924,6 @@ final class TransportViewModel: ObservableObject {
                 route: route, day: day, schedule: schedule, direction: .toHome, config: cfg
             )
         }
-    }
-
-    private func hasActiveRepeatReminder(for connection: TrainConnection, route: SavedCommuteRoute) -> Bool {
-        guard let direction = route.matchesSchedule(connection) else { return false }
-        let calendar = Calendar.current
-        let connectionDay = calendar.startOfDay(for: connection.departureTime)
-        if route.skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
-        return !route.isOccurrenceSkipped(on: connectionDay, direction: direction)
     }
 
     private func notifyServiceAlertsForReminders(
@@ -1109,9 +1109,7 @@ final class TransportViewModel: ObservableObject {
                 }
                 settingsManager.upsertReminder(updatedReminder)
                 rebuildDisplayConnections()
-                if case let .loaded(conns) = connections {
-                    updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
-                }
+                refreshWidgetsFromLoadedConnections()
             } catch {
                 // Keep current reminder if live resync fails and allow a retry on next refresh.
                 if reminder.id != liveConnection.id {

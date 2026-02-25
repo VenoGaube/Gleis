@@ -172,6 +172,14 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         return nil
     }
 
+    func hasActiveReminder(for connection: TrainConnection) -> Bool {
+        guard let direction = matchesSchedule(connection) else { return false }
+        let calendar = Calendar.current
+        let connectionDay = calendar.startOfDay(for: connection.departureTime)
+        if skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
+        return !isOccurrenceSkipped(on: connectionDay, direction: direction)
+    }
+
     mutating func skipDate(_ date: Date) {
         let day = Calendar.current.startOfDay(for: date)
         if !skippedDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: day) }) { skippedDates.append(day) }

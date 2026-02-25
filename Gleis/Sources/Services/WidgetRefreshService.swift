@@ -85,26 +85,20 @@ final class WidgetRefreshService {
         var contexts: [WidgetRefreshContext] = []
         let dayScopes: [WidgetDayScope] = [.today, .tomorrow]
 
-        if isValidRoutePair(snapshot.liveStartStation, snapshot.liveEndStation),
-           let start = snapshot.liveStartStation,
-           let end = snapshot.liveEndStation
-        {
-            contexts.append(contentsOf: contextsForRoutePair(
-                routeScope: .liveRoute,
-                forwardFrom: start,
-                forwardTo: end,
-                dayScopes: dayScopes
-            ))
-        }
+        let routePairs: [(scope: WidgetRouteScope, from: Station?, to: Station?)] = [
+            (.liveRoute, snapshot.liveStartStation, snapshot.liveEndStation),
+            (.repeatJourney, snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation),
+        ]
 
-        if isValidRoutePair(snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation),
-           let home = snapshot.savedRoute.homeStation,
-           let work = snapshot.savedRoute.workStation
-        {
+        for route in routePairs {
+            guard isValidRoutePair(route.from, route.to),
+                  let fromStation = route.from,
+                  let toStation = route.to
+            else { continue }
             contexts.append(contentsOf: contextsForRoutePair(
-                routeScope: .repeatJourney,
-                forwardFrom: home,
-                forwardTo: work,
+                routeScope: route.scope,
+                forwardFrom: fromStation,
+                forwardTo: toStation,
                 dayScopes: dayScopes
             ))
         }
@@ -192,7 +186,7 @@ final class WidgetRefreshService {
                 let stopCount = connection.legs.first { !$0.isWalking }?.stopCount
                 let hasReminder =
                     snapshot.reminderIds.contains(connection.id)
-                    || hasActiveRepeatReminder(connection, in: snapshot.savedRoute)
+                    || snapshot.savedRoute.hasActiveReminder(for: connection)
                 let isPinned = snapshot.pinnedConnectionId == connection.id
 
                 return WidgetConnection(
@@ -256,14 +250,6 @@ final class WidgetRefreshService {
         stateLock.unlock()
     }
 
-    private func hasActiveRepeatReminder(_ connection: TrainConnection, in route: SavedCommuteRoute) -> Bool {
-        guard let direction = route.matchesSchedule(connection) else { return false }
-        let calendar = Calendar.current
-        let connectionDay = calendar.startOfDay(for: connection.departureTime)
-        if route.skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
-        return !route.isOccurrenceSkipped(on: connectionDay, direction: direction)
-    }
-
     private func departureQueryDate(for dayScope: WidgetDayScope, now: Date) -> Date {
         switch dayScope {
         case .today:
@@ -302,7 +288,7 @@ final class WidgetRefreshService {
         savedRoute: SavedCommuteRoute
     ) -> [TrainConnection] {
         let selectedConnectionIds = Set(connections.compactMap { connection in
-            if reminderIds.contains(connection.id) || hasActiveRepeatReminder(connection, in: savedRoute) {
+            if reminderIds.contains(connection.id) || savedRoute.hasActiveReminder(for: connection) {
                 return connection.id
             }
             return nil
@@ -326,32 +312,17 @@ final class WidgetRefreshService {
     }
 
     private func persistUnavailableRouteStates(from snapshot: WidgetRefreshSnapshot, updatedAt: Date) {
-        if !isValidRoutePair(snapshot.liveStartStation, snapshot.liveEndStation) {
-            saveUnavailableRouteState(
-                routeScope: .liveRoute,
-                forwardFrom: snapshot.liveStartStation,
-                forwardTo: snapshot.liveEndStation,
-                message: unavailableRouteMessage(
-                    routeScope: .liveRoute,
-                    from: snapshot.liveStartStation,
-                    to: snapshot.liveEndStation
-                ),
-                recoveryAction: .openLiveRoute,
-                updatedAt: updatedAt
-            )
-        }
+        let routePairs: [(scope: WidgetRouteScope, from: Station?, to: Station?)] = [
+            (.liveRoute, snapshot.liveStartStation, snapshot.liveEndStation),
+            (.repeatJourney, snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation),
+        ]
 
-        if !isValidRoutePair(snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation) {
+        for route in routePairs where !isValidRoutePair(route.from, route.to) {
             saveUnavailableRouteState(
-                routeScope: .repeatJourney,
-                forwardFrom: snapshot.savedRoute.homeStation,
-                forwardTo: snapshot.savedRoute.workStation,
-                message: unavailableRouteMessage(
-                    routeScope: .repeatJourney,
-                    from: snapshot.savedRoute.homeStation,
-                    to: snapshot.savedRoute.workStation
-                ),
-                recoveryAction: .openRepeatJourney,
+                routeScope: route.scope,
+                forwardFrom: route.from,
+                forwardTo: route.to,
+                message: unavailableRouteMessage(routeScope: route.scope, from: route.from, to: route.to),
                 updatedAt: updatedAt
             )
         }
@@ -362,11 +333,11 @@ final class WidgetRefreshService {
         forwardFrom: Station?,
         forwardTo: Station?,
         message: String,
-        recoveryAction: WidgetRecoveryAction,
         updatedAt: Date
     ) {
         let dayScopes: [WidgetDayScope] = [.today, .tomorrow]
         let directions: [WidgetDirectionScope] = [.forward, .reverse]
+        let recoveryAction = recoveryAction(for: routeScope)
 
         for dayScope in dayScopes {
             for direction in directions {
@@ -409,8 +380,10 @@ final class WidgetRefreshService {
 
     private func saveFallbackData(for context: WidgetRefreshContext, updatedAt: Date) {
         let existing = AppGroupStorage.loadWidgetData(for: context.storageKey)
-        let shouldReuseExistingConnections =
-            existing.map { matchesRoute($0, context: context) } ?? false
+        let shouldReuseExistingConnections = existing.map {
+            normalizedStationToken($0.fromStationName) == normalizedStationToken(context.fromStation.name)
+                && normalizedStationToken($0.toStationName) == normalizedStationToken(context.toStation.name)
+        } ?? false
 
         let fallbackData = WidgetData(
             transportType: .trainCommute,
@@ -426,12 +399,7 @@ final class WidgetRefreshService {
         AppGroupStorage.saveWidgetData(for: context.storageKey, data: fallbackData)
     }
 
-    private func matchesRoute(_ data: WidgetData, context: WidgetRefreshContext) -> Bool {
-        normalizeStationName(data.fromStationName) == normalizeStationName(context.fromStation.name)
-            && normalizeStationName(data.toStationName) == normalizeStationName(context.toStation.name)
-    }
-
-    private func normalizeStationName(_ name: String?) -> String {
+    private func normalizedStationToken(_ name: String?) -> String {
         (name ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
