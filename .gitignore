@@ -18,6 +18,7 @@ xcuserdata/
 *.xccheckout
 *.xcscmblueprint
 *.xcuserstate
+*.xcodeproj/xcshareddata/IDEWorkspaceChecks.plist
 
 # Swift Package Manager
 .build/
@@ -41,6 +42,7 @@ fastlane/test_output/
 
 # Local AI/dev tooling settings
 .claude/
+.vscode/
 .env
 .env.*
 
@@ -63,3 +65,21 @@ Gleis.local.xcconfig
 *.ipa
 *.xcarchive
 *.dSYM.zip
+
+# Xcode test/coverage artifacts
+*.xcresult
+*.xccovreport
+*.xccovarchive
+*.profraw
+*.profdata
+*.dSYM
+*.dSYM/
+
+# Local env helpers
+.envrc
+.direnv/
+
+# Editor/temp leftovers
+*.orig
+*.swp
+*.tmp
