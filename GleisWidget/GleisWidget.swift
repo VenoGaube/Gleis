@@ -9,7 +9,7 @@ struct SelectTransportIntent: WidgetConfigurationIntent {
     static var description: IntentDescription = "Choose route, direction, and day"
 
     @Parameter(title: "Transport Type", default: .trainCommute) var transportType: TransportTypeOption
-    @Parameter(title: "Route", default: .repeatJourney) var route: WidgetRouteOption
+    @Parameter(title: "Route", default: .liveRoute) var route: WidgetRouteOption
     @Parameter(title: "Direction", default: .forward) var direction: WidgetDirectionOption
     @Parameter(title: "Day", default: .today) var day: WidgetDayOption
 }

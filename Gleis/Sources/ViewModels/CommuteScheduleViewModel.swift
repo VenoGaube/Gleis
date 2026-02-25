@@ -159,6 +159,7 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     func resetToDefaults() {
         Haptics.notification(.warning)
+        notificationService.cancelAllCommuteNotifications()
         route = SavedCommuteRoute()
         save()
     }

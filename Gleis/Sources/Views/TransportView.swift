@@ -30,15 +30,16 @@ struct TransportView: View {
                 HStack(alignment: .center) {
                     Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
                     Spacer()
+                    if viewModel.connections.isLoaded {
+                        DataFreshnessBadge(
+                            isStale: viewModel.isShowingCachedData || viewModel.isServiceDegraded
+                        )
+                    }
                     QuickTicketButton().font(.title2).padding(.trailing, 4)
                 }
 
                 if !networkMonitor.isConnected {
                     OfflineBanner()
-                } else if viewModel.isServiceDegraded {
-                    ServiceDegradedBanner(retryAt: viewModel.serviceRetryAt, lastUpdated: viewModel.lastUpdated)
-                } else if viewModel.isShowingCachedData {
-                    CachedDataBanner(lastUpdated: viewModel.lastUpdated)
                 }
 
                 if let recovery = viewModel.connectionRecovery {
@@ -223,7 +224,7 @@ struct TransportView: View {
             } else {
                 BottomScrollSentinel(
                     onScrollPastEnd: { Task { await viewModel.loadMoreConnections() } },
-                    isLoading: viewModel.isLoadingMore
+                    isLoading: viewModel.isLoadingMore || viewModel.isRefreshingConnections
                 )
             }
         }
@@ -272,6 +273,31 @@ struct TransportView: View {
         }
     }
 
+}
+
+private struct DataFreshnessBadge: View {
+    let isStale: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isStale ? Color.orange : Color.green)
+                .frame(width: 7, height: 7)
+            Text(isStale ? "Stale" : "Live")
+                .font(.caption2.weight(.semibold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill((isStale ? Color.orange : Color.green).opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke((isStale ? Color.orange : Color.green).opacity(0.22), lineWidth: 1)
+        )
+        .accessibilityLabel(isStale ? "Data status stale" : "Data status live")
+    }
 }
 
 private struct ReminderRecoveryBanner: View {

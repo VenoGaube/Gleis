@@ -75,6 +75,17 @@ final class NotificationService: NotificationServiceProtocol {
 
     func cancelNotification(id: String) { center.removePendingNotificationRequests(withIdentifiers: [id]) }
 
+    func cancelServiceAlertNotifications(reminderId: String) {
+        let prefix = "serviceAlert_\(reminderId)_"
+        center.getPendingNotificationRequests { requests in
+            let identifiers = requests
+                .map(\.identifier)
+                .filter { $0.hasPrefix(prefix) }
+            guard !identifiers.isEmpty else { return }
+            self.center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        }
+    }
+
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection) {
         let ids = [
             "commute_\(direction.rawValue)_\(day.rawValue)_5min", "commute_\(direction.rawValue)_\(day.rawValue)_leave",

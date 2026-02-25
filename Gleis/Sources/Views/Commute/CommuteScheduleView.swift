@@ -703,7 +703,7 @@ private struct ExcludedDatesSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Exclude holidays or OOO days so commute suggestions and reminders can ignore them.")
+                Text("Exclude holidays or OOO days so commute suggestions can ignore them.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)

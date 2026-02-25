@@ -48,8 +48,14 @@ final class WidgetRefreshService {
             )
         }
 
+        let now = Date()
+        persistUnavailableRouteStates(from: snapshot, updatedAt: now)
+
         let contexts = buildRefreshContexts(from: snapshot)
-        guard !contexts.isEmpty else { return }
+        guard !contexts.isEmpty else {
+            WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
+            return
+        }
 
         await withTaskGroup(of: Void.self) { group in
             for context in contexts {
@@ -79,7 +85,10 @@ final class WidgetRefreshService {
         var contexts: [WidgetRefreshContext] = []
         let dayScopes: [WidgetDayScope] = [.today, .tomorrow]
 
-        if let start = snapshot.liveStartStation, let end = snapshot.liveEndStation {
+        if isValidRoutePair(snapshot.liveStartStation, snapshot.liveEndStation),
+           let start = snapshot.liveStartStation,
+           let end = snapshot.liveEndStation
+        {
             contexts.append(contentsOf: contextsForRoutePair(
                 routeScope: .liveRoute,
                 forwardFrom: start,
@@ -88,7 +97,10 @@ final class WidgetRefreshService {
             ))
         }
 
-        if let home = snapshot.savedRoute.homeStation, let work = snapshot.savedRoute.workStation {
+        if isValidRoutePair(snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation),
+           let home = snapshot.savedRoute.homeStation,
+           let work = snapshot.savedRoute.workStation
+        {
             contexts.append(contentsOf: contextsForRoutePair(
                 routeScope: .repeatJourney,
                 forwardFrom: home,
@@ -155,7 +167,9 @@ final class WidgetRefreshService {
             let dayFilteredConnections = filterConnections(connections, for: context.dayScope, now: now)
             let selectedConnections = prioritizeConnections(
                 dayFilteredConnections,
-                pinnedConnectionId: snapshot.pinnedConnectionId
+                pinnedConnectionId: snapshot.pinnedConnectionId,
+                reminderIds: snapshot.reminderIds,
+                savedRoute: snapshot.savedRoute
             )
 
             if selectedConnections.isEmpty {
@@ -178,7 +192,7 @@ final class WidgetRefreshService {
                 let stopCount = connection.legs.first { !$0.isWalking }?.stopCount
                 let hasReminder =
                     snapshot.reminderIds.contains(connection.id)
-                    || snapshot.savedRoute.matchesSchedule(connection) != nil
+                    || hasActiveRepeatReminder(connection, in: snapshot.savedRoute)
                 let isPinned = snapshot.pinnedConnectionId == connection.id
 
                 return WidgetConnection(
@@ -217,11 +231,7 @@ final class WidgetRefreshService {
 
             AppGroupStorage.saveWidgetData(for: context.storageKey, data: widgetData)
         } catch {
-            AppGroupStorage.markWidgetDataAsFallback(
-                for: context.storageKey,
-                message: fallbackMessage(for: context),
-                updatedAt: now
-            )
+            saveFallbackData(for: context, updatedAt: now)
         }
     }
 
@@ -244,6 +254,14 @@ final class WidgetRefreshService {
         stateLock.lock()
         isRefreshing = false
         stateLock.unlock()
+    }
+
+    private func hasActiveRepeatReminder(_ connection: TrainConnection, in route: SavedCommuteRoute) -> Bool {
+        guard let direction = route.matchesSchedule(connection) else { return false }
+        let calendar = Calendar.current
+        let connectionDay = calendar.startOfDay(for: connection.departureTime)
+        if route.skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
+        return !route.isOccurrenceSkipped(on: connectionDay, direction: direction)
     }
 
     private func departureQueryDate(for dayScope: WidgetDayScope, now: Date) -> Date {
@@ -279,15 +297,149 @@ final class WidgetRefreshService {
 
     private func prioritizeConnections(
         _ connections: [TrainConnection],
-        pinnedConnectionId: String?
+        pinnedConnectionId: String?,
+        reminderIds: Set<String>,
+        savedRoute: SavedCommuteRoute
     ) -> [TrainConnection] {
+        let selectedConnectionIds = Set(connections.compactMap { connection in
+            if reminderIds.contains(connection.id) || hasActiveRepeatReminder(connection, in: savedRoute) {
+                return connection.id
+            }
+            return nil
+        })
+
         let sorted = connections.sorted { lhs, rhs in
             let lhsPinned = lhs.id == pinnedConnectionId
             let rhsPinned = rhs.id == pinnedConnectionId
             if lhsPinned != rhsPinned { return lhsPinned }
-            return lhs.departureTime < rhs.departureTime
+
+            let lhsSelected = selectedConnectionIds.contains(lhs.id)
+            let rhsSelected = selectedConnectionIds.contains(rhs.id)
+            if lhsSelected != rhsSelected { return lhsSelected }
+
+            if lhs.departureTime != rhs.departureTime {
+                return lhs.departureTime < rhs.departureTime
+            }
+            return lhs.id < rhs.id
         }
         return Array(sorted.prefix(3))
+    }
+
+    private func persistUnavailableRouteStates(from snapshot: WidgetRefreshSnapshot, updatedAt: Date) {
+        if !isValidRoutePair(snapshot.liveStartStation, snapshot.liveEndStation) {
+            saveUnavailableRouteState(
+                routeScope: .liveRoute,
+                forwardFrom: snapshot.liveStartStation,
+                forwardTo: snapshot.liveEndStation,
+                message: unavailableRouteMessage(
+                    routeScope: .liveRoute,
+                    from: snapshot.liveStartStation,
+                    to: snapshot.liveEndStation
+                ),
+                recoveryAction: .openLiveRoute,
+                updatedAt: updatedAt
+            )
+        }
+
+        if !isValidRoutePair(snapshot.savedRoute.homeStation, snapshot.savedRoute.workStation) {
+            saveUnavailableRouteState(
+                routeScope: .repeatJourney,
+                forwardFrom: snapshot.savedRoute.homeStation,
+                forwardTo: snapshot.savedRoute.workStation,
+                message: unavailableRouteMessage(
+                    routeScope: .repeatJourney,
+                    from: snapshot.savedRoute.homeStation,
+                    to: snapshot.savedRoute.workStation
+                ),
+                recoveryAction: .openRepeatJourney,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    private func saveUnavailableRouteState(
+        routeScope: WidgetRouteScope,
+        forwardFrom: Station?,
+        forwardTo: Station?,
+        message: String,
+        recoveryAction: WidgetRecoveryAction,
+        updatedAt: Date
+    ) {
+        let dayScopes: [WidgetDayScope] = [.today, .tomorrow]
+        let directions: [WidgetDirectionScope] = [.forward, .reverse]
+
+        for dayScope in dayScopes {
+            for direction in directions {
+                let fromName = direction == .forward ? forwardFrom?.name : forwardTo?.name
+                let toName = direction == .forward ? forwardTo?.name : forwardFrom?.name
+                let key = WidgetDataStorageKey(
+                    transportType: .trainCommute,
+                    routeScope: routeScope,
+                    directionScope: direction,
+                    dayScope: dayScope
+                )
+                let data = WidgetData(
+                    transportType: .trainCommute,
+                    connections: [],
+                    leaveTimes: [],
+                    fromStationName: fromName,
+                    toStationName: toName,
+                    updatedAt: updatedAt,
+                    state: .stale,
+                    stateMessage: message,
+                    recoveryAction: recoveryAction
+                )
+                AppGroupStorage.saveWidgetData(for: key, data: data)
+            }
+        }
+    }
+
+    private func unavailableRouteMessage(routeScope: WidgetRouteScope, from: Station?, to: Station?) -> String {
+        if let from, let to, from.id == to.id {
+            return "Choose different stations to show departures."
+        }
+
+        switch routeScope {
+        case .liveRoute:
+            return "Set your current route to show live departures."
+        case .repeatJourney:
+            return "Set your morning and afternoon route to show departures."
+        }
+    }
+
+    private func saveFallbackData(for context: WidgetRefreshContext, updatedAt: Date) {
+        let existing = AppGroupStorage.loadWidgetData(for: context.storageKey)
+        let shouldReuseExistingConnections =
+            existing.map { matchesRoute($0, context: context) } ?? false
+
+        let fallbackData = WidgetData(
+            transportType: .trainCommute,
+            connections: shouldReuseExistingConnections ? (existing?.connections ?? []) : [],
+            leaveTimes: shouldReuseExistingConnections ? (existing?.leaveTimes ?? []) : [],
+            fromStationName: context.fromStation.name,
+            toStationName: context.toStation.name,
+            updatedAt: updatedAt,
+            state: .fallback,
+            stateMessage: fallbackMessage(for: context),
+            recoveryAction: recoveryAction(for: context.storageKey.routeScope)
+        )
+        AppGroupStorage.saveWidgetData(for: context.storageKey, data: fallbackData)
+    }
+
+    private func matchesRoute(_ data: WidgetData, context: WidgetRefreshContext) -> Bool {
+        normalizeStationName(data.fromStationName) == normalizeStationName(context.fromStation.name)
+            && normalizeStationName(data.toStationName) == normalizeStationName(context.toStation.name)
+    }
+
+    private func normalizeStationName(_ name: String?) -> String {
+        (name ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func isValidRoutePair(_ from: Station?, _ to: Station?) -> Bool {
+        guard let from, let to else { return false }
+        return from.id != to.id
     }
 
     private func recoveryAction(for routeScope: WidgetRouteScope) -> WidgetRecoveryAction {

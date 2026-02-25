@@ -176,6 +176,7 @@ struct SettingsView: View {
     }
 
     private func removeRepeatSchedule(day: Weekday, direction: CommuteDirection) {
+        NotificationService.shared.cancelCommuteNotification(day: day, direction: direction)
         var route = settingsManager.savedCommuteRoute
         route.removeSchedule(for: day, direction: direction)
         settingsManager.updateSavedCommuteRoute(route)
@@ -184,6 +185,7 @@ struct SettingsView: View {
     private func cancelReminder(_ reminder: ScheduledReminder) {
         NotificationService.shared.cancelNotification(id: "\(reminder.id)_fiveMinuteWarning")
         NotificationService.shared.cancelNotification(id: "\(reminder.id)_exactTime")
+        NotificationService.shared.cancelServiceAlertNotifications(reminderId: reminder.id)
         settingsManager.removeReminder(connectionId: reminder.id)
     }
 }

@@ -41,6 +41,7 @@ protocol NotificationServiceProtocol {
         reminderId: String
     ) async throws
     func cancelNotification(id: String)
+    func cancelServiceAlertNotifications(reminderId: String)
     func cancelCommuteNotification(day: Weekday, direction: CommuteDirection)
     func cancelAllCommuteNotifications()
     func scheduleCommuteNotification(

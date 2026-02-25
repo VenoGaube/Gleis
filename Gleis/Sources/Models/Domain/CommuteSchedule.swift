@@ -11,6 +11,7 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     var toWorkActiveDays: Set<Weekday>
     var toHomeActiveDays: Set<Weekday>
     var skippedDates: [Date]
+    var skippedOccurrences: [SkippedCommuteOccurrence]
 
     private static let defaultWorkweekDays: Set<Weekday> = Set(Weekday.workweek)
 
@@ -23,6 +24,7 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         case toWorkActiveDays
         case toHomeActiveDays
         case skippedDates
+        case skippedOccurrences
     }
 
     init() {
@@ -32,6 +34,7 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         toWorkActiveDays = Self.defaultWorkweekDays
         toHomeActiveDays = Self.defaultWorkweekDays
         skippedDates = []
+        skippedOccurrences = []
     }
 
     var isConfigured: Bool { homeStation != nil && workStation != nil }
@@ -45,6 +48,8 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         toWorkSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toWorkSchedules) ?? [:]
         toHomeSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toHomeSchedules) ?? [:]
         skippedDates = try container.decodeIfPresent([Date].self, forKey: .skippedDates) ?? []
+        skippedOccurrences =
+            try container.decodeIfPresent([SkippedCommuteOccurrence].self, forKey: .skippedOccurrences) ?? []
 
         let decodedToWorkActive =
             try container.decodeIfPresent(Set<Weekday>.self, forKey: .toWorkActiveDays)
@@ -67,6 +72,7 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         try container.encode(toWorkActiveDays, forKey: .toWorkActiveDays)
         try container.encode(toHomeActiveDays, forKey: .toHomeActiveDays)
         try container.encode(skippedDates, forKey: .skippedDates)
+        try container.encode(skippedOccurrences, forKey: .skippedOccurrences)
     }
 
     func schedule(for day: Weekday, direction: CommuteDirection = .toWork) -> DaySchedule? {
@@ -101,6 +107,10 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         } else {
             toHomeSchedules.removeValue(forKey: day)
         }
+        skippedOccurrences.removeAll {
+            $0.direction == direction
+                && Calendar.current.component(.weekday, from: $0.date) == day.rawValue
+        }
     }
 
     mutating func setActiveDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
@@ -126,8 +136,6 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
 
     func matchesSchedule(_ connection: TrainConnection) -> CommuteDirection? {
         let calendar = Calendar.current
-        let connectionDay = calendar.startOfDay(for: connection.departureTime)
-        if skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return nil }
         guard let weekday = Weekday(rawValue: calendar.component(.weekday, from: connection.departureTime)) else {
             return nil
         }
@@ -136,16 +144,30 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         let connMinute = calendar.component(.minute, from: connection.departureTime)
 
         if isDayActive(weekday, direction: .toWork),
-           let schedule = toWorkSchedules[weekday], schedule.departureHour == connHour,
-           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
+           let schedule = toWorkSchedules[weekday]
         {
-            return .toWork
+            if let scheduleConnectionId = schedule.connectionId, scheduleConnectionId == connection.id {
+                return .toWork
+            }
+            if schedule.departureHour == connHour,
+               schedule.departureMinute == connMinute,
+               schedule.lineNumber == connection.lineNumber
+            {
+                return .toWork
+            }
         }
         if isDayActive(weekday, direction: .toHome),
-           let schedule = toHomeSchedules[weekday], schedule.departureHour == connHour,
-           schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
+           let schedule = toHomeSchedules[weekday]
         {
-            return .toHome
+            if let scheduleConnectionId = schedule.connectionId, scheduleConnectionId == connection.id {
+                return .toHome
+            }
+            if schedule.departureHour == connHour,
+               schedule.departureMinute == connMinute,
+               schedule.lineNumber == connection.lineNumber
+            {
+                return .toHome
+            }
         }
         return nil
     }
@@ -155,9 +177,24 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         if !skippedDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: day) }) { skippedDates.append(day) }
     }
 
+    mutating func skipOccurrence(on date: Date, direction: CommuteDirection) {
+        let day = Calendar.current.startOfDay(for: date)
+        if !isOccurrenceSkipped(on: day, direction: direction) {
+            skippedOccurrences.append(SkippedCommuteOccurrence(date: day, direction: direction))
+        }
+    }
+
+    func isOccurrenceSkipped(on date: Date, direction: CommuteDirection) -> Bool {
+        let day = Calendar.current.startOfDay(for: date)
+        return skippedOccurrences.contains {
+            $0.direction == direction && Calendar.current.isDate($0.date, inSameDayAs: day)
+        }
+    }
+
     mutating func pruneOldSkippedDates() {
         let yesterday = Calendar.current.startOfDay(for: Date().addingTimeInterval(-86400))
         skippedDates.removeAll { $0 < yesterday }
+        skippedOccurrences.removeAll { $0.date < yesterday }
     }
 
     private static func sanitizedActiveDays(_ activeDays: Set<Weekday>, scheduledDays: Dictionary<Weekday, DaySchedule>.Keys)
@@ -166,6 +203,11 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         let merged = activeDays.union(scheduledDays)
         return merged.isEmpty ? defaultWorkweekDays : merged
     }
+}
+
+struct SkippedCommuteOccurrence: Codable, Equatable {
+    var date: Date
+    var direction: CommuteDirection
 }
 
 // MARK: - DaySchedule

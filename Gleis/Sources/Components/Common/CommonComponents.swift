@@ -671,30 +671,49 @@ struct StationButton: View {
 
 // MARK: - BottomScrollSentinel
 
-/// Detects when user scrolls past the end of content (overscroll) to trigger pagination.
-/// Only fires when the sentinel is pulled significantly into view, not just when it appears.
+/// Detects when the user reaches the bottom region of the list to trigger pagination.
+/// Fires once per load cycle and retriggers after loading completes.
 struct BottomScrollSentinel: View {
     let onScrollPastEnd: () -> Void
     let isLoading: Bool
 
     @State private var hasTriggered = false
+    @State private var lastMinY: CGFloat = .greatestFiniteMagnitude
 
     var body: some View {
         GeometryReader { proxy in
-            Color.clear.onChange(of: proxy.frame(in: .global).minY) { _, minY in
-                guard !isLoading, !hasTriggered else { return }
-                let screenHeight = UIScreen.main.bounds.height
-                // Trigger when sentinel top is pulled above 85% of screen height
-                // This means user has scrolled past the content end
-                let triggerThreshold = screenHeight * 0.85
-                if minY < triggerThreshold {
+            Color.clear
+                .onAppear {
+                    lastMinY = proxy.frame(in: .global).minY
+                    guard !isLoading, !hasTriggered else { return }
+                    let triggerThreshold = UIScreen.main.bounds.height + 24
+                    if lastMinY < triggerThreshold {
+                        hasTriggered = true
+                        onScrollPastEnd()
+                    }
+                }
+                .onChange(of: proxy.frame(in: .global).minY) { _, minY in
+                    lastMinY = minY
+                    guard !isLoading, !hasTriggered else { return }
+                    // Trigger as soon as sentinel enters the viewport near the bottom.
+                    let triggerThreshold = UIScreen.main.bounds.height + 24
+                    if minY < triggerThreshold {
+                        hasTriggered = true
+                        onScrollPastEnd()
+                    }
+                }
+        }
+        .frame(height: 60)
+        .onChange(of: isLoading) { wasLoading, nowLoading in
+            // Reset trigger state when loading completes so user can trigger again.
+            if wasLoading, !nowLoading {
+                hasTriggered = false
+                let triggerThreshold = UIScreen.main.bounds.height + 24
+                if lastMinY < triggerThreshold {
                     hasTriggered = true
                     onScrollPastEnd()
                 }
             }
-        }.frame(height: 60).onChange(of: isLoading) { wasLoading, nowLoading in
-            // Reset trigger state when loading completes so user can trigger again
-            if wasLoading, !nowLoading { hasTriggered = false }
         }
     }
 }

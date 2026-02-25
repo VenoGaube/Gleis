@@ -32,6 +32,7 @@ final class TransportViewModel: ObservableObject {
     @Published var errorTitle: String?
     @Published var showError: Bool = false
     @Published var isShowingCachedData = false
+    @Published private(set) var isRefreshingConnections = false
     @Published var isServiceDegraded = false
     @Published var serviceRetryAt: Date?
     @Published var lastUpdated: Date?
@@ -66,6 +67,7 @@ final class TransportViewModel: ObservableObject {
     private var consecutiveAutomaticFetchFailures = 0
     private var automaticRefreshBackoffUntil: Date?
     private var alertStabilityByConnectionID: [String: AlertStabilityState] = [:]
+    private var lastCommuteNotificationReconcileDay: Date?
 
     private struct AlertStabilityState {
         var activeAlerts: [ServiceAlert]
@@ -89,6 +91,9 @@ final class TransportViewModel: ObservableObject {
         Task {
             await loadStations()
         }
+        Task {
+            await reconcileCommuteNotificationsIfNeeded(force: true)
+        }
         observeConfigChanges()
     }
 
@@ -101,6 +106,9 @@ final class TransportViewModel: ObservableObject {
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
+                // Immediately invalidate widget route snapshots to avoid showing the old station pair
+                // while the new route fetch is still in progress.
+                updateWidget(with: [], forceRefreshContexts: true)
                 currentFetchTask?.cancel()
                 currentFetchTask = Task { await self.refreshConnections(isUserInitiated: false) }
             }
@@ -113,8 +121,38 @@ final class TransportViewModel: ObservableObject {
         }.debounce(for: .milliseconds(100), scheduler: RunLoop.main).sink { [weak self] _ in
             guard let self else { return }
             rebuildDisplayConnections()
-            if let loadedConnections = connections.value { updateWidgetIfNeeded(with: loadedConnections) }
+            if let loadedConnections = connections.value {
+                updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
+            }
         }.store(in: &cancellables)
+
+        // Keep card selection state and widgets in sync when reminders are edited from
+        // other views (Settings, repeat schedules, or background reminder resync).
+        settingsManager.$scheduledReminders
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                rebuildDisplayConnections()
+                if let loadedConnections = connections.value {
+                    updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
+                }
+            }
+            .store(in: &cancellables)
+
+        settingsManager.$savedCommuteRoute
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                rebuildDisplayConnections()
+                if let loadedConnections = connections.value {
+                    updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: true)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func loadStations() async {
@@ -133,6 +171,8 @@ final class TransportViewModel: ObservableObject {
     }
 
     func refreshConnections(showFeedback: Bool = false, isUserInitiated: Bool = false) async {
+        await reconcileCommuteNotificationsIfNeeded()
+
         guard !isFetching else {
             if let pending = pendingRefreshRequest {
                 pendingRefreshRequest = (
@@ -145,8 +185,10 @@ final class TransportViewModel: ObservableObject {
             return
         }
         isFetching = true
+        isRefreshingConnections = true
         defer {
             isFetching = false
+            isRefreshingConnections = false
             if let pending = pendingRefreshRequest {
                 pendingRefreshRequest = nil
                 currentFetchTask = Task { @MainActor [weak self] in
@@ -166,7 +208,7 @@ final class TransportViewModel: ObservableObject {
             availableTrainTypes = []
             lastInitializedFilterRouteKey = nil
             connectionRecovery = nil
-            updateWidget(with: [])
+            updateWidget(with: [], forceRefreshContexts: true)
             return
         }
 
@@ -200,7 +242,7 @@ final class TransportViewModel: ObservableObject {
 
         // Skip fetch if route unchanged, already loaded, and not user-initiated
         // But still filter out past connections from existing state
-        if !isUserInitiated && !isRouteChange && connections.isLoaded && !isShowingCachedData {
+        if !isUserInitiated, !isRouteChange, connections.isLoaded, !isShowingCachedData {
             if let existing = connections.value {
                 let now = Date()
                 let pinnedId = settingsManager.pinnedJourney?.connectionId
@@ -215,7 +257,7 @@ final class TransportViewModel: ObservableObject {
                 let routeDataIncomplete = stillFuture.contains(where: missingRouteData)
                 let needsFreshNetworkData =
                     lastUpdated.map { now.timeIntervalSince($0) >= minimumLiveRefreshInterval } ?? true
-                if !routeDataIncomplete && !needsFreshNetworkData { return }
+                if !routeDataIncomplete, !needsFreshNetworkData { return }
             } else {
                 return
             }
@@ -323,7 +365,6 @@ final class TransportViewModel: ObservableObject {
                 evaluateReminderReliability(with: futureConnections)
                 isShowingCachedData = true
                 lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
-                toastManager.show("Showing cached data", type: .info)
                 updateWidgetIfNeeded(with: futureConnections)
             } else {
                 connections = .error(GleisError.from(error))
@@ -359,11 +400,14 @@ final class TransportViewModel: ObservableObject {
             if let replacingReminderId, replacingReminderId != connection.id {
                 notificationService.cancelNotification(id: "\(replacingReminderId)_fiveMinuteWarning")
                 notificationService.cancelNotification(id: "\(replacingReminderId)_exactTime")
+                notificationService.cancelServiceAlertNotifications(reminderId: replacingReminderId)
                 settingsManager.removeReminder(connectionId: replacingReminderId)
             }
             settingsManager.upsertReminder(reminder)
             rebuildDisplayConnections()
-            if case let .loaded(conns) = connections { updateWidgetIfNeeded(with: conns) }
+            if case let .loaded(conns) = connections {
+                updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
+            }
         } catch {
             if let gleisError = error as? GleisError, case .notificationPermissionDenied = gleisError {
                 do {
@@ -389,17 +433,26 @@ final class TransportViewModel: ObservableObject {
     func cancelNotification(for connection: TrainConnection) {
         notificationService.cancelNotification(id: "\(connection.id)_fiveMinuteWarning")
         notificationService.cancelNotification(id: "\(connection.id)_exactTime")
+        notificationService.cancelServiceAlertNotifications(reminderId: connection.id)
         if selectedConnection?.id == connection.id { selectedConnection = nil }
+        settingsManager.removeReminder(connectionId: connection.id)
 
-        if settingsManager.savedCommuteRoute.matchesSchedule(connection) != nil {
+        if let direction = settingsManager.savedCommuteRoute.matchesSchedule(connection),
+           let weekday = Weekday(rawValue: Calendar.current.component(.weekday, from: connection.departureTime))
+        {
+            notificationService.cancelCommuteNotification(day: weekday, direction: direction)
             var route = settingsManager.savedCommuteRoute
-            route.skipDate(connection.departureTime)
+            route.skipOccurrence(on: connection.departureTime, direction: direction)
             route.pruneOldSkippedDates()
             settingsManager.updateSavedCommuteRoute(route)
-            toastManager.show("Skipped for today", type: .info)
+            toastManager.show("Skipped this trip", type: .info)
         } else {
-            settingsManager.removeReminder(connectionId: connection.id)
             toastManager.show("Reminder cancelled", type: .info)
+        }
+
+        rebuildDisplayConnections()
+        if case let .loaded(conns) = connections {
+            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
         }
     }
 
@@ -432,14 +485,18 @@ final class TransportViewModel: ObservableObject {
         settingsManager.pinJourney(connection)
         toastManager.show("Pinned as My Journey", type: .success)
         rebuildDisplayConnections()
-        if case let .loaded(conns) = connections { updateWidgetIfNeeded(with: conns) }
+        if case let .loaded(conns) = connections {
+            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
+        }
     }
 
     func unpinJourney() {
         settingsManager.unpinJourney()
         toastManager.show("Unpinned journey", type: .info)
         rebuildDisplayConnections()
-        if case let .loaded(conns) = connections { updateWidgetIfNeeded(with: conns) }
+        if case let .loaded(conns) = connections {
+            updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
+        }
     }
 
     func isPinned(_ connectionId: String) -> Bool { settingsManager.isPinned(connectionId) }
@@ -457,17 +514,44 @@ final class TransportViewModel: ObservableObject {
         defer { isLoadingMore = false }
 
         let pageSize = FetchLimits.connectionBatchSize
+        let maxPaginationHops = 3
 
         do {
-            let more = try await transportService.fetchConnections(
-                from: start, to: end, transportType: transportType,
-                departureTime: last.departureTime.addingTimeInterval(60), count: pageSize
-            )
-            guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
-            let now = Date()
-            let newConns = more.filter { new in new.departureTime > now && !current.contains { $0.id == new.id } }
-            guard !newConns.isEmpty else { return }
-            setConnections(current + newConns)
+            let currentIds = Set(current.map(\.id))
+            var cursor = last.departureTime.addingTimeInterval(1)
+            var appendedConnections: [TrainConnection] = []
+
+            for _ in 0 ..< maxPaginationHops {
+                let more = try await transportService.fetchConnections(
+                    from: start, to: end, transportType: transportType, departureTime: cursor, count: pageSize
+                )
+                guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
+                guard !more.isEmpty else { break }
+
+                let now = Date()
+                let unseen = more.filter { new in
+                    new.departureTime > now && !currentIds.contains(new.id) && !appendedConnections.contains {
+                        $0.id == new.id
+                    }
+                }
+                if !unseen.isEmpty {
+                    appendedConnections.append(contentsOf: unseen)
+                    break
+                }
+
+                // Advance the cursor to avoid getting stuck on duplicate pages.
+                if let furthestDeparture = more.map(\.departureTime).max(), furthestDeparture > cursor {
+                    cursor = furthestDeparture.addingTimeInterval(1)
+                } else {
+                    break
+                }
+
+                // If backend returns fewer than requested, we've likely reached the end.
+                if more.count < pageSize { break }
+            }
+
+            guard !appendedConnections.isEmpty else { return }
+            setConnections(current + appendedConnections)
         } catch { if !(error is CancellationError) { toastManager.show("Failed to load more", type: .error) } }
     }
 
@@ -543,13 +627,14 @@ final class TransportViewModel: ObservableObject {
 
         let excluded = config.excludedTrainTypes
         let filtered = excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
+        let route = settingsManager.savedCommuteRoute
 
         let currentTime = Date()
         displayConnections = filtered.compactMap { connection in
             let leaveTime = calculateLeaveTime(for: connection)
             let isSelected =
                 settingsManager.isReminderSet(for: connection.id)
-                || settingsManager.savedCommuteRoute.matchesSchedule(connection) != nil
+                || hasActiveRepeatReminder(for: connection, route: route)
             let isPinned = settingsManager.isPinned(connection.id)
 
             return DisplayConnection(
@@ -646,22 +731,28 @@ final class TransportViewModel: ObservableObject {
 
     // MARK: - Widget
 
-    private func updateWidgetIfNeeded(with connections: [TrainConnection]) {
+    private func updateWidgetIfNeeded(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
-        if let lastUpdate = lastWidgetUpdate, now.timeIntervalSince(lastUpdate) < 5 { return }
+        if !forceRefreshContexts,
+           let lastUpdate = lastWidgetUpdate,
+           now.timeIntervalSince(lastUpdate) < 5
+        {
+            return
+        }
         lastWidgetUpdate = now
-        updateWidget(with: connections)
+        updateWidget(with: connections, forceRefreshContexts: forceRefreshContexts)
     }
 
-    private func updateWidget(with connections: [TrainConnection]) {
+    private func updateWidget(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
         let futureConnections = connections.filter { $0.departureTime > now }
+        let route = settingsManager.savedCommuteRoute
 
-        let widgetConnections = futureConnections.prefix(3).map { conn -> WidgetConnection in
+        let widgetConnections = futureConnections.map { conn -> WidgetConnection in
             let stopCount = conn.legs.first { !$0.isWalking }?.stopCount
             let hasReminder =
                 settingsManager.isReminderSet(for: conn.id)
-                || settingsManager.savedCommuteRoute.matchesSchedule(conn) != nil
+                || hasActiveRepeatReminder(for: conn, route: route)
             let isPinned = settingsManager.isPinned(conn.id)
             return WidgetConnection(
                 id: conn.id, lineNumber: conn.lineNumber, lineColors: conn.lineColors, departureTime: conn.departureTime,
@@ -674,18 +765,22 @@ final class TransportViewModel: ObservableObject {
 
         let sorted = widgetConnections.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            if lhs.hasReminder != rhs.hasReminder { return lhs.hasReminder }
             return lhs.departureTime < rhs.departureTime
         }
+        let topConnections = Array(sorted.prefix(3))
 
-        let sortedConnections = sorted.compactMap { widgetConn in futureConnections.first { $0.id == widgetConn.id } }
+        let sortedConnections = topConnections.compactMap {
+            widgetConn in futureConnections.first { $0.id == widgetConn.id }
+        }
         let leaveTimes = sortedConnections.map { calculateLeaveTime(for: $0) }
         let isRouteConfigured = config.startStation != nil && config.endStation != nil
         let state: WidgetDataState
         let message: String?
-        if sorted.isEmpty {
+        if topConnections.isEmpty {
             state = .stale
             message = "No upcoming departures."
-        } else if isServiceDegraded && isShowingCachedData {
+        } else if isServiceDegraded, isShowingCachedData {
             state = .fallback
             message = widgetServiceDegradedMessage(referenceDate: now)
         } else {
@@ -696,7 +791,7 @@ final class TransportViewModel: ObservableObject {
 
         let widgetData = WidgetData(
             transportType: transportType,
-            connections: Array(sorted),
+            connections: topConnections,
             leaveTimes: leaveTimes,
             fromStationName: config.startStation?.name,
             toStationName: config.endStation?.name,
@@ -708,7 +803,7 @@ final class TransportViewModel: ObservableObject {
         AppGroupStorage.saveWidgetData(for: transportType, data: widgetData)
         // Keep all intent-keyed widget variants (direction/day/route) fresh as well.
         Task(priority: .utility) {
-            await WidgetRefreshService.shared.refreshWidgetData()
+            await WidgetRefreshService.shared.refreshWidgetData(force: forceRefreshContexts)
         }
         WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
     }
@@ -771,6 +866,64 @@ final class TransportViewModel: ObservableObject {
         }
 
         connectionRecovery = nil
+    }
+
+    private func reconcileCommuteNotificationsIfNeeded(force: Bool = false) async {
+        let today = Calendar.current.startOfDay(for: Date())
+        if !force,
+           let lastReconcile = lastCommuteNotificationReconcileDay,
+           Calendar.current.isDate(lastReconcile, inSameDayAs: today)
+        {
+            return
+        }
+        await reconcileCommuteNotificationsWithSavedRoute(referenceDate: today)
+        lastCommuteNotificationReconcileDay = today
+    }
+
+    private func reconcileCommuteNotificationsWithSavedRoute(referenceDate: Date) async {
+        var route = settingsManager.savedCommuteRoute
+        let routeBeforePrune = route
+        route.pruneOldSkippedDates()
+        if route != routeBeforePrune {
+            settingsManager.updateSavedCommuteRoute(route)
+        }
+
+        let calendar = Calendar.current
+        let skippedTodayGlobally = route.skippedDates.contains { calendar.isDate($0, inSameDayAs: referenceDate) }
+        let todayWeekday = Weekday(rawValue: calendar.component(.weekday, from: referenceDate))
+
+        notificationService.cancelAllCommuteNotifications()
+        let cfg = config
+
+        for (day, schedule) in route.toWorkSchedules where route.isDayActive(day, direction: .toWork) {
+            if day == todayWeekday,
+               (skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toWork))
+            {
+                continue
+            }
+            try? await notificationService.scheduleCommuteNotification(
+                route: route, day: day, schedule: schedule, direction: .toWork, config: cfg
+            )
+        }
+
+        for (day, schedule) in route.toHomeSchedules where route.isDayActive(day, direction: .toHome) {
+            if day == todayWeekday,
+               (skippedTodayGlobally || route.isOccurrenceSkipped(on: referenceDate, direction: .toHome))
+            {
+                continue
+            }
+            try? await notificationService.scheduleCommuteNotification(
+                route: route, day: day, schedule: schedule, direction: .toHome, config: cfg
+            )
+        }
+    }
+
+    private func hasActiveRepeatReminder(for connection: TrainConnection, route: SavedCommuteRoute) -> Bool {
+        guard let direction = route.matchesSchedule(connection) else { return false }
+        let calendar = Calendar.current
+        let connectionDay = calendar.startOfDay(for: connection.departureTime)
+        if route.skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
+        return !route.isOccurrenceSkipped(on: connectionDay, direction: direction)
     }
 
     private func notifyServiceAlertsForReminders(
@@ -951,14 +1104,20 @@ final class TransportViewModel: ObservableObject {
                 if reminder.id != updatedReminder.id {
                     notificationService.cancelNotification(id: "\(reminder.id)_fiveMinuteWarning")
                     notificationService.cancelNotification(id: "\(reminder.id)_exactTime")
+                    notificationService.cancelServiceAlertNotifications(reminderId: reminder.id)
                     settingsManager.removeReminder(connectionId: reminder.id)
                 }
                 settingsManager.upsertReminder(updatedReminder)
+                rebuildDisplayConnections()
+                if case let .loaded(conns) = connections {
+                    updateWidgetIfNeeded(with: conns, forceRefreshContexts: true)
+                }
             } catch {
                 // Keep current reminder if live resync fails and allow a retry on next refresh.
                 if reminder.id != liveConnection.id {
                     notificationService.cancelNotification(id: "\(liveConnection.id)_fiveMinuteWarning")
                     notificationService.cancelNotification(id: "\(liveConnection.id)_exactTime")
+                    notificationService.cancelServiceAlertNotifications(reminderId: liveConnection.id)
                 }
                 reminderResyncSignatures.remove(signature)
             }
