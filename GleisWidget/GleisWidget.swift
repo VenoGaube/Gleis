@@ -288,7 +288,7 @@ extension View {
                 return colorScheme == .dark ? Color(.systemBackground) : .white
             }
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            return urgencyColor(remaining)
+            return widgetJourneyUrgencyColor(remaining)
         }()
 
         return containerBackground(for: .widget) {
@@ -307,51 +307,20 @@ extension View {
 /// Focused on: When to leave, departure time, platform, and delay status
 struct SmallWidgetView: View {
     let entry: GleisEntry
-    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         if let data = entry.data, let current = data.connection(at: entry.date) {
-            let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            let conn = current.connection
-
-            VStack(spacing: 0) {
-                Text(widgetRouteText(for: entry, data: data))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.62)
-                    .allowsTightening(true)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-
-                // Top: Line badge (centered)
-                LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small).padding(.top, 6)
-
-                Spacer(minLength: 0)
-
-                // Center: Countdown - the hero element
-                CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
-
-                Spacer(minLength: 0)
-
-                // Bottom: Departure info - what you need at the station
-                VStack(spacing: 4) {
-                    DepartureInfo(connection: conn, size: .small)
-                    if conn.hasServiceAlert {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text("Service alert")
-                        }
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.red)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
+            let route = widgetRouteText(for: entry, data: data)
+            WidgetJourneySmallCardContent(
+                routeText: route,
+                connection: current.connection,
+                leaveTime: current.leaveTime,
+                referenceDate: entry.date
+            )
+            .widgetURL(entryURL(entry, fallbackConnectionId: current.connection.id))
         } else {
-            EmptyWidgetView(size: .small, data: entry.data)
+            WidgetJourneyEmptyState(size: .small, data: entry.data, subtitle: emptyHintText(for: entry.data))
+                .widgetURL(recoveryURL(for: entry.data))
         }
     }
 }
@@ -361,114 +330,22 @@ struct SmallWidgetView: View {
 /// Journey card layout with countdown and departure details
 struct MediumWidgetView: View {
     let entry: GleisEntry
-    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         if let data = entry.data, let current = data.connection(at: entry.date) {
-            let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            let conn = current.connection
-
-            HStack(spacing: 0) {
-                // Left: Countdown panel
-                VStack(spacing: 4) {
-                    CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
-
-                    if remaining > 0 {
-                        Text("Leave at \(current.leaveTime, style: .time)").font(.system(size: 10)).foregroundStyle(
-                            .secondary
-                        ).scalableText(minimumScale: 0.8)
-                    }
-                }.frame(width: 95).frame(maxHeight: .infinity)
-
-                // Right: Journey details
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(widgetRouteText(for: entry, data: data))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .minimumScaleFactor(0.7)
-                        .allowsTightening(true)
-
-                    // Header: Line + Destination
-                    HStack(spacing: 8) {
-                        LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(conn.destination).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
-
-                            if conn.isPinned {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "pin.fill").font(.system(size: 7))
-                                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
-                                }.foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-                    }
-
-                    Spacer(minLength: 0)
-
-                    // Departure time + Platform (the critical info)
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                if conn.isDelayed {
-                                    Text(scheduledTime(conn.departureTime, delay: conn.delay)).font(
-                                        .title3.weight(.medium).monospacedDigit()
-                                    ).strikethrough().foregroundStyle(.secondary).scalableText(minimumScale: 0.7)
-
-                                    Text(timeFormatter.string(from: conn.departureTime)).font(
-                                        .title2.weight(.bold).monospacedDigit()
-                                    ).foregroundStyle(.orange).scalableText(minimumScale: 0.7)
-                                } else {
-                                    Text(timeFormatter.string(from: conn.departureTime)).font(
-                                        .title2.weight(.bold).monospacedDigit()
-                                    ).scalableText(minimumScale: 0.7)
-                                }
-                            }
-                        }
-
-                        Spacer()
-
-                        // Platform - same height as departure
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-
-                            Text(conn.platform ?? "–").font(.title2.weight(.bold).monospacedDigit()).scalableText(
-                                minimumScale: 0.7)
-                        }
-                    }
-
-                    // Delay indicator
-                    if conn.isDelayed {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
-                        }.foregroundStyle(.orange)
-                    }
-
-                    if conn.hasServiceAlert {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("Service alert").font(.caption.weight(.semibold))
-                        }
-                        .foregroundStyle(.red)
-                    }
-                }.padding(14)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).widgetURL(
-                entryURL(entry, fallbackConnectionId: conn.id))
+            let route = widgetRouteText(for: entry, data: data)
+            WidgetJourneyMediumCardContent(
+                routeText: route,
+                connection: current.connection,
+                leaveTime: current.leaveTime,
+                referenceDate: entry.date
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .widgetURL(entryURL(entry, fallbackConnectionId: current.connection.id))
         } else {
-            EmptyWidgetView(size: .medium, data: entry.data)
+            WidgetJourneyEmptyState(size: .medium, data: entry.data, subtitle: emptyHintText(for: entry.data))
+                .widgetURL(recoveryURL(for: entry.data))
         }
-    }
-
-    private func scheduledTime(_ actual: Date, delay: Int) -> String {
-        let scheduled = actual.addingTimeInterval(TimeInterval(-delay * 60))
-        return timeFormatter.string(from: scheduled)
     }
 }
 
@@ -498,7 +375,7 @@ struct CircularWidgetView: View {
                     if remaining <= 0 {
                         Text("GO").font(.system(size: 18, weight: .black, design: .rounded)).scalableText(
                             minimumScale: 0.6)
-                    } else if remaining <= 60 {
+                    } else if widgetShouldShowSecondsCountdown(leaveTime: current.leaveTime) {
                         // Under 1 minute: live countdown with seconds
                         Text(current.leaveTime, style: .timer).font(
                             .system(size: 14, weight: .bold, design: .rounded).monospacedDigit()
@@ -560,13 +437,13 @@ struct RectangularWidgetView: View {
                 HStack(spacing: 4) {
                     if remaining <= 0 {
                         Text("GO!").fontWeight(.semibold).widgetAccentable().scalableText(minimumScale: 0.8)
-                    } else if remaining <= 60 {
+                    } else if widgetShouldShowSecondsCountdown(leaveTime: current.leaveTime) {
                         // Under 1 minute: live countdown with seconds
                         Text(current.leaveTime, style: .timer).fontWeight(.bold).widgetAccentable().scalableText(
                             minimumScale: 0.8)
                         Text("to go").foregroundStyle(.secondary)
                     } else {
-                        Text(formatCountdown(remaining)).fontWeight(.bold).widgetAccentable().scalableText(
+                        Text(widgetJourneyFormatCountdown(remaining)).fontWeight(.bold).widgetAccentable().scalableText(
                             minimumScale: 0.8)
                         Text("to go").foregroundStyle(.secondary)
                     }
@@ -580,220 +457,6 @@ struct RectangularWidgetView: View {
                 }.font(.headline)
                 Text(emptyHintText(for: entry.data)).font(.subheadline).foregroundStyle(.secondary)
             }.widgetURL(entryURL(entry))
-        }
-    }
-}
-
-// MARK: - LineBadge
-
-struct LineBadge: View {
-    let line: String
-    let lineColors: TrainLineColors?
-    let size: BadgeSize
-
-    enum BadgeSize {
-        case small, medium
-
-        var font: Font {
-            switch self {
-            case .small: .system(size: 12, weight: .bold)
-            case .medium: .system(size: 14, weight: .bold)
-            }
-        }
-
-        var verticalPadding: CGFloat {
-            switch self {
-            case .small: 4
-            case .medium: 5
-            }
-        }
-
-        var horizontalPadding: CGFloat {
-            switch self {
-            case .small: 8
-            case .medium: 10
-            }
-        }
-    }
-
-    init(line: String, lineColors: TrainLineColors? = nil, size: BadgeSize) {
-        self.line = line
-        self.lineColors = lineColors
-        self.size = size
-    }
-
-    var body: some View {
-        let style = Color.lineBadgeStyle(for: line, apiColors: lineColors)
-        return Text(line)
-            .font(size.font)
-            .foregroundStyle(style.foreground)
-            .scalableText(minimumScale: 0.7)
-            .padding(.vertical, size.verticalPadding)
-            .padding(.horizontal, size.horizontalPadding)
-            .background(style.background, in: Capsule())
-    }
-}
-
-// MARK: - CountdownDisplay
-
-struct CountdownDisplay: View {
-    let remaining: TimeInterval
-    let leaveTime: Date
-    let size: CountdownSize
-
-    enum CountdownSize {
-        case large, medium
-
-        var mainFont: Font {
-            switch self {
-            case .large: .system(size: 44, weight: .bold, design: .rounded)
-            case .medium: .system(size: 28, weight: .bold, design: .rounded)
-            }
-        }
-
-        var labelFont: Font {
-            switch self {
-            case .large: .system(size: 12)
-            case .medium: .system(size: 10)
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 2) {
-            if remaining <= 0 {
-                Text("GO!").font(size.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
-            } else if remaining <= 60 {
-                // Under 1 minute: live countdown timer with seconds
-                Text(leaveTime, style: .timer).font(size.mainFont.monospacedDigit()).foregroundStyle(
-                    urgencyColor(remaining)
-                ).multilineTextAlignment(.center).scalableText(minimumScale: 0.6)
-                Text("leave now").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
-            } else {
-                Text(formatCountdown(remaining)).font(size.mainFont.monospacedDigit()).foregroundStyle(
-                    urgencyColor(remaining)
-                ).scalableText(minimumScale: 0.6)
-                Text("to leave").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-// MARK: - DepartureInfo
-
-struct DepartureInfo: View {
-    let connection: WidgetConnection
-    let size: InfoSize
-
-    enum InfoSize {
-        case small, medium
-
-        var labelFont: Font { .system(size: 9, weight: .semibold) }
-        var departureLabel: String {
-            switch self {
-            case .small: "DEP"
-            case .medium: "DEPARTURE"
-            }
-        }
-
-        var platformLabel: String {
-            switch self {
-            case .small: "PL"
-            case .medium: "PLATFORM"
-            }
-        }
-
-        var valueFont: Font {
-            switch self {
-            case .small: .subheadline.weight(.bold).monospacedDigit()
-            case .medium: .title2.weight(.bold).monospacedDigit()
-            }
-        }
-
-        var delayFont: Font {
-            switch self {
-            case .small: .system(size: 10, weight: .bold)
-            case .medium: .caption.weight(.bold)
-            }
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top) {
-            // Departure time
-            VStack(alignment: .leading, spacing: 2) {
-                Text(size.departureLabel).font(size.labelFont).foregroundStyle(.secondary)
-
-                if connection.isDelayed {
-                    HStack(spacing: 4) {
-                        Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).foregroundStyle(
-                            .orange
-                        ).scalableText(minimumScale: 0.7)
-                        Text("+\(connection.delay)'").font(size.delayFont).foregroundStyle(.orange)
-                    }
-                } else {
-                    Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
-                        minimumScale: 0.7)
-                }
-            }
-
-            Spacer()
-
-            // Platform
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
-                Text(connection.platform ?? "–").font(size.valueFont).scalableText(minimumScale: 0.7)
-            }
-        }
-    }
-}
-
-// MARK: - EmptyWidgetView
-
-struct EmptyWidgetView: View {
-    let size: EmptySize
-    let data: WidgetData?
-
-    enum EmptySize { case small, medium }
-
-    var body: some View {
-        let accentColor: Color = switch data?.state {
-        case .fallback: .orange
-        case .stale: .secondary
-        default: .trainBlue
-        }
-        let title = switch data?.state {
-        case .fallback: "Offline data"
-        case .stale: "No departures"
-        default: "Set up route"
-        }
-        let subtitle = emptyHintText(for: data)
-
-        switch size {
-        case .small:
-            VStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(accentColor.opacity(0.1)).frame(width: 48, height: 48)
-                    Image(systemName: "tram.fill").font(.title3).foregroundStyle(accentColor)
-                }
-                Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(recoveryURL(for: data))
-
-        case .medium:
-            HStack(spacing: 16) {
-                ZStack {
-                    Circle().fill(accentColor.opacity(0.1)).frame(width: 56, height: 56)
-                    Image(systemName: "tram.fill").font(.title2).foregroundStyle(accentColor)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            } // .padding()
-            .widgetURL(recoveryURL(for: data))
         }
     }
 }
@@ -886,26 +549,6 @@ private func emptyHintText(for data: WidgetData?) -> String {
     }
 }
 
-private func formatCountdown(_ seconds: TimeInterval) -> String {
-    // Truncate to show remaining time (0m appears in final minute)
-    let totalMinutes = Int(ceil(max(0, seconds) / 60))
-    let hours = totalMinutes / 60
-    let minutes = totalMinutes % 60
-
-    if hours > 0 {
-        if minutes == 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
-    }
-    return "\(minutes)m"
-}
-
-private func urgencyColor(_ remaining: TimeInterval) -> Color {
-    if remaining <= 0 { return .secondary }
-    if remaining < 120 { return .red }
-    if remaining < 300 { return .orange }
-    return .green
-}
-
 // MARK: - Color Extension
 
 private struct LineBadgeStyle {
@@ -934,6 +577,10 @@ extension Color {
 
         // Default railway blue
         return trainBlue
+    }
+
+    static func lineColor(for line: String, apiColors: TrainLineColors?) -> Color {
+        lineBadgeStyle(for: line, apiColors: apiColors).background
     }
 
     fileprivate static func lineBadgeStyle(for line: String, apiColors: TrainLineColors?) -> LineBadgeStyle {

@@ -43,3 +43,23 @@ fastlane/test_output/
 .claude/
 .env
 .env.*
+
+# iOS secrets/signing material (never commit)
+*.p8
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.cer
+*.crt
+*.csr
+AuthKey_*.p8
+GoogleService-Info.plist
+Secrets*.plist
+*.xcconfig.local
+*.xcconfig.private
+Gleis.local.xcconfig
+
+# Release/export artifacts
+*.ipa
+*.xcarchive
+*.dSYM.zip

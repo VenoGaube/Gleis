@@ -16,6 +16,8 @@ This repository is public for development transparency and collaboration.
 
 - Local developer settings and credentials are intentionally excluded from version control.
 - Do not commit tokens, session IDs, or private keys.
+- Gate `AID` is no longer hardcoded in source. If needed, provide it via `GLEIS_GATE_AID`
+  in app `Info.plist` or via process environment for local runs.
 
 ## License
 
