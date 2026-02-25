@@ -8,20 +8,77 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     var workStation: Station?
     var toWorkSchedules: [Weekday: DaySchedule]
     var toHomeSchedules: [Weekday: DaySchedule]
+    var toWorkActiveDays: Set<Weekday>
+    var toHomeActiveDays: Set<Weekday>
     var skippedDates: [Date]
+
+    private static let defaultWorkweekDays: Set<Weekday> = Set(Weekday.workweek)
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case homeStation
+        case workStation
+        case toWorkSchedules
+        case toHomeSchedules
+        case toWorkActiveDays
+        case toHomeActiveDays
+        case skippedDates
+    }
 
     init() {
         id = UUID()
         toWorkSchedules = [:]
         toHomeSchedules = [:]
+        toWorkActiveDays = Self.defaultWorkweekDays
+        toHomeActiveDays = Self.defaultWorkweekDays
         skippedDates = []
     }
 
     var isConfigured: Bool { homeStation != nil && workStation != nil }
-    var activeDays: Set<Weekday> { Set(toWorkSchedules.keys).union(toHomeSchedules.keys) }
+    var scheduledDays: Set<Weekday> { Set(toWorkSchedules.keys).union(toHomeSchedules.keys) }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        homeStation = try container.decodeIfPresent(Station.self, forKey: .homeStation)
+        workStation = try container.decodeIfPresent(Station.self, forKey: .workStation)
+        toWorkSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toWorkSchedules) ?? [:]
+        toHomeSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toHomeSchedules) ?? [:]
+        skippedDates = try container.decodeIfPresent([Date].self, forKey: .skippedDates) ?? []
+
+        let decodedToWorkActive =
+            try container.decodeIfPresent(Set<Weekday>.self, forKey: .toWorkActiveDays)
+            ?? Self.defaultWorkweekDays.union(toWorkSchedules.keys)
+        let decodedToHomeActive =
+            try container.decodeIfPresent(Set<Weekday>.self, forKey: .toHomeActiveDays)
+            ?? Self.defaultWorkweekDays.union(toHomeSchedules.keys)
+
+        toWorkActiveDays = Self.sanitizedActiveDays(decodedToWorkActive, scheduledDays: toWorkSchedules.keys)
+        toHomeActiveDays = Self.sanitizedActiveDays(decodedToHomeActive, scheduledDays: toHomeSchedules.keys)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(homeStation, forKey: .homeStation)
+        try container.encode(workStation, forKey: .workStation)
+        try container.encode(toWorkSchedules, forKey: .toWorkSchedules)
+        try container.encode(toHomeSchedules, forKey: .toHomeSchedules)
+        try container.encode(toWorkActiveDays, forKey: .toWorkActiveDays)
+        try container.encode(toHomeActiveDays, forKey: .toHomeActiveDays)
+        try container.encode(skippedDates, forKey: .skippedDates)
+    }
 
     func schedule(for day: Weekday, direction: CommuteDirection = .toWork) -> DaySchedule? {
         direction == .toWork ? toWorkSchedules[day] : toHomeSchedules[day]
+    }
+
+    func activeDays(for direction: CommuteDirection) -> Set<Weekday> {
+        direction == .toWork ? toWorkActiveDays : toHomeActiveDays
+    }
+
+    func isDayActive(_ day: Weekday, direction: CommuteDirection) -> Bool {
+        activeDays(for: direction).contains(day)
     }
 
     func fromStation(for direction: CommuteDirection) -> Station? { direction == .toWork ? homeStation : workStation }
@@ -29,7 +86,13 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     func toStation(for direction: CommuteDirection) -> Station? { direction == .toWork ? workStation : homeStation }
 
     mutating func setSchedule(_ schedule: DaySchedule, for day: Weekday, direction: CommuteDirection) {
-        if direction == .toWork { toWorkSchedules[day] = schedule } else { toHomeSchedules[day] = schedule }
+        if direction == .toWork {
+            toWorkSchedules[day] = schedule
+            toWorkActiveDays.insert(day)
+        } else {
+            toHomeSchedules[day] = schedule
+            toHomeActiveDays.insert(day)
+        }
     }
 
     mutating func removeSchedule(for day: Weekday, direction: CommuteDirection) {
@@ -38,6 +101,27 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         } else {
             toHomeSchedules.removeValue(forKey: day)
         }
+    }
+
+    mutating func setActiveDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
+        let sanitized: Set<Weekday> = days.isEmpty ? Self.defaultWorkweekDays : days
+        if direction == .toWork {
+            toWorkActiveDays = sanitized.union(toWorkSchedules.keys)
+        } else {
+            toHomeActiveDays = sanitized.union(toHomeSchedules.keys)
+        }
+    }
+
+    mutating func setDayActive(_ day: Weekday, isActive: Bool, direction: CommuteDirection) {
+        var days = activeDays(for: direction)
+        if isActive {
+            days.insert(day)
+        } else {
+            let hasSchedule = schedule(for: day, direction: direction) != nil
+            if hasSchedule || days.count <= 1 { return }
+            days.remove(day)
+        }
+        setActiveDays(days, for: direction)
     }
 
     func matchesSchedule(_ connection: TrainConnection) -> CommuteDirection? {
@@ -51,12 +135,14 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         let connHour = calendar.component(.hour, from: connection.departureTime)
         let connMinute = calendar.component(.minute, from: connection.departureTime)
 
-        if let schedule = toWorkSchedules[weekday], schedule.departureHour == connHour,
+        if isDayActive(weekday, direction: .toWork),
+           let schedule = toWorkSchedules[weekday], schedule.departureHour == connHour,
            schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
         {
             return .toWork
         }
-        if let schedule = toHomeSchedules[weekday], schedule.departureHour == connHour,
+        if isDayActive(weekday, direction: .toHome),
+           let schedule = toHomeSchedules[weekday], schedule.departureHour == connHour,
            schedule.departureMinute == connMinute, schedule.lineNumber == connection.lineNumber
         {
             return .toHome
@@ -72,6 +158,13 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
     mutating func pruneOldSkippedDates() {
         let yesterday = Calendar.current.startOfDay(for: Date().addingTimeInterval(-86400))
         skippedDates.removeAll { $0 < yesterday }
+    }
+
+    private static func sanitizedActiveDays(_ activeDays: Set<Weekday>, scheduledDays: Dictionary<Weekday, DaySchedule>.Keys)
+        -> Set<Weekday>
+    {
+        let merged = activeDays.union(scheduledDays)
+        return merged.isEmpty ? defaultWorkweekDays : merged
     }
 }
 

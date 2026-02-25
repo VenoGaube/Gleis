@@ -209,11 +209,13 @@ final class CommuteScheduleViewModel: ObservableObject {
             notificationService.cancelAllCommuteNotifications()
             let cfg = config
             for (day, schedule) in route.toWorkSchedules {
+                guard route.isDayActive(day, direction: .toWork) else { continue }
                 try? await notificationService.scheduleCommuteNotification(
                     route: route, day: day, schedule: schedule, direction: .toWork, config: cfg
                 )
             }
             for (day, schedule) in route.toHomeSchedules {
+                guard route.isDayActive(day, direction: .toHome) else { continue }
                 try? await notificationService.scheduleCommuteNotification(
                     route: route, day: day, schedule: schedule, direction: .toHome, config: cfg
                 )

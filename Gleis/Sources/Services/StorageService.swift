@@ -13,6 +13,39 @@ enum StorageKey: String {
 struct ArchivedSchedules: Codable {
     var toWorkSchedules: [Weekday: DaySchedule]
     var toHomeSchedules: [Weekday: DaySchedule]
+    var toWorkActiveDays: Set<Weekday>
+    var toHomeActiveDays: Set<Weekday>
+
+    private enum CodingKeys: String, CodingKey {
+        case toWorkSchedules
+        case toHomeSchedules
+        case toWorkActiveDays
+        case toHomeActiveDays
+    }
+
+    init(
+        toWorkSchedules: [Weekday: DaySchedule],
+        toHomeSchedules: [Weekday: DaySchedule],
+        toWorkActiveDays: Set<Weekday>,
+        toHomeActiveDays: Set<Weekday>
+    ) {
+        self.toWorkSchedules = toWorkSchedules
+        self.toHomeSchedules = toHomeSchedules
+        self.toWorkActiveDays = toWorkActiveDays
+        self.toHomeActiveDays = toHomeActiveDays
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        toWorkSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toWorkSchedules) ?? [:]
+        toHomeSchedules = try container.decodeIfPresent([Weekday: DaySchedule].self, forKey: .toHomeSchedules) ?? [:]
+        toWorkActiveDays =
+            try container.decodeIfPresent(Set<Weekday>.self, forKey: .toWorkActiveDays)
+            ?? Set(Weekday.workweek).union(toWorkSchedules.keys)
+        toHomeActiveDays =
+            try container.decodeIfPresent(Set<Weekday>.self, forKey: .toHomeActiveDays)
+            ?? Set(Weekday.workweek).union(toHomeSchedules.keys)
+    }
 }
 
 // MARK: - LocalStorageService
@@ -171,7 +204,9 @@ final class SettingsManager: ObservableObject {
 
         let archived = ArchivedSchedules(
             toWorkSchedules: savedCommuteRoute.toWorkSchedules,
-            toHomeSchedules: savedCommuteRoute.toHomeSchedules
+            toHomeSchedules: savedCommuteRoute.toHomeSchedules,
+            toWorkActiveDays: savedCommuteRoute.toWorkActiveDays,
+            toHomeActiveDays: savedCommuteRoute.toHomeActiveDays
         )
         archivedSchedulesByStationPair[key] = archived
         try? storage.save(archivedSchedulesByStationPair, forKey: StorageKey.archivedSchedulesByStationPair.rawValue)
@@ -187,6 +222,8 @@ final class SettingsManager: ObservableObject {
         guard let key = stationPairKey(start: start, end: end) else {
             route.toWorkSchedules = [:]
             route.toHomeSchedules = [:]
+            route.toWorkActiveDays = Set(Weekday.workweek)
+            route.toHomeActiveDays = Set(Weekday.workweek)
             updateSavedCommuteRoute(route)
             return
         }
@@ -195,10 +232,14 @@ final class SettingsManager: ObservableObject {
             // Restore archived schedules
             route.toWorkSchedules = archived.toWorkSchedules
             route.toHomeSchedules = archived.toHomeSchedules
+            route.toWorkActiveDays = archived.toWorkActiveDays.union(route.toWorkSchedules.keys)
+            route.toHomeActiveDays = archived.toHomeActiveDays.union(route.toHomeSchedules.keys)
         } else {
             // No archived schedules for this pair - clear schedules
             route.toWorkSchedules = [:]
             route.toHomeSchedules = [:]
+            route.toWorkActiveDays = Set(Weekday.workweek)
+            route.toHomeActiveDays = Set(Weekday.workweek)
         }
         updateSavedCommuteRoute(route)
     }

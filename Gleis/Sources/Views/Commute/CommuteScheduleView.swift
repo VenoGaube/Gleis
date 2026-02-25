@@ -20,6 +20,8 @@ struct CommuteScheduleView: View {
     @State private var toHomeDismissedSuggestionDays: Set<Weekday> = []
     @State private var suggestionLookupTask: Task<Void, Never>?
     @State private var suggestionLookupGeneration = 0
+    @State private var weekendActivationPromptDirection: CommuteDirection?
+    @State private var weekendPromptShownDirections: Set<CommuteDirection> = []
     @Environment(\.colorScheme) var colorScheme
 
     private var directionLabel: String {
@@ -35,6 +37,31 @@ struct CommuteScheduleView: View {
 
     private var directionIcon: String {
         viewModel.selectedDirection == .toWork ? "arrow.right" : "arrow.left"
+    }
+
+    private enum CommuteDayPreset {
+        case workweek
+        case allDays
+        case custom
+
+        var title: String {
+            switch self {
+            case .workweek: "Workweek"
+            case .allDays: "All Days"
+            case .custom: "Custom"
+            }
+        }
+    }
+
+    private var selectedDirectionActiveDays: Set<Weekday> {
+        viewModel.route.activeDays(for: viewModel.selectedDirection)
+    }
+
+    private var selectedDirectionPreset: CommuteDayPreset {
+        let activeDays = selectedDirectionActiveDays
+        if activeDays == Set(Weekday.workweek) { return .workweek }
+        if activeDays == Set(Weekday.mondayFirst) { return .allDays }
+        return .custom
     }
 
     private enum TimingSheet: Identifiable {
@@ -119,6 +146,8 @@ struct CommuteScheduleView: View {
                     swapAccessibilityLabel: "Switch direction",
                     swapAccessibilityValue: directionLabel
                 )
+
+                commuteDaysControls
 
                 if viewModel.hasSchedules {
                     HStack(spacing: 8) {
@@ -237,7 +266,105 @@ struct CommuteScheduleView: View {
                     }
                 )
             }
+            .confirmationDialog(
+                "Enable Weekend Days?",
+                isPresented: Binding(
+                    get: { weekendActivationPromptDirection != nil },
+                    set: { if !$0 { weekendActivationPromptDirection = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Enable Saturday + Sunday") {
+                    guard let direction = weekendActivationPromptDirection else { return }
+                    var activeDays = viewModel.route.activeDays(for: direction)
+                    activeDays.formUnion(Weekday.weekend)
+                    setActiveDays(activeDays, for: direction)
+                    weekendActivationPromptDirection = nil
+                    viewModel.toastManager.show("Weekend days enabled for \(direction.title.lowercased())", type: .success)
+                }
+                Button("Not now", role: .cancel) {
+                    weekendActivationPromptDirection = nil
+                }
+            } message: {
+                if let direction = weekendActivationPromptDirection {
+                    Text("You set a weekend train for \(direction.title.lowercased()). Also enable both Saturday and Sunday?")
+                }
+            }
             .toastOverlay(viewModel.toastManager)
+    }
+
+    private var commuteDaysControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Commute Days", systemImage: "calendar")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Menu {
+                    Button {
+                        applyPreset(.workweek, for: viewModel.selectedDirection)
+                    } label: {
+                        HStack {
+                            Text("Workweek (Mon-Fri)")
+                            if selectedDirectionPreset == .workweek { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button {
+                        applyPreset(.allDays, for: viewModel.selectedDirection)
+                    } label: {
+                        HStack {
+                            Text("All Days")
+                            if selectedDirectionPreset == .allDays { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(selectedDirectionPreset.title).font(.caption.weight(.semibold))
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.secondary.opacity(colorScheme == .dark ? 0.22 : 0.12), in: Capsule())
+                }
+            }
+
+            HStack(spacing: 8) {
+                ForEach(Weekday.mondayFirst) { day in
+                    let isActive = selectedDirectionActiveDays.contains(day)
+                    Button {
+                        toggleActiveDay(day, for: viewModel.selectedDirection)
+                    } label: {
+                        Text(day.shortName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isActive ? .white : .secondary)
+                            .frame(width: 32, height: 28)
+                            .background(
+                                Capsule().fill(
+                                    isActive
+                                        ? Color.accentColor
+                                        : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.16))
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(day.fullName) \(isActive ? "active" : "inactive")")
+                }
+            }
+
+            Text("Suggestions and reminders run only on active days.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12).fill(
+                colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), lineWidth: 1)
+        )
     }
 
     private var scheduleSection: some View {
@@ -255,17 +382,25 @@ struct CommuteScheduleView: View {
                 ForEach(Weekday.mondayFirst) { day in
                     let schedule = viewModel.route.schedule(for: day, direction: viewModel.selectedDirection)
                     let hasSchedule = schedule != nil
-                    let suggestion = suggestion(for: day, direction: viewModel.selectedDirection)
+                    let isDayActive = viewModel.route.isDayActive(day, direction: viewModel.selectedDirection)
+                    let suggestion = isDayActive ? suggestion(for: day, direction: viewModel.selectedDirection) : nil
                     let isSuggestionLoading =
-                        suggestion == nil && suggestionLoading(for: day, direction: viewModel.selectedDirection)
+                        isDayActive
+                        && suggestion == nil && suggestionLoading(for: day, direction: viewModel.selectedDirection)
 
                     DayScheduleRow(
                         day: day,
+                        isDayActive: isDayActive,
                         schedule: schedule,
                         suggestion: suggestion,
                         isSuggestionLoading: isSuggestionLoading,
                         walkingTime: travelTime, bufferTime: bufferTime, hasNotification: hasSchedule,
                         onTap: { selectedDay = day },
+                        onEnableDay: !isDayActive ? {
+                            var activeDays = viewModel.route.activeDays(for: viewModel.selectedDirection)
+                            activeDays.insert(day)
+                            setActiveDays(activeDays, for: viewModel.selectedDirection)
+                        } : nil,
                         onClear: { handleScheduleCleared(day: day, direction: viewModel.selectedDirection) },
                         onCopy: hasSchedule ? { showCopySheet = day } : nil,
                         onUseSuggestion: suggestion != nil
@@ -287,7 +422,14 @@ struct CommuteScheduleView: View {
         }
     }
 
-    private func handleScheduleSaved(day _: Weekday, schedule: DaySchedule, direction: CommuteDirection) {
+    private func handleScheduleSaved(day: Weekday, schedule: DaySchedule, direction: CommuteDirection) {
+        if day.isWeekend, !weekendPromptShownDirections.contains(direction) {
+            let weekendFullyActive = Set(Weekday.weekend).isSubset(of: viewModel.route.activeDays(for: direction))
+            if !weekendFullyActive {
+                weekendPromptShownDirections.insert(direction)
+                weekendActivationPromptDirection = direction
+            }
+        }
         requestSuggestions(basedOn: schedule, direction: direction, resetDismissedDays: true)
     }
 
@@ -307,7 +449,8 @@ struct CommuteScheduleView: View {
         clearSuggestions(for: direction)
 
         let candidates = Weekday.mondayFirst.filter { day in
-            viewModel.route.schedule(for: day, direction: direction) == nil
+            viewModel.route.isDayActive(day, direction: direction)
+                && viewModel.route.schedule(for: day, direction: direction) == nil
                 && !isSuggestionDismissed(day, direction: direction)
         }
         guard !candidates.isEmpty else {
@@ -480,6 +623,66 @@ struct CommuteScheduleView: View {
         selectedDay = day
     }
 
+    private func applyPreset(_ preset: CommuteDayPreset, for direction: CommuteDirection) {
+        switch preset {
+        case .workweek:
+            setActiveDays(Set(Weekday.workweek), for: direction)
+        case .allDays:
+            setActiveDays(Set(Weekday.mondayFirst), for: direction)
+        case .custom:
+            break
+        }
+    }
+
+    private func toggleActiveDay(_ day: Weekday, for direction: CommuteDirection) {
+        var activeDays = viewModel.route.activeDays(for: direction)
+        let isActive = activeDays.contains(day)
+        let hasSchedule = viewModel.route.schedule(for: day, direction: direction) != nil
+
+        if isActive {
+            if hasSchedule {
+                viewModel.toastManager.show("Clear \(day.fullName) schedule first to deactivate it.", type: .info)
+                return
+            }
+            if activeDays.count <= 1 {
+                viewModel.toastManager.show("Keep at least one day active.", type: .info)
+                return
+            }
+            activeDays.remove(day)
+        } else {
+            activeDays.insert(day)
+        }
+
+        setActiveDays(activeDays, for: direction)
+    }
+
+    private func setActiveDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
+        suggestionLookupTask?.cancel()
+        suggestionLookupTask = nil
+        suggestionLookupGeneration += 1
+        clearSuggestionLoading(for: direction)
+        viewModel.route.setActiveDays(days, for: direction)
+        viewModel.save()
+        viewModel.rescheduleAllNotifications()
+        clearInactiveSuggestionState(for: direction)
+    }
+
+    private func clearInactiveSuggestionState(for direction: CommuteDirection) {
+        let inactiveDays = Set(Weekday.mondayFirst).subtracting(viewModel.route.activeDays(for: direction))
+        guard !inactiveDays.isEmpty else { return }
+
+        switch direction {
+        case .toWork:
+            toWorkSuggestions = toWorkSuggestions.filter { !inactiveDays.contains($0.key) }
+            toWorkSuggestionLoadingDays.subtract(inactiveDays)
+            toWorkDismissedSuggestionDays.subtract(inactiveDays)
+        case .toHome:
+            toHomeSuggestions = toHomeSuggestions.filter { !inactiveDays.contains($0.key) }
+            toHomeSuggestionLoadingDays.subtract(inactiveDays)
+            toHomeDismissedSuggestionDays.subtract(inactiveDays)
+        }
+    }
+
     private func dateComponentsSet(from dates: [Date]) -> Set<DateComponents> {
         let calendar = Calendar.current
         return Set(dates.map { calendar.dateComponents([.year, .month, .day], from: $0) })
@@ -536,6 +739,7 @@ private struct ExcludedDatesSheet: View {
 
 struct DayScheduleRow: View {
     let day: Weekday
+    let isDayActive: Bool
     let schedule: DaySchedule?
     let suggestion: DaySchedule?
     let isSuggestionLoading: Bool
@@ -543,6 +747,7 @@ struct DayScheduleRow: View {
     let bufferTime: Int
     let hasNotification: Bool
     let onTap: () -> Void
+    let onEnableDay: (() -> Void)?
     let onClear: () -> Void
     let onCopy: (() -> Void)?
     let onUseSuggestion: (() -> Void)?
@@ -553,6 +758,7 @@ struct DayScheduleRow: View {
 
     init(
         day: Weekday,
+        isDayActive: Bool = true,
         schedule: DaySchedule?,
         suggestion: DaySchedule? = nil,
         isSuggestionLoading: Bool = false,
@@ -560,6 +766,7 @@ struct DayScheduleRow: View {
         bufferTime: Int,
         hasNotification: Bool,
         onTap: @escaping () -> Void,
+        onEnableDay: (() -> Void)? = nil,
         onClear: @escaping () -> Void,
         onCopy: (() -> Void)? = nil,
         onUseSuggestion: (() -> Void)? = nil,
@@ -567,6 +774,7 @@ struct DayScheduleRow: View {
         onDismissSuggestion: (() -> Void)? = nil
     ) {
         self.day = day
+        self.isDayActive = isDayActive
         self.schedule = schedule
         self.suggestion = suggestion
         self.isSuggestionLoading = isSuggestionLoading
@@ -574,6 +782,7 @@ struct DayScheduleRow: View {
         self.bufferTime = bufferTime
         self.hasNotification = hasNotification
         self.onTap = onTap
+        self.onEnableDay = onEnableDay
         self.onClear = onClear
         self.onCopy = onCopy
         self.onUseSuggestion = onUseSuggestion
@@ -589,6 +798,9 @@ struct DayScheduleRow: View {
 
     private var isShowingSuggestion: Bool { schedule == nil && suggestion != nil }
     private var isShowingSuggestionOrLoading: Bool { isShowingSuggestion || (schedule == nil && isSuggestionLoading) }
+    private var isInactiveWithoutSchedule: Bool {
+        !isDayActive && schedule == nil && suggestion == nil && !isSuggestionLoading
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: isShowingSuggestion ? 2 : 8) {
@@ -611,8 +823,9 @@ struct DayScheduleRow: View {
                 dayBadge
                 scheduleContent
             }
-            .padding(.vertical, isShowingSuggestionOrLoading ? 4 : 12)
+            .padding(.vertical, isShowingSuggestionOrLoading ? 4 : (isInactiveWithoutSchedule ? 7 : 12))
         }
+        .opacity(isInactiveWithoutSchedule ? 0.84 : 1.0)
         .tint(.primary)
         .contextMenu { contextMenuContent }
     }
@@ -636,6 +849,8 @@ struct DayScheduleRow: View {
     private var scheduleContent: some View {
         if let s = schedule {
             scheduleDetailsView(s)
+        } else if isInactiveWithoutSchedule {
+            inactiveDayView
         } else if let suggested = suggestion {
             suggestionPreviewView(suggested)
         } else if isSuggestionLoading {
@@ -662,6 +877,33 @@ struct DayScheduleRow: View {
             }
         }
         .onDisappear { animateSuggestionLoading = false }
+    }
+
+    private var inactiveDayView: some View {
+        HStack(spacing: 8) {
+            Text("Inactive day")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let onEnableDay {
+                Button {
+                    Haptics.selection()
+                    onEnableDay()
+                } label: {
+                    Text("Enable")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Enable \(day.fullName)")
+            }
+            Text("Tap to set manually")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
     }
 
     private func suggestionPreviewView(_ s: DaySchedule) -> some View {

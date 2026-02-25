@@ -129,6 +129,7 @@ enum Weekday: Int, CaseIterable, Codable, Identifiable {
     case monday, tuesday, wednesday, thursday, friday, saturday
 
     var id: Int { rawValue }
+    var isWeekend: Bool { self == .saturday || self == .sunday }
     var shortName: String { ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][rawValue - 1] }
 
     var fullName: String {
@@ -137,4 +138,6 @@ enum Weekday: Int, CaseIterable, Codable, Identifiable {
 
     /// Returns weekdays in Monday-first order for UI display
     static var mondayFirst: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday] }
+    static var workweek: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday] }
+    static var weekend: [Weekday] { [.saturday, .sunday] }
 }
