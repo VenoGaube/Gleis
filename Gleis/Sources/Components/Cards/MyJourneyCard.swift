@@ -568,9 +568,9 @@ private struct JourneyStopRow: View {
             // Stop info
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(name).font(isEndpoint ? .subheadline.weight(.semibold) : .caption).foregroundStyle(
-                        isPassed ? .secondary : .primary
-                    )
+                    Text(name)
+                        .font(.caption.weight(isEndpoint ? .semibold : .regular))
+                        .foregroundStyle(isPassed ? .secondary : .primary)
                     if isTransferBoundary {
                         Image(systemName: "arrow.triangle.branch")
                             .font(.caption2.weight(.semibold))

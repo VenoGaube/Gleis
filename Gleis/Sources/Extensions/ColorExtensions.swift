@@ -11,6 +11,9 @@ extension Color {
     static let trainBlue = Color(red: 0.0, green: 0.48, blue: 0.85)
     static let settingsSilver = Color(red: 0.55, green: 0.55, blue: 0.58)
     static let sBahnGreen = Color(red: 0.2, green: 0.6, blue: 0.3)
+    static let repeatLeaveChip = Color(red: 0.12, green: 0.31, blue: 0.55) // #1F4E8C
+    static let repeatNotificationChip = Color(red: 0.0, green: 0.34, blue: 0.82) // #0057D2
+    static let repeatSuggestionText = Color(red: 0.72, green: 0.37, blue: 0.0) // #B85E00
 
     // Header gradient colors - travel-inspired palette
     static let headerGradientStart = Color(red: 0.12, green: 0.16, blue: 0.32) // Deep midnight blue

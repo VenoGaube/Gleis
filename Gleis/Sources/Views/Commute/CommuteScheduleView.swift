@@ -317,24 +317,34 @@ struct CommuteScheduleView: View {
         setSuggestionLoading(Set(candidates), for: direction)
 
         suggestionLookupTask = Task(priority: .utility) {
-            let suggestions = await viewModel.findSuggestedSchedules(
-                for: candidates,
-                basedOn: schedule,
-                direction: direction
-            )
-            if Task.isCancelled { return }
+            for candidateDay in candidates {
+                if Task.isCancelled { return }
 
-            await MainActor.run {
-                guard suggestionLookupGeneration == lookupGeneration else { return }
-                for candidateDay in candidates {
-                    guard let matchedSchedule = suggestions[candidateDay] else { continue }
-                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { continue }
-                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { continue }
+                let matchedSchedule = await viewModel.findSuggestedSchedule(
+                    for: candidateDay,
+                    basedOn: schedule,
+                    direction: direction
+                )
+                if Task.isCancelled { return }
+
+                await MainActor.run {
+                    guard suggestionLookupGeneration == lookupGeneration else { return }
+                    removeSuggestionLoading(for: candidateDay, direction: direction)
+
+                    guard let matchedSchedule else { return }
+                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
+                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
+
                     switch direction {
                     case .toWork: toWorkSuggestions[candidateDay] = matchedSchedule
                     case .toHome: toHomeSuggestions[candidateDay] = matchedSchedule
                     }
                 }
+            }
+
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard suggestionLookupGeneration == lookupGeneration else { return }
                 clearSuggestionLoading(for: direction)
                 suggestionLookupTask = nil
             }
@@ -344,14 +354,10 @@ struct CommuteScheduleView: View {
     private func handleScheduleCleared(day: Weekday, direction: CommuteDirection) {
         viewModel.clearSchedule(day: day, direction: direction)
         dismissSuggestion(for: day, direction: direction)
-        removeSuggestionLoading(for: day, direction: direction)
-
-        guard let template = firstScheduleTemplate(for: direction) else {
-            clearSuggestions(for: direction)
-            clearSuggestionLoading(for: direction)
-            return
-        }
-        requestSuggestions(basedOn: template, direction: direction, resetDismissedDays: false)
+        suggestionLookupTask?.cancel()
+        suggestionLookupTask = nil
+        suggestionLookupGeneration += 1
+        clearSuggestionLoading(for: direction)
     }
 
     private func suggestion(for day: Weekday, direction: CommuteDirection) -> DaySchedule? {
@@ -455,15 +461,6 @@ struct CommuteScheduleView: View {
         }
     }
 
-    private func firstScheduleTemplate(for direction: CommuteDirection) -> DaySchedule? {
-        for day in Weekday.mondayFirst {
-            if let schedule = viewModel.route.schedule(for: day, direction: direction) {
-                return schedule
-            }
-        }
-        return nil
-    }
-
     private func applySuggestion(for day: Weekday, direction: CommuteDirection) {
         guard let schedule = suggestion(for: day, direction: direction) else { return }
 
@@ -551,6 +548,7 @@ struct DayScheduleRow: View {
     let onUseSuggestion: (() -> Void)?
     let onChooseDifferentSuggestion: (() -> Void)?
     let onDismissSuggestion: (() -> Void)?
+    @State private var animateSuggestionLoading = false
     @Environment(\.colorScheme) var colorScheme
 
     init(
@@ -593,7 +591,7 @@ struct DayScheduleRow: View {
     private var isShowingSuggestionOrLoading: Bool { isShowingSuggestion || (schedule == nil && isSuggestionLoading) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: isShowingSuggestion ? 2 : 8) {
             HStack(spacing: 0) {
                 mainButton
                 clearButton
@@ -613,7 +611,7 @@ struct DayScheduleRow: View {
                 dayBadge
                 scheduleContent
             }
-            .padding(.vertical, isShowingSuggestionOrLoading ? 8 : 12)
+            .padding(.vertical, isShowingSuggestionOrLoading ? 4 : 12)
         }
         .tint(.primary)
         .contextMenu { contextMenuContent }
@@ -650,11 +648,20 @@ struct DayScheduleRow: View {
 
     private var suggestionLoadingView: some View {
         HStack(spacing: 8) {
-            SkeletonBox(width: 44, height: 22, cornerRadius: 11)
-            SkeletonBox(width: 56, height: 18, cornerRadius: 6)
-            SkeletonBox(width: 70, height: 14, cornerRadius: 6)
+            SkeletonBox(width: 60, height: 28, cornerRadius: 14)
+            SkeletonBox(width: 72, height: 22, cornerRadius: 8)
+            SkeletonBox(width: 96, height: 18, cornerRadius: 8)
             Spacer()
         }
+        .scaleEffect(animateSuggestionLoading ? 1.0 : 0.985)
+        .opacity(animateSuggestionLoading ? 1.0 : 0.78)
+        .offset(y: animateSuggestionLoading ? 0 : 1)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                animateSuggestionLoading = true
+            }
+        }
+        .onDisappear { animateSuggestionLoading = false }
     }
 
     private func suggestionPreviewView(_ s: DaySchedule) -> some View {
@@ -679,7 +686,7 @@ struct DayScheduleRow: View {
 
                 Text("Suggested")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.repeatSuggestionText)
             }
             Spacer()
         }
@@ -687,7 +694,7 @@ struct DayScheduleRow: View {
 
     private func scheduleDetailsView(_ s: DaySchedule) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 trainLineRow(s)
                 leaveTimeRow
             }
@@ -736,7 +743,7 @@ struct DayScheduleRow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.purple, in: Capsule())
+                .background(Color.repeatLeaveChip, in: Capsule())
             }
 
             if hasNotification {
@@ -747,7 +754,7 @@ struct DayScheduleRow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(Color.blue, in: Capsule())
+                .background(Color.repeatNotificationChip, in: Capsule())
             }
         }
     }
@@ -784,33 +791,39 @@ struct DayScheduleRow: View {
 
     @ViewBuilder
     private var suggestionActionRow: some View {
-        HStack(spacing: 10) {
-            if let onUseSuggestion {
-                Button {
-                    Haptics.selection()
-                    onUseSuggestion()
+        HStack {
+            HStack(spacing: 18) {
+                if let onUseSuggestion {
+                    Button {
+                        Haptics.selection()
+                        onUseSuggestion()
+                    }
+                    label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Accept suggested train")
                 }
-                label: {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Accept suggested train")
-            }
 
-            if let onChooseDifferentSuggestion {
-                Button {
-                    Haptics.selection()
-                    onChooseDifferentSuggestion()
+                if let onChooseDifferentSuggestion {
+                    Button {
+                        Haptics.selection()
+                        onChooseDifferentSuggestion()
+                    }
+                    label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Deny suggestion and choose another train")
                 }
-                label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.orange)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Deny suggestion and choose another train")
             }
 
             Spacer()
@@ -824,13 +837,15 @@ struct DayScheduleRow: View {
                     Image(systemName: "minus.circle.fill")
                         .font(.title3)
                         .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss suggestion")
             }
         }
         .padding(.leading, 50)
-        .padding(.bottom, 4)
+        .padding(.top, -6)
     }
 }
 

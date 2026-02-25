@@ -242,11 +242,6 @@ struct ConnectionLegRow: View {
         let showChangedBadge: Bool
     }
 
-    private var inBetweenStopCount: Int? {
-        if let stopCount = leg.stopCount { return stopCount }
-        return leg.intermediateStops.isEmpty ? nil : leg.intermediateStops.count
-    }
-
     private var railColor: Color {
         guard !leg.isWalking else { return .gray }
         return Color.lineColor(for: leg.lineNumber, apiColors: leg.lineColors)
@@ -299,6 +294,8 @@ struct ConnectionLegRow: View {
         return entries
     }
 
+    private var now: Date { Date() }
+
     private func normalizedPlatform(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, !trimmed.isEmpty else { return nil }
@@ -320,136 +317,117 @@ struct ConnectionLegRow: View {
     }
 
     private var compactWalkingBody: some View {
-        HStack(alignment: .top, spacing: 0) {
+        HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(showTopConnector ? railColor : .clear).frame(width: 2, height: 8)
-                Circle().fill(railColor).frame(width: 8, height: 8)
-                Rectangle().fill(showBottomConnector ? railColor : .clear).frame(width: 2)
+                Rectangle().fill(showTopConnector ? railColor.opacity(0.6) : .clear).frame(width: 2, height: 10)
+                Circle()
+                    .stroke(railColor.opacity(0.7), lineWidth: 2)
+                    .frame(width: 10, height: 10)
+                Rectangle().fill(showBottomConnector ? railColor.opacity(0.6) : .clear).frame(width: 2, height: 10)
             }.frame(width: 20)
 
-            HStack(spacing: 10) {
-                Image(systemName: "figure.walk").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(walkingTitle)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    if let walkingDurationMinutes {
-                        Text("\(walkingDurationMinutes) min walk").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-
+            HStack(spacing: 8) {
+                Text(walkingTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
                 Spacer()
+                if let walkingDurationMinutes {
+                    Text("\(walkingDurationMinutes) min")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .background(
-                colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.04),
+                colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.05),
                 in: RoundedRectangle(cornerRadius: 10)
             )
         }
+        .padding(.vertical, 2)
     }
 
     private var fullLegBody: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                Rectangle().fill(showTopConnector ? railColor : .clear).frame(width: 2, height: 8)
-                Circle().fill(railColor).frame(width: 10, height: 10)
-                Rectangle().fill(showBottomConnector ? railColor : .clear).frame(width: 2)
-            }.frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
-                    legBadge
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: leg.isWalking ? "figure.walk" : "train.side.front.car").font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(leg.isWalking ? "WALK" : leg.lineNumber).font(.caption).foregroundStyle(.secondary)
-
-                            if let destination = leg.finalDestination, !leg.isWalking {
-                                Text("→ \(destination)").font(.caption).foregroundStyle(.tertiary).scalableText(
-                                    minimumScale: 0.8)
-                            }
-                            Spacer()
-                            if let duration = leg.duration, !leg.isWalking {
-                                Text("\(Int(duration / 60)) min").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if let stops = inBetweenStopCount, stops > 0, !leg.isWalking {
-                            Text("\(stops) in-between stops").font(.caption2).foregroundStyle(.blue)
-                        }
-
-                        if let delay = leg.delayMinutes, delay > 0, !leg.isWalking {
-                            HStack(spacing: 4) {
-                                Image(systemName: "clock.badge.exclamationmark").font(.caption2)
-                                Text("+\(delay) min delay").font(.caption2)
-                            }.foregroundStyle(.orange)
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(stopEntries.enumerated()), id: \.element.id) { index, stop in
-                        HStack(alignment: .center, spacing: 10) {
-                            VStack(spacing: 0) {
-                                Rectangle().fill(index == 0 ? .clear : railColor.opacity(0.75)).frame(
-                                    width: 2, height: 8
-                                )
-                                Circle().fill(railColor).frame(
-                                    width: stop.isEndpoint ? 8 : 6,
-                                    height: stop.isEndpoint ? 8 : 6
-                                )
-                                Rectangle().fill(index == stopEntries.count - 1 ? .clear : railColor.opacity(0.75))
-                                    .frame(width: 2, height: 8)
-                            }.frame(width: 12)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 8) {
-                                    Text(stop.name).font(.subheadline.weight(stop.isEndpoint ? .semibold : .regular))
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    TimeText(date: stop.time)
-                                }
-
-                                if let platform = stop.platform {
-                                    HStack(spacing: 4) {
-                                        Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                                        if stop.showChangedBadge {
-                                            Text("(changed)").font(.caption2).foregroundStyle(.orange)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .padding(10)
-                .background(
-                    colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03),
-                    in: RoundedRectangle(cornerRadius: 10)
-                )
+        VStack(spacing: 0) {
+            ForEach(Array(stopEntries.enumerated()), id: \.element.id) { index, stop in
+                stopRow(stop: stop, index: index)
             }
-            .padding(12)
-            .background(
-                colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03),
-                in: RoundedRectangle(cornerRadius: 12)
-            )
         }
     }
 
-    @ViewBuilder private var legBadge: some View {
-        if leg.isWalking {
-            Image(systemName: "figure.walk").font(.headline).foregroundStyle(.white).frame(width: 44, height: 36)
-                .background(Color.gray, in: RoundedRectangle(cornerRadius: 8))
-        } else {
-            LineBadge(line: leg.lineNumber, colors: leg.lineColors)
+    private func stopRow(stop: LegStopEntry, index: Int) -> some View {
+        let isFirst = index == 0
+        let isLast = index == stopEntries.count - 1
+        let isPassed = stop.time.map { now >= $0 } ?? false
+        let connectorColor = isPassed ? railColor : railColor.opacity(0.35)
+        let nodeFillColor = isPassed ? railColor : (colorScheme == .dark ? railColor.opacity(0.4) : railColor.opacity(0.22))
+
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill((isFirst ? showTopConnector : true) ? connectorColor : .clear)
+                    .frame(width: 2, height: stop.isEndpoint ? 8 : 10)
+
+                Circle()
+                    .fill(nodeFillColor)
+                    .frame(width: stop.isEndpoint ? 12 : 6, height: stop.isEndpoint ? 12 : 6)
+                    .overlay(Circle().stroke(railColor, lineWidth: stop.isEndpoint ? 2 : 1))
+
+                Rectangle()
+                    .fill((isLast ? showBottomConnector : true) ? connectorColor : .clear)
+                    .frame(width: 2, height: stop.isEndpoint ? 8 : 10)
+            }
+            .frame(width: 20)
+
+            if isFirst {
+                let style = Color.lineBadgeStyle(for: leg.lineNumber, apiColors: leg.lineColors)
+                Text(leg.lineNumber)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(style.foreground)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(style.background, in: RoundedRectangle(cornerRadius: 5))
+                    .overlay {
+                        if let border = style.border {
+                            RoundedRectangle(cornerRadius: 5).stroke(border.opacity(0.7), lineWidth: 1)
+                        }
+                    }
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(stop.name)
+                    .font(.caption.weight(stop.isEndpoint ? .semibold : .regular))
+                    .foregroundStyle(isPassed ? .secondary : .primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    if let time = stop.time {
+                        Text(time, style: .time)
+                            .font(stop.isEndpoint ? .subheadline.monospacedDigit().weight(.semibold) : .caption.monospacedDigit())
+                            .foregroundStyle(isPassed ? .secondary : .primary)
+                    }
+
+                    if stop.showChangedBadge {
+                        Text("(changed)")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Spacer()
+
+            if let platform = stop.platform, stop.isEndpoint {
+                Text("Platform \(platform)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(colorScheme == .dark ? 0.18 : 0.08), in: Capsule())
+            }
         }
+        .padding(.vertical, stop.isEndpoint ? 5 : 2)
     }
 }
 
