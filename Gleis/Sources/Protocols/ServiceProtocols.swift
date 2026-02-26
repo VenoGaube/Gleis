@@ -6,7 +6,9 @@ enum FetchLimits {
     static let connectionBatchSize = 6
     static let stationSearchCount = 25
     static let stationResolveCandidateCount = 5
-    static let widgetRefreshConnectionCount = 5
+    static let widgetRefreshConnectionCount = 8
+    static let widgetStoredConnectionLimit = 60
+    static let widgetCoverageHorizonHours = 10
     static let commuteSuggestionConnectionCount = 5
 }
 

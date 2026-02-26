@@ -116,47 +116,60 @@ struct WidgetData: Codable {
         state: .fresh
     )
 
+    private var scheduledConnections: [(connection: WidgetConnection, leaveTime: Date)] {
+        let paired = Array(zip(connections, leaveTimes))
+        return paired.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+            if lhs.0.departureTime != rhs.0.departureTime {
+                return lhs.0.departureTime < rhs.0.departureTime
+            }
+            return lhs.0.id < rhs.0.id
+        }
+    }
+
     func connection(at date: Date) -> (connection: WidgetConnection, leaveTime: Date)? {
+        let scheduled = scheduledConnections
+        guard !scheduled.isEmpty else { return nil }
+
         // Find the next regular (non-pinned) connection by leave time
-        var nextRegularIndex: Int?
-        for (i, lt) in leaveTimes.enumerated() where date < lt && !connections[i].isPinned {
-            nextRegularIndex = i
+        var nextRegular: (connection: WidgetConnection, leaveTime: Date)?
+        for item in scheduled where date < item.leaveTime && !item.connection.isPinned {
+            nextRegular = item
             break
         }
 
         // Priority 1: Show pinned "My Journey" only if:
-        // - Its arrival time hasn't passed, AND
+        // - Its departure time hasn't passed, AND
         // - Its leave time is within 20 minutes of the next regular connection (or no regular connection exists)
-        for (i, conn) in connections.enumerated() where conn.isPinned && conn.arrivalTime > date {
-            let pinnedLeaveTime = leaveTimes[i]
+        for item in scheduled where item.connection.isPinned && item.connection.departureTime > date {
+            let pinnedLeaveTime = item.leaveTime
 
             // If pinned leave time has passed, show it (it's time!)
-            if pinnedLeaveTime <= date { return (conn, pinnedLeaveTime) }
+            if pinnedLeaveTime <= date { return (item.connection, pinnedLeaveTime) }
 
             // If no regular connection, show pinned
-            guard let regularIdx = nextRegularIndex else { return (conn, pinnedLeaveTime) }
+            guard let regular = nextRegular else { return (item.connection, pinnedLeaveTime) }
 
-            let regularLeaveTime = leaveTimes[regularIdx]
-            let timeDifference = abs(pinnedLeaveTime.timeIntervalSince(regularLeaveTime))
+            let timeDifference = abs(pinnedLeaveTime.timeIntervalSince(regular.leaveTime))
 
             // Only prioritize pinned if within 20 minutes of next regular connection
-            if timeDifference <= 20 * 60 { return (conn, pinnedLeaveTime) }
+            if timeDifference <= 20 * 60 { return (item.connection, pinnedLeaveTime) }
             // Otherwise, don't prioritize pinned yet - fall through to regular logic
         }
 
         // Priority 2: Show reminder-set connection until its departure (pinned until GO! completes)
-        for (i, conn) in connections.enumerated() where conn.hasReminder && conn.departureTime > date {
-            return (conn, leaveTimes[i])
+        for item in scheduled where item.connection.hasReminder && item.connection.departureTime > date {
+            return item
         }
 
         // Priority 3: Find first connection whose leave time hasn't passed
-        for (i, lt) in leaveTimes.enumerated() where date < lt {
-            return (connections[i], lt)
+        for item in scheduled where date < item.leaveTime {
+            return item
         }
 
-        // Priority 4: Show last connection if its departure hasn't passed (for GO! state)
-        if let lastIndex = connections.indices.last, connections[lastIndex].departureTime > date {
-            return (connections[lastIndex], leaveTimes[lastIndex])
+        // Priority 4: Show in-flight train if departure already happened but no next leave yet.
+        if let inFlight = scheduled.first(where: { $0.leaveTime <= date && $0.connection.departureTime > date }) {
+            return inFlight
         }
         return nil
     }
@@ -168,18 +181,18 @@ struct WidgetData: Codable {
         // Data is stale if updated more than 6 hours ago
         if now.timeIntervalSince(updatedAt) > 6 * 60 * 60 { return true }
         // Data is stale if all connections have departed
-        guard let lastConnection = connections.last else { return true }
-        return lastConnection.departureTime < now
+        guard let lastDeparture = connections.map(\.departureTime).max() else { return true }
+        return lastDeparture < now
     }
 
     var isFallback: Bool { state == .fallback }
 
     /// Returns connections that haven't departed yet
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        var result: [(WidgetConnection, Date)] = []
-        for (i, conn) in connections.enumerated() {
+        var result: [(connection: WidgetConnection, leaveTime: Date)] = []
+        for item in scheduledConnections {
             // Include if departure is in the future OR if leave time hasn't passed yet
-            if conn.departureTime > date || leaveTimes[i] > date { result.append((conn, leaveTimes[i])) }
+            if item.connection.departureTime > date || item.leaveTime > date { result.append(item) }
         }
         return result
     }

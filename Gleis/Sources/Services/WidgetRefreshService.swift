@@ -148,14 +148,13 @@ final class WidgetRefreshService {
     private func refreshContext(_ context: WidgetRefreshContext, snapshot: WidgetRefreshSnapshot) async {
         let now = Date()
         let departure = departureQueryDate(for: context.dayScope, now: now)
+        let coverageEnd = coverageEndDate(for: context.dayScope, now: now)
 
         do {
-            let connections = try await TransportService.shared.fetchConnections(
-                from: context.fromStation,
-                to: context.toStation,
-                transportType: .trainCommute,
-                departureTime: departure,
-                count: FetchLimits.widgetRefreshConnectionCount
+            let connections = try await fetchConnectionsCoveringHorizon(
+                for: context,
+                departure: departure,
+                coverageEnd: coverageEnd
             )
 
             let dayFilteredConnections = filterConnections(connections, for: context.dayScope, now: now)
@@ -265,6 +264,67 @@ final class WidgetRefreshService {
         return calendar.startOfDay(for: tomorrow)
     }
 
+    private func coverageEndDate(for dayScope: WidgetDayScope, now: Date) -> Date {
+        let horizonSeconds = TimeInterval(FetchLimits.widgetCoverageHorizonHours * 60 * 60)
+        let calendar = Calendar.current
+
+        switch dayScope {
+        case .today:
+            guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
+                return now.addingTimeInterval(horizonSeconds)
+            }
+            return min(endOfDay, now.addingTimeInterval(horizonSeconds))
+        case .tomorrow:
+            let start = startOfTomorrow(from: now)
+            guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+                return start.addingTimeInterval(horizonSeconds)
+            }
+            return min(end, start.addingTimeInterval(horizonSeconds))
+        }
+    }
+
+    private func fetchConnectionsCoveringHorizon(
+        for context: WidgetRefreshContext,
+        departure: Date,
+        coverageEnd: Date
+    ) async throws -> [TrainConnection] {
+        let pageSize = FetchLimits.widgetRefreshConnectionCount
+        let maxHops = 4
+        var allConnections: [TrainConnection] = []
+        var seenIds = Set<String>()
+        var cursor = departure
+
+        for _ in 0 ..< maxHops {
+            let page = try await TransportService.shared.fetchConnections(
+                from: context.fromStation,
+                to: context.toStation,
+                transportType: .trainCommute,
+                departureTime: cursor,
+                count: pageSize
+            )
+            guard !page.isEmpty else { break }
+
+            for connection in page where !seenIds.contains(connection.id) {
+                seenIds.insert(connection.id)
+                allConnections.append(connection)
+            }
+
+            guard let furthestDeparture = page.map(\.departureTime).max() else { break }
+            if furthestDeparture >= coverageEnd { break }
+            if furthestDeparture <= cursor { break }
+
+            cursor = furthestDeparture.addingTimeInterval(1)
+            if page.count < pageSize { break }
+        }
+
+        return allConnections.sorted { lhs, rhs in
+            if lhs.departureTime != rhs.departureTime {
+                return lhs.departureTime < rhs.departureTime
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
     private func filterConnections(
         _ connections: [TrainConnection],
         for dayScope: WidgetDayScope,
@@ -308,7 +368,7 @@ final class WidgetRefreshService {
             }
             return lhs.id < rhs.id
         }
-        return Array(sorted.prefix(3))
+        return Array(sorted.prefix(FetchLimits.widgetStoredConnectionLimit))
     }
 
     private func persistUnavailableRouteStates(from snapshot: WidgetRefreshSnapshot, updatedAt: Date) {

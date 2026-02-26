@@ -130,8 +130,10 @@ struct GleisProvider: AppIntentTimelineProvider {
 
             // Add entries for the transition to next connection
             let nextConnectionDate = current.leaveTime.addingTimeInterval(1)
-            if let nextCurrent = data.connection(at: nextConnectionDate) {
+            if nextConnectionDate > now {
                 entries.append(GleisEntry(date: nextConnectionDate, data: data, configuration: configuration))
+            }
+            if let nextCurrent = data.connection(at: nextConnectionDate) {
                 // Add entry for next connection's timer mode
                 let nextRemaining = nextCurrent.leaveTime.timeIntervalSince(nextConnectionDate)
                 if nextRemaining > 60 {
@@ -144,8 +146,8 @@ struct GleisProvider: AppIntentTimelineProvider {
             }
 
             // Add an entry for when all connections will have departed (to show stale state)
-            if let lastConn = data.connections.last {
-                let staleDate = lastConn.departureTime.addingTimeInterval(1)
+            if let latestDeparture = data.connections.map(\.departureTime).max() {
+                let staleDate = latestDeparture.addingTimeInterval(1)
                 if staleDate > now {
                     let staleData = staleData(
                         from: data,
@@ -170,7 +172,7 @@ struct GleisProvider: AppIntentTimelineProvider {
                 entries.append(GleisEntry(date: now, data: data, configuration: configuration))
 
                 // Find the first future leave time and create entries leading up to it
-                for leaveTime in data.leaveTimes where leaveTime > now {
+                for leaveTime in data.leaveTimes.sorted() where leaveTime > now {
                     // Create entry 30 mins before leave time (when countdown becomes relevant)
                     let thirtyMinBefore = leaveTime.addingTimeInterval(-30 * 60)
                     if thirtyMinBefore > now {
@@ -189,32 +191,11 @@ struct GleisProvider: AppIntentTimelineProvider {
             entries.append(GleisEntry(date: now, data: nil, configuration: configuration))
         }
 
-        // Determine refresh policy
-        let refreshPolicy: TimelineReloadPolicy
-        if let data, let current = data.connection(at: now) {
-            let remaining = current.leaveTime.timeIntervalSince(now)
-            if remaining > 60 {
-                // Refresh just before timer mode starts
-                refreshPolicy = .after(current.leaveTime.addingTimeInterval(-59))
-            } else if remaining > 0 {
-                refreshPolicy = .after(current.leaveTime.addingTimeInterval(1))
-            } else {
-                refreshPolicy = .after(now.addingTimeInterval(60))
-            }
-        } else if let data, let firstFutureLeaveTime = data.leaveTimes.first(where: { $0 > now }) {
-            // No current connection but have future ones - refresh 30 mins before next leave time
-            let thirtyMinBefore = firstFutureLeaveTime.addingTimeInterval(-30 * 60)
-            if thirtyMinBefore > now {
-                refreshPolicy = .after(thirtyMinBefore)
-            } else {
-                refreshPolicy = .after(now.addingTimeInterval(300)) // 5 min refresh
-            }
-        } else {
-            // No data or no future connections. Poll gently to recover.
-            refreshPolicy = .after(now.addingTimeInterval(15 * 60))
-        }
+        let sortedEntries = entries.sorted { $0.date < $1.date }
+        let refreshPolicy: TimelineReloadPolicy =
+            sortedEntries.contains(where: { $0.date > now }) ? .atEnd : .after(now.addingTimeInterval(15 * 60))
 
-        return Timeline(entries: entries, policy: refreshPolicy)
+        return Timeline(entries: sortedEntries, policy: refreshPolicy)
     }
 
     private func loadData(for configuration: SelectTransportIntent) -> WidgetData? {
@@ -224,6 +205,29 @@ struct GleisProvider: AppIntentTimelineProvider {
             directionScope: configuration.direction.storageScope,
             dayScope: configuration.day.storageScope
         )
+        if let primary = AppGroupStorage.loadWidgetData(for: storageKey),
+           hasUsableConnection(primary, now: Date())
+        {
+            return primary
+        }
+
+        // Overnight fallback:
+        // when "today" data is stale (e.g. phone was off), reuse the preloaded "tomorrow"
+        // data for the same route/direction if it still contains future departures.
+        if configuration.day == .today {
+            let rolloverKey = WidgetDataStorageKey(
+                transportType: configuration.transportType.modelValue,
+                routeScope: configuration.route.storageScope,
+                directionScope: configuration.direction.storageScope,
+                dayScope: .tomorrow
+            )
+            if let rolloverData = AppGroupStorage.loadWidgetData(for: rolloverKey),
+               hasUsableConnection(rolloverData, now: Date())
+            {
+                return rolloverData
+            }
+        }
+
         return AppGroupStorage.loadWidgetData(for: storageKey)
     }
 
@@ -239,6 +243,11 @@ struct GleisProvider: AppIntentTimelineProvider {
             stateMessage: message,
             recoveryAction: data.recoveryAction
         )
+    }
+
+    private func hasUsableConnection(_ data: WidgetData, now: Date) -> Bool {
+        if data.connection(at: now) != nil { return true }
+        return !data.futureConnections(from: now).isEmpty
     }
 }
 
@@ -352,7 +361,12 @@ struct SmallWidgetView: View {
                 Spacer(minLength: 0)
 
                 // Center: Countdown - the hero element
-                CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+                CountdownDisplay(
+                    remaining: remaining,
+                    leaveTime: current.leaveTime,
+                    referenceDate: entry.date,
+                    size: .medium
+                )
 
                 Spacer(minLength: 0)
 
@@ -382,7 +396,12 @@ struct MediumWidgetView: View {
 
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
-                    CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+                    CountdownDisplay(
+                        remaining: remaining,
+                        leaveTime: current.leaveTime,
+                        referenceDate: entry.date,
+                        size: .medium
+                    )
 
                     if remaining > 0 {
                         Text("Leave at \(current.leaveTime, style: .time)").font(.system(size: 10)).foregroundStyle(
@@ -471,9 +490,15 @@ struct CircularWidgetView: View {
                             minimumScale: 0.6)
                     } else if remaining <= 60 {
                         // Under 1 minute: live countdown with seconds
-                        Text(current.leaveTime, style: .timer).font(
-                            .system(size: 14, weight: .bold, design: .rounded).monospacedDigit()
-                        ).multilineTextAlignment(.center).scalableText(minimumScale: 0.6)
+                        Text(
+                            timerInterval: countdownInterval(referenceDate: entry.date, leaveTime: current.leaveTime),
+                            pauseTime: current.leaveTime,
+                            countsDown: true,
+                            showsHours: false
+                        )
+                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                        .multilineTextAlignment(.center)
+                        .scalableText(minimumScale: 0.6)
                     } else {
                         Text("\(Int(ceil(remaining / 60)))").font(
                             .system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
@@ -538,7 +563,12 @@ struct RectangularWidgetView: View {
                             .scalableText(minimumScale: 0.8)
                     } else if remaining <= 60 {
                         // Under 1 minute: live countdown with seconds
-                        Text(current.leaveTime, style: .timer)
+                        Text(
+                            timerInterval: countdownInterval(referenceDate: entry.date, leaveTime: current.leaveTime),
+                            pauseTime: current.leaveTime,
+                            countsDown: true,
+                            showsHours: false
+                        )
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .widgetAccentable()
                             .scalableText(minimumScale: 0.8)
@@ -631,6 +661,7 @@ struct LineBadge: View {
 struct CountdownDisplay: View {
     let remaining: TimeInterval
     let leaveTime: Date
+    let referenceDate: Date
     let size: CountdownSize
 
     enum CountdownSize {
@@ -657,9 +688,16 @@ struct CountdownDisplay: View {
                 Text("GO!").font(size.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
             } else if remaining <= 60 {
                 // Under 1 minute: live countdown timer with seconds
-                Text(leaveTime, style: .timer).font(size.mainFont.monospacedDigit()).foregroundStyle(
-                    urgencyColor(remaining)
-                ).multilineTextAlignment(.center).scalableText(minimumScale: 0.6)
+                Text(
+                    timerInterval: countdownInterval(referenceDate: referenceDate, leaveTime: leaveTime),
+                    pauseTime: leaveTime,
+                    countsDown: true,
+                    showsHours: false
+                )
+                .font(size.mainFont.monospacedDigit())
+                .foregroundStyle(urgencyColor(remaining))
+                .multilineTextAlignment(.center)
+                .scalableText(minimumScale: 0.6)
                 Text("leave now").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
             } else {
                 Text(formatCountdown(remaining)).font(size.mainFont.monospacedDigit()).foregroundStyle(
@@ -905,6 +943,12 @@ private func formatCountdown(_ seconds: TimeInterval) -> String {
         return "\(hours)h \(minutes)m"
     }
     return "\(minutes)m"
+}
+
+private func countdownInterval(referenceDate: Date, leaveTime: Date) -> ClosedRange<Date> {
+    let start = min(referenceDate, leaveTime)
+    let end = max(referenceDate, leaveTime)
+    return start ... end
 }
 
 private func urgencyColor(_ remaining: TimeInterval) -> Color {
