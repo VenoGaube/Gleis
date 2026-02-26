@@ -138,15 +138,11 @@ struct WidgetData: Codable {
         return nil
     }
 
-    /// Check if the data is stale (all connections have departed or data is too old)
+    /// A snapshot is stale only when explicitly marked stale or when it has not
+    /// been refreshed for a long time.
     var isStale: Bool {
         if state == .stale { return true }
-        let now = Date()
-        // Widget snapshots should be considered stale if not refreshed for too long.
-        if now.timeIntervalSince(updatedAt) > 90 * 60 { return true }
-        // Data is stale if all connections have departed
-        guard let lastDeparture = connections.map(\.departureTime).max() else { return true }
-        return lastDeparture < now
+        return Date().timeIntervalSince(updatedAt) > 90 * 60
     }
 
     var isFallback: Bool { state == .fallback }

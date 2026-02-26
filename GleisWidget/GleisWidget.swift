@@ -191,18 +191,18 @@ struct GleisProvider: AppIntentTimelineProvider {
                 }
             }
 
-            // Add an entry for when all connections will have departed (to show stale state)
+            // Add an entry for when all connections will have departed.
             if let latestDeparture = data.connections.map(\.departureTime).max() {
                 let staleDate = latestDeparture.addingTimeInterval(1)
                 if staleDate > now {
-                    let staleData = staleData(
+                    let emptyData = noDeparturesData(
                         from: data,
                         updatedAt: staleDate,
                         message: "No more departures right now."
                     )
                     appendTimelineEntry(
                         at: staleDate,
-                        data: staleData,
+                        data: emptyData,
                         configuration: configuration,
                         entries: &entries,
                         scheduledTimestamps: &scheduledTimestamps
@@ -214,14 +214,14 @@ struct GleisProvider: AppIntentTimelineProvider {
             let futureConnections = data.futureConnections(from: now)
 
             if futureConnections.isEmpty {
-                let staleData = staleData(
+                let emptyData = noDeparturesData(
                     from: data,
                     updatedAt: now,
                     message: "No upcoming departures."
                 )
                 appendTimelineEntry(
                     at: now,
-                    data: staleData,
+                    data: emptyData,
                     configuration: configuration,
                     entries: &entries,
                     scheduledTimestamps: &scheduledTimestamps
@@ -275,14 +275,95 @@ struct GleisProvider: AppIntentTimelineProvider {
 
         let sortedEntries = entries.sorted { $0.date < $1.date }
         let fallbackReloadDate = staleAwareReloadDate(now: now, data: data)
-        let refreshPolicy: TimelineReloadPolicy =
-            sortedEntries.contains(where: { $0.date > now }) ? .atEnd : .after(fallbackReloadDate)
+        let hasFutureEntries = sortedEntries.contains(where: { $0.date > now })
+        let hasLowFutureBuffer = data.map { $0.futureConnections(from: now).count <= 1 } ?? false
+        let refreshPolicy: TimelineReloadPolicy = if hasLowFutureBuffer {
+            .after(fallbackReloadDate)
+        } else if hasFutureEntries {
+            .atEnd
+        } else {
+            .after(fallbackReloadDate)
+        }
 
         return Timeline(entries: sortedEntries, policy: refreshPolicy)
     }
 
     private func loadData(for configuration: SelectTransportIntent) -> WidgetData? {
-        AppGroupStorage.loadPrimaryWidgetData(for: configuration.transportType.modelValue)
+        let now = Date()
+        let transportType = configuration.transportType.modelValue
+        let scopedKey = WidgetDataStorageKey(
+            transportType: transportType,
+            routeScope: configuration.route.storageScope,
+            directionScope: configuration.direction.storageScope,
+            dayScope: configuration.day.storageScope
+        )
+
+        if let scopedData = AppGroupStorage.loadWidgetData(for: scopedKey) {
+            let adjustedScopedData = freshnessAdjustedData(scopedData, now: now)
+            let hasFutureScopedConnections = !adjustedScopedData.futureConnections(from: now).isEmpty
+            if hasFutureScopedConnections || configuration.day.storageScope != .today {
+                return adjustedScopedData
+            }
+        }
+
+        // If the app has been inactive since day rollover, today's scoped key may
+        // be missing while tomorrow's precomputed data is still useful.
+        if configuration.day.storageScope == .today {
+            let rolloverKey = WidgetDataStorageKey(
+                transportType: transportType,
+                routeScope: configuration.route.storageScope,
+                directionScope: configuration.direction.storageScope,
+                dayScope: .tomorrow
+            )
+
+            if let rolloverData = AppGroupStorage.loadWidgetData(for: rolloverKey),
+               let recovered = rolloverDataForToday(fromTomorrow: rolloverData, now: now)
+            {
+                return recovered
+            }
+        }
+
+        if let primaryData = AppGroupStorage.loadPrimaryWidgetData(for: transportType) {
+            return freshnessAdjustedData(primaryData, now: now)
+        }
+
+        return nil
+    }
+
+    private func freshnessAdjustedData(_ data: WidgetData, now: Date) -> WidgetData {
+        let hasFutureConnections = !data.futureConnections(from: now).isEmpty
+        guard hasFutureConnections else { return data }
+
+        let isFreshEnough = data.state == .fresh && now.timeIntervalSince(data.updatedAt) <= 90 * 60
+        if isFreshEnough || data.state == .fallback { return data }
+
+        return WidgetData(
+            transportType: data.transportType,
+            connections: data.connections,
+            leaveTimes: data.leaveTimes,
+            fromStationName: data.fromStationName,
+            toStationName: data.toStationName,
+            updatedAt: data.updatedAt,
+            state: .fallback,
+            stateMessage: data.stateMessage ?? "Showing last known departures.",
+            recoveryAction: data.recoveryAction
+        )
+    }
+
+    private func rolloverDataForToday(fromTomorrow data: WidgetData, now: Date) -> WidgetData? {
+        guard !data.futureConnections(from: now).isEmpty else { return nil }
+
+        return WidgetData(
+            transportType: data.transportType,
+            connections: data.connections,
+            leaveTimes: data.leaveTimes,
+            fromStationName: data.fromStationName,
+            toStationName: data.toStationName,
+            updatedAt: data.updatedAt,
+            state: .fallback,
+            stateMessage: data.stateMessage ?? "Showing saved departures while app is inactive.",
+            recoveryAction: data.recoveryAction
+        )
     }
 
     private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
@@ -299,8 +380,27 @@ struct GleisProvider: AppIntentTimelineProvider {
         )
     }
 
+    private func noDeparturesData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
+        WidgetData(
+            transportType: data.transportType,
+            connections: [],
+            leaveTimes: [],
+            fromStationName: data.fromStationName,
+            toStationName: data.toStationName,
+            updatedAt: updatedAt,
+            state: .fresh,
+            stateMessage: message,
+            recoveryAction: data.recoveryAction
+        )
+    }
+
     private func staleAwareReloadDate(now: Date, data: WidgetData?) -> Date {
         guard let data else { return now.addingTimeInterval(15 * 60) }
+        let futureCount = data.futureConnections(from: now).count
+        if futureCount <= 1 {
+            // Proactively reload when we're about to exhaust the queued departures.
+            return now.addingTimeInterval(2 * 60)
+        }
         if data.state != .fresh || now.timeIntervalSince(data.updatedAt) > 45 * 60 {
             return now.addingTimeInterval(5 * 60)
         }
@@ -467,6 +567,7 @@ struct SmallWidgetView: View {
                 VStack(spacing: 4) {
                     DepartureInfo(connection: conn, size: .small)
                 }
+                .padding(.top, 6)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
             }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
@@ -847,39 +948,54 @@ struct DepartureInfo: View {
     }
 
     var body: some View {
-        HStack(alignment: .top) {
-            // Departure time
-            VStack(alignment: .leading, spacing: 2) {
-                Text(size.departureLabel)
-                    .font(size.labelFont)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+        switch size {
+        case .small:
+            HStack(alignment: .top) {
+                departureColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                platformColumn(alignment: .center)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
 
-                if connection.isDelayed {
-                    HStack(spacing: 4) {
-                        Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).foregroundStyle(
-                            .orange
-                        ).scalableText(minimumScale: 0.7)
-                        Text("+\(connection.delay)'").font(size.delayFont).foregroundStyle(.orange)
-                    }
-                } else {
-                    Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
-                        minimumScale: 0.7)
+        case .medium:
+            HStack(alignment: .top) {
+                departureColumn
+                Spacer()
+                platformColumn(alignment: .trailing)
+            }
+        }
+    }
+
+    private var departureColumn: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(size.departureLabel)
+                .font(size.labelFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            if connection.isDelayed {
+                HStack(spacing: 4) {
+                    Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).foregroundStyle(
+                        .orange
+                    ).scalableText(minimumScale: 0.7)
+                    Text("+\(connection.delay)'").font(size.delayFont).foregroundStyle(.orange)
                 }
+            } else {
+                Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
+                    minimumScale: 0.7)
             }
+        }
+    }
 
-            Spacer()
-
-            // Platform
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(size.platformLabel)
-                    .font(size.labelFont)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(displayPlatform).font(size.valueFont).scalableText(minimumScale: 0.7)
-            }
+    private func platformColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(size.platformLabel)
+                .font(size.labelFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(displayPlatform).font(size.valueFont).scalableText(minimumScale: 0.7)
         }
     }
 }
@@ -898,10 +1014,11 @@ struct EmptyWidgetView: View {
         case .stale: .secondary
         default: .trainBlue
         }
+        let hasSnapshot = data != nil
         let title = switch data?.state {
         case .fallback: "Offline data"
         case .stale: "No departures"
-        default: "Set up route"
+        default: hasSnapshot ? "No departures" : "Set up route"
         }
         let subtitle = emptyHintText(for: data)
 

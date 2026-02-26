@@ -845,16 +845,16 @@ final class TransportViewModel: ObservableObject {
         updateWidget(with: connections, forceRefreshContexts: forceRefreshContexts)
     }
 
-    private func updateWidget(with _: [TrainConnection], forceRefreshContexts: Bool = false) {
+    private func updateWidget(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
-        let topDisplayConnections = prioritizedWidgetDisplayConnections(at: now)
+        let topDisplayConnections = prioritizedWidgetDisplayConnections(from: connections, at: now)
         let topConnections = topDisplayConnections.map(makeWidgetConnection)
         let leaveTimes = topDisplayConnections.map(\.leaveTime)
         let isRouteConfigured = config.startStation != nil && config.endStation != nil
         let state: WidgetDataState
         let message: String?
         if topConnections.isEmpty {
-            state = .stale
+            state = .fresh
             message = "No upcoming departures."
         } else if isServiceDegraded, isShowingCachedData {
             state = .fallback
@@ -885,14 +885,40 @@ final class TransportViewModel: ObservableObject {
     }
 
     private func prioritizedWidgetDisplayConnections(
+        from sourceConnections: [TrainConnection]? = nil,
         at now: Date
     ) -> [DisplayConnection] {
-        let routeOrdered = sortedWidgetDisplayConnections(from: displayConnections, excludingPinned: true, now: now)
+        let candidates: [DisplayConnection]
+        if let sourceConnections {
+            let excluded = config.excludedTrainTypes
+            let filtered = excluded.isEmpty
+                ? sourceConnections
+                : sourceConnections.filter { !excluded.contains($0.trainType) }
+            let route = settingsManager.savedCommuteRoute
+            candidates = filtered.map { connection in
+                let leaveTime = calculateLeaveTime(for: connection)
+                let isSelected =
+                    settingsManager.isReminderSet(for: connection.id)
+                    || route.hasActiveReminder(for: connection)
+                let isPinned = settingsManager.isPinned(connection.id)
+                return DisplayConnection(
+                    connection: connection,
+                    leaveTime: leaveTime,
+                    isSelected: isSelected,
+                    isPinned: isPinned,
+                    currentTime: now
+                )
+            }
+        } else {
+            candidates = displayConnections
+        }
+
+        let routeOrdered = sortedWidgetDisplayConnections(from: candidates, excludingPinned: true, now: now)
         if !routeOrdered.isEmpty {
             return Array(routeOrdered.prefix(3))
         }
 
-        let includingPinned = sortedWidgetDisplayConnections(from: displayConnections, excludingPinned: false, now: now)
+        let includingPinned = sortedWidgetDisplayConnections(from: candidates, excludingPinned: false, now: now)
         return Array(includingPinned.prefix(3))
     }
 

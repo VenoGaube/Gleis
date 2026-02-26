@@ -103,7 +103,7 @@ final class WidgetRefreshService {
             ))
         }
 
-        return contexts.filter { $0.fromStation.id != $0.toStation.id && !$0.storageKey.isDefaultKey }
+        return contexts.filter { $0.fromStation.id != $0.toStation.id }
     }
 
     private func contextsForRoutePair(
@@ -158,26 +158,34 @@ final class WidgetRefreshService {
             )
 
             let dayFilteredConnections = filterConnections(connections, for: context.dayScope, now: now)
+            let excludedTrainTypes = snapshot.config.excludedTrainTypes
+            let typeFilteredConnections = excludedTrainTypes.isEmpty
+                ? dayFilteredConnections
+                : dayFilteredConnections.filter { !excludedTrainTypes.contains($0.trainType) }
             let selectedConnections = prioritizeConnections(
-                dayFilteredConnections,
+                typeFilteredConnections,
                 pinnedConnectionId: snapshot.pinnedConnectionId,
                 reminderIds: snapshot.reminderIds,
                 savedRoute: snapshot.savedRoute
             )
 
             if selectedConnections.isEmpty {
-                let staleData = WidgetData(
+                let wereConnectionsFilteredOut =
+                    !excludedTrainTypes.isEmpty
+                    && !dayFilteredConnections.isEmpty
+                    && typeFilteredConnections.isEmpty
+                let emptyData = WidgetData(
                     transportType: .trainCommute,
                     connections: [],
                     leaveTimes: [],
                     fromStationName: context.fromStation.name,
                     toStationName: context.toStation.name,
                     updatedAt: now,
-                    state: .stale,
-                    stateMessage: staleMessage(for: context),
+                    state: .fresh,
+                    stateMessage: noDeparturesMessage(for: context, wereConnectionsFilteredOut: wereConnectionsFilteredOut),
                     recoveryAction: recoveryAction(for: context.storageKey.routeScope)
                 )
-                AppGroupStorage.saveWidgetData(for: context.storageKey, data: staleData)
+                AppGroupStorage.saveWidgetData(for: context.storageKey, data: emptyData)
                 return
             }
 
@@ -289,12 +297,14 @@ final class WidgetRefreshService {
         coverageEnd: Date
     ) async throws -> [TrainConnection] {
         let pageSize = FetchLimits.widgetRefreshConnectionCount
-        let maxHops = 4
+        let targetCount = FetchLimits.widgetStoredConnectionLimit
+        let maxHops = max(4, (targetCount / max(1, pageSize)) + 2)
         var allConnections: [TrainConnection] = []
         var seenIds = Set<String>()
         var cursor = departure
 
         for _ in 0 ..< maxHops {
+            if allConnections.count >= targetCount || cursor >= coverageEnd { break }
             let page = try await TransportService.shared.fetchConnections(
                 from: context.fromStation,
                 to: context.toStation,
@@ -409,9 +419,6 @@ final class WidgetRefreshService {
                     directionScope: direction,
                     dayScope: dayScope
                 )
-                // The primary/default widget snapshot is sourced from TransportViewModel.
-                // Background refresh should not overwrite it.
-                if key.isDefaultKey { continue }
                 let data = WidgetData(
                     transportType: .trainCommute,
                     connections: [],
@@ -482,7 +489,19 @@ final class WidgetRefreshService {
         }
     }
 
-    private func staleMessage(for context: WidgetRefreshContext) -> String {
+    private func noDeparturesMessage(
+        for context: WidgetRefreshContext,
+        wereConnectionsFilteredOut: Bool = false
+    ) -> String {
+        if wereConnectionsFilteredOut {
+            switch context.dayScope {
+            case .today:
+                return "No departures match your filters today."
+            case .tomorrow:
+                return "No departures match your filters for tomorrow."
+            }
+        }
+
         switch context.dayScope {
         case .today:
             return "No more departures today."
