@@ -645,8 +645,107 @@ final class TransportViewModel: ObservableObject {
     private func setConnections(_ newConnections: [TrainConnection]) {
         let previousConnections = connections.value ?? []
         let stabilizedConnections = stabilizedServiceAlerts(in: newConnections, previous: previousConnections)
-        connections = .loaded(stabilizedConnections)
+        let deduplicatedConnections = deduplicatedConnections(stabilizedConnections, previous: previousConnections)
+        connections = .loaded(deduplicatedConnections)
         rebuildDisplayConnections()
+    }
+
+    private func deduplicatedConnections(
+        _ connections: [TrainConnection],
+        previous: [TrainConnection]
+    ) -> [TrainConnection] {
+        guard connections.count > 1 else { return connections }
+
+        let previousIds = Set(previous.map(\.id))
+        var bestBySignature: [String: TrainConnection] = [:]
+
+        for connection in connections {
+            let signature = connectionSignature(for: connection)
+            guard let existing = bestBySignature[signature] else {
+                bestBySignature[signature] = connection
+                continue
+            }
+
+            if shouldPrefer(connection, over: existing, previousIds: previousIds) {
+                bestBySignature[signature] = connection
+            }
+        }
+
+        return bestBySignature.values.sorted { lhs, rhs in
+            if lhs.departureTime != rhs.departureTime {
+                return lhs.departureTime < rhs.departureTime
+            }
+            if lhs.arrivalTime != rhs.arrivalTime {
+                return lhs.arrivalTime < rhs.arrivalTime
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func connectionSignature(for connection: TrainConnection) -> String {
+        let legSignature = connection.legs.map(connectionLegSignature).joined(separator: ";")
+        return [
+            connection.departureStation.id,
+            connection.arrivalStation.id,
+            minuteTimestamp(connection.departureTime),
+            minuteTimestamp(connection.arrivalTime),
+            "\(connection.transfers)",
+            legSignature,
+        ].joined(separator: "|")
+    }
+
+    private func connectionLegSignature(_ leg: ConnectionLeg) -> String {
+        [
+            leg.isWalking ? "W" : "T",
+            normalizeLine(leg.lineNumber),
+            leg.from.id,
+            leg.to.id,
+            minuteTimestamp(leg.departureTime),
+            minuteTimestamp(leg.arrivalTime),
+        ].joined(separator: "~")
+    }
+
+    private func minuteTimestamp(_ date: Date?) -> String {
+        guard let date else { return "nil" }
+        return String(Int(date.timeIntervalSince1970 / 60))
+    }
+
+    private func shouldPrefer(
+        _ candidate: TrainConnection,
+        over current: TrainConnection,
+        previousIds: Set<String>
+    ) -> Bool {
+        let candidateScore = preferenceScore(for: candidate, previousIds: previousIds)
+        let currentScore = preferenceScore(for: current, previousIds: previousIds)
+        if candidateScore != currentScore {
+            return candidateScore > currentScore
+        }
+        return candidate.id < current.id
+    }
+
+    private func preferenceScore(for connection: TrainConnection, previousIds: Set<String>) -> Int {
+        var score = 0
+
+        let route = settingsManager.savedCommuteRoute
+        if settingsManager.isPinned(connection.id) { score += 1_000 }
+        if settingsManager.isReminderSet(for: connection.id) || route.hasActiveReminder(for: connection) {
+            score += 800
+        }
+        if previousIds.contains(connection.id) { score += 300 }
+        if connection.serviceAlerts != nil { score += 80 }
+        score += (connection.serviceAlerts ?? []).filter(\.isActive).count * 40
+        if !normalizePlatform(connection.platform).isEmpty { score += 2 }
+
+        score += connection.legs.reduce(0) { partial, leg in
+            var legScore = 0
+            if !leg.isWalking { legScore += 10 }
+            if leg.stopCount != nil { legScore += 5 }
+            if !leg.intermediateStops.isEmpty { legScore += 5 }
+            if !normalizePlatform(leg.platform).isEmpty { legScore += 2 }
+            return partial + legScore
+        }
+
+        return score
     }
 
     private func stabilizedServiceAlerts(
