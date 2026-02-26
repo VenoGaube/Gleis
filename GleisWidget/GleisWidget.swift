@@ -315,18 +315,39 @@ struct SmallWidgetView: View {
             let conn = current.connection
 
             VStack(spacing: 0) {
-                Text(widgetRouteText(for: entry, data: data))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.62)
-                    .allowsTightening(true)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
+                ViewThatFits(in: .horizontal) {
+                    Text(widgetRouteText(for: entry, data: data))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.62)
+                        .allowsTightening(true)
 
-                // Top: Line badge (centered)
-                LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small).padding(.top, 6)
+                    Text(widgetFirstWordRouteText(for: entry, data: data))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail) // falls back to automatic "..."
+                        .minimumScaleFactor(0.8)
+                        .allowsTightening(true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+
+                // Top: Line badge + alert icon (centered on one row)
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small)
+                    if conn.hasServiceAlert {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.red)
+                            .accessibilityLabel("Service alert")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 6)
 
                 Spacer(minLength: 0)
 
@@ -338,14 +359,6 @@ struct SmallWidgetView: View {
                 // Bottom: Departure info - what you need at the station
                 VStack(spacing: 4) {
                     DepartureInfo(connection: conn, size: .small)
-                    if conn.hasServiceAlert {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text("Service alert")
-                        }
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.red)
-                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
@@ -361,7 +374,6 @@ struct SmallWidgetView: View {
 /// Journey card layout with countdown and departure details
 struct MediumWidgetView: View {
     let entry: GleisEntry
-    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         if let data = entry.data, let current = data.connection(at: entry.date) {
@@ -369,7 +381,6 @@ struct MediumWidgetView: View {
             let conn = current.connection
 
             HStack(spacing: 0) {
-                // Left: Countdown panel
                 VStack(spacing: 4) {
                     CountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
 
@@ -378,10 +389,9 @@ struct MediumWidgetView: View {
                             .secondary
                         ).scalableText(minimumScale: 0.8)
                     }
-                }.frame(width: 95).frame(maxHeight: .infinity)
+                }.frame(width: 88).frame(maxHeight: .infinity)
 
-                // Right: Journey details
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 7) {
                     Text(widgetRouteText(for: entry, data: data))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -390,73 +400,39 @@ struct MediumWidgetView: View {
                         .minimumScaleFactor(0.7)
                         .allowsTightening(true)
 
-                    // Header: Line + Destination
                     HStack(spacing: 8) {
                         LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(conn.destination).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
-
-                            if conn.isPinned {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "pin.fill").font(.system(size: 7))
-                                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
-                                }.foregroundStyle(.secondary)
-                            }
-                        }
+                        Text(conn.destination).font(.subheadline.weight(.semibold)).scalableText(minimumScale: 0.8)
 
                         Spacer()
                     }
 
-                    Spacer(minLength: 0)
-
-                    // Departure time + Platform (the critical info)
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                if conn.isDelayed {
-                                    Text(scheduledTime(conn.departureTime, delay: conn.delay)).font(
-                                        .title3.weight(.medium).monospacedDigit()
-                                    ).strikethrough().foregroundStyle(.secondary).scalableText(minimumScale: 0.7)
-
-                                    Text(timeFormatter.string(from: conn.departureTime)).font(
-                                        .title2.weight(.bold).monospacedDigit()
-                                    ).foregroundStyle(.orange).scalableText(minimumScale: 0.7)
-                                } else {
-                                    Text(timeFormatter.string(from: conn.departureTime)).font(
-                                        .title2.weight(.bold).monospacedDigit()
-                                    ).scalableText(minimumScale: 0.7)
-                                }
-                            }
-                        }
-
+                    HStack(spacing: 12) {
+                        Text(timeFormatter.string(from: conn.departureTime))
+                            .font(.title3.weight(.bold).monospacedDigit())
+                            .scalableText(minimumScale: 0.75)
+                        Text("Pl \(conn.platform ?? "–")")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .scalableText(minimumScale: 0.75)
                         Spacer()
-
-                        // Platform - same height as departure
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-
-                            Text(conn.platform ?? "–").font(.title2.weight(.bold).monospacedDigit()).scalableText(
-                                minimumScale: 0.7)
-                        }
                     }
 
-                    // Delay indicator
-                    if conn.isDelayed {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
-                        }.foregroundStyle(.orange)
-                    }
-
-                    if conn.hasServiceAlert {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("Service alert").font(.caption.weight(.semibold))
+                    HStack(spacing: 8) {
+                        if conn.isDelayed {
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock.badge.exclamationmark").font(.caption2)
+                                Text("+\(conn.delay) min").font(.caption.weight(.semibold))
+                            }.foregroundStyle(.orange)
                         }
-                        .foregroundStyle(.red)
+                        if conn.hasServiceAlert {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                                Text("Service alert").font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(.red)
+                        }
                     }
                 }.padding(14)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).widgetURL(
@@ -464,11 +440,6 @@ struct MediumWidgetView: View {
         } else {
             EmptyWidgetView(size: .medium, data: entry.data)
         }
-    }
-
-    private func scheduledTime(_ actual: Date, delay: Int) -> String {
-        let scheduled = actual.addingTimeInterval(TimeInterval(-delay * 60))
-        return timeFormatter.string(from: scheduled)
     }
 }
 
@@ -531,46 +502,67 @@ struct RectangularWidgetView: View {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
             let conn = current.connection
 
-            VStack(alignment: .leading, spacing: 1) {
-                // Line 1: Line number + Destination
-                HStack(spacing: 5) {
-                    Text(widgetCompactRouteText(for: entry, data: data))
-                        .fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 2) {
+                // Line 1: Route (origin -> destination)
+                Text(widgetRouteText(for: entry, data: data))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.75)
+
+                // Line 2: Train ID + departure/platform
+                HStack(spacing: 6) {
+                    Text(conn.lineNumber)
+                        .font(.headline.weight(.bold))
+                        .widgetAccentable()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(timeFormatter.string(from: conn.departureTime))
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text("Pl \(conn.platform ?? "–")")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .scalableText(minimumScale: 0.7)
-                    Text("•").foregroundStyle(.secondary)
-                    Text(conn.lineNumber).fontWeight(.bold).widgetAccentable()
-                    Text(conn.destination).scalableText(minimumScale: 0.8)
-                }.font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
 
-                // Line 2: Departure time + Platform
-                HStack(spacing: 5) {
-                    Text(timeFormatter.string(from: conn.departureTime)).fontWeight(.semibold).scalableText(
-                        minimumScale: 0.8)
-                    if conn.isDelayed { Text("+\(conn.delay)'").foregroundStyle(.orange) }
-                    if conn.hasServiceAlert {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                    }
-                    Text("•").foregroundStyle(.secondary)
-                    Text("Pl. \(conn.platform ?? "–")").fontWeight(.semibold).scalableText(minimumScale: 0.8)
-                }.font(.subheadline)
-
-                // Line 3: Countdown
+                // Line 3: Countdown + status
                 HStack(spacing: 4) {
                     if remaining <= 0 {
-                        Text("GO!").fontWeight(.semibold).widgetAccentable().scalableText(minimumScale: 0.8)
+                        Text("GO!")
+                            .font(.subheadline.weight(.semibold))
+                            .widgetAccentable()
+                            .scalableText(minimumScale: 0.8)
                     } else if remaining <= 60 {
                         // Under 1 minute: live countdown with seconds
-                        Text(current.leaveTime, style: .timer).fontWeight(.bold).widgetAccentable().scalableText(
-                            minimumScale: 0.8)
-                        Text("to go").foregroundStyle(.secondary)
+                        Text(current.leaveTime, style: .timer)
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .widgetAccentable()
+                            .scalableText(minimumScale: 0.8)
+                        Text("to go").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text(formatCountdown(remaining)).fontWeight(.bold).widgetAccentable().scalableText(
-                            minimumScale: 0.8)
-                        Text("to go").foregroundStyle(.secondary)
+                        Text(formatCountdown(remaining))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .widgetAccentable()
+                            .scalableText(minimumScale: 0.8)
+                        Text("to go").font(.caption).foregroundStyle(.secondary)
                     }
-                }.font(.subheadline)
+
+                    if conn.isDelayed {
+                        Text("+\(conn.delay)'")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.orange)
+                    }
+
+                    if conn.hasServiceAlert {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
             }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
         } else {
             VStack(alignment: .leading, spacing: 2) {
@@ -654,7 +646,7 @@ struct CountdownDisplay: View {
         var labelFont: Font {
             switch self {
             case .large: .system(size: 12)
-            case .medium: .system(size: 10)
+            case .medium: .system(size: 11)
             }
         }
     }
@@ -684,6 +676,11 @@ struct CountdownDisplay: View {
 struct DepartureInfo: View {
     let connection: WidgetConnection
     let size: InfoSize
+    private var displayPlatform: String {
+        let trimmed = connection.platform?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return "–" }
+        return trimmed
+    }
 
     enum InfoSize {
         case small, medium
@@ -705,7 +702,7 @@ struct DepartureInfo: View {
 
         var valueFont: Font {
             switch self {
-            case .small: .subheadline.weight(.bold).monospacedDigit()
+            case .small: .headline.weight(.bold).monospacedDigit()
             case .medium: .title2.weight(.bold).monospacedDigit()
             }
         }
@@ -742,7 +739,7 @@ struct DepartureInfo: View {
             // Platform
             VStack(alignment: .trailing, spacing: 2) {
                 Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
-                Text(connection.platform ?? "–").font(size.valueFont).scalableText(minimumScale: 0.7)
+                Text(displayPlatform).font(size.valueFont).scalableText(minimumScale: 0.7)
             }
         }
     }
@@ -840,6 +837,17 @@ private func widgetCompactRouteText(for entry: GleisEntry, data: WidgetData) -> 
         return "\(fromCompact)→\(toCompact)"
     }
     return entry.configuration.direction == .forward ? "F→T" : "T→F"
+}
+
+private func widgetFirstWordRouteText(for entry: GleisEntry, data: WidgetData) -> String {
+    let from = normalizedWidgetStationName(data.fromStationName)
+    let to = normalizedWidgetStationName(data.toStationName)
+    if let from, let to {
+        let fromCompact = from.components(separatedBy: .whitespaces).first ?? from
+        let toCompact = to.components(separatedBy: .whitespaces).first ?? to
+        return "\(fromCompact) → \(toCompact)"
+    }
+    return entry.configuration.direction == .forward ? "From → To" : "To → From"
 }
 
 private func normalizedWidgetStationName(_ name: String?) -> String? {

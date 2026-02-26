@@ -253,10 +253,13 @@ struct TransportView: View {
         let routeChanged = oldStart?.id != start?.id || oldEnd?.id != end?.id
         let changed = oldStart != start || oldEnd != end
         if changed { viewModel.selectedConnection = nil }
+        if routeChanged {
+            viewModel.cancelCurrentFetch()
+            viewModel.setImmediateRouteTransitionState(start: start, end: end)
+        }
         config.startStation = start
         config.endStation = end
         settingsManager.updateConfig(config)
-        if routeChanged { viewModel.cancelCurrentFetch() }
     }
 
     private func swapStations() {

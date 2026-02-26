@@ -21,44 +21,62 @@ Then it shows a clear leave-time on each connection card.
 <table>
   <tr>
     <td align="center">
-      <img src="Screenshots/TransportView_Connection_HomeScreen.png" width="220" alt="Train overview" /><br />
+      <img src="Screenshots/TransportView_Connection_HomeScreen.png" width="300" alt="Train overview" /><br />
       <sub>Train overview</sub>
     </td>
     <td align="center">
-      <img src="Screenshots/TransportView_Connections_Delay_Alert.png" width="220" alt="More connections" /><br />
+      <img src="Screenshots/TransportView_Connections_Delay_Alert.png" width="300" alt="More connections" /><br />
       <sub>More connections</sub>
-    </td>
-    <td align="center">
-      <img src="Screenshots/Connection_Details.png" width="220" alt="Connection details" /><br />
-      <sub>Connection details</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="Screenshots/Connection_Details_Delay.png" width="220" alt="Delay and transfer risk" /><br />
-      <sub>Delay + transfer risk</sub>
+      <img src="Screenshots/Connection_Details.png" width="300" alt="Connection details" /><br />
+      <sub>Connection details</sub>
     </td>
     <td align="center">
-      <img src="Screenshots/Connection_Details_Alert.png" width="220" alt="Service alerts" /><br />
+      <img src="Screenshots/Connection_Details_Delay.png" width="300" alt="Delay and transfer risk" /><br />
+      <sub>Delay + transfer risk</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="Screenshots/Connection_Details_Alert.png" width="300" alt="Service alerts" /><br />
       <sub>Service alerts</sub>
     </td>
     <td align="center">
-      <img src="Screenshots/Stations_List.png" width="220" alt="Station picker" /><br />
+      <img src="Screenshots/Stations_List.png" width="300" alt="Station picker" /><br />
       <sub>Station picker</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="Screenshots/Repeat_Journey_Loading.png" width="220" alt="Repeat journeys setup" /><br />
+      <img src="Screenshots/Repeat_Journey_Loading.png" width="300" alt="Repeat journeys setup" /><br />
       <sub>Repeat setup</sub>
     </td>
     <td align="center">
-      <img src="Screenshots/Repeat_Journey_Suggested.png" width="220" alt="Repeat journeys suggestions" /><br />
+      <img src="Screenshots/Repeat_Journey_Suggested.png" width="300" alt="Repeat journeys suggestions" /><br />
       <sub>Repeat suggestions</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
-      <img src="Screenshots/Settings.png" width="220" alt="Settings screen" /><br />
+      <img src="Screenshots/Settings.png" width="300" alt="Settings screen" /><br />
       <sub>Settings</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Small_Home_Widget.png" width="300" alt="Small home widget" /><br />
+      <sub>Small home widget</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="Screenshots/Medium_Home_Widget.png" width="300" alt="Medium home widget" /><br />
+      <sub>Medium home widget</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Lockscreen_Widgets.png" width="300" alt="Lock screen widgets" /><br />
+      <sub>Lock screen widgets</sub>
     </td>
   </tr>
 </table>

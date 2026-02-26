@@ -567,6 +567,16 @@ final class TransportViewModel: ObservableObject {
         pendingRefreshRequest = nil
     }
 
+    func setImmediateRouteTransitionState(start: Station?, end: Station?) {
+        let hasValidRoute = start != nil && end != nil && start?.id != end?.id
+        connections = hasValidRoute ? .loading : .idle
+        displayConnections = []
+        availableTrainTypes = []
+        isShowingCachedData = false
+        connectionRecovery = nil
+        if !hasValidRoute { clearServiceDegradedState() }
+    }
+
     deinit {
         refreshTimer?.invalidate()
         displayTimer?.invalidate()
