@@ -348,7 +348,6 @@ struct MyJourneyCard: View {
                             currentPlatform: leg.arrivalPlatform ?? leg.platform,
                             nextPlatform: transition.targetLeg.platform,
                             destinationPlatform: transition.targetLeg.arrivalPlatform,
-                            incomingDelayMinutes: leg.delayMinutes,
                             nextDepartureTime: transition.targetLeg.departureTime,
                             lineColor: transition.hasUpcomingTransitLeg
                                 ? Color.lineColor(
@@ -434,8 +433,16 @@ private struct JourneyLegSection: View {
             // Show departure endpoint for each transit leg.
             if departureStation != nil {
                 JourneyStopRow(
-                    name: departureStation?.name ?? leg.from.name, time: leg.departureTime, platform: leg.platform,
-                    delay: leg.delayMinutes, lineNumber: leg.lineNumber, lineColors: leg.lineColors, isEndpoint: true,
+                    name: departureStation?.name ?? leg.from.name,
+                    time: ConnectionTransferPlanner.plannedTime(
+                        from: leg.departureTime,
+                        delayMinutes: leg.departureDelayMinutes ?? leg.delayMinutes
+                    ),
+                    platform: leg.platform,
+                    delay: leg.departureDelayMinutes ?? leg.delayMinutes,
+                    lineNumber: leg.lineNumber,
+                    lineColors: leg.lineColors,
+                    isEndpoint: true,
                     isPassed: leg.departureTime.map { now >= $0 } ?? false, showTopConnector: false,
                     showBottomConnector: true, lineColor: legLineColor, isTransferBoundary: !isFirstLeg
                 )
@@ -444,10 +451,16 @@ private struct JourneyLegSection: View {
             // Intermediate stops
             if !leg.isWalking {
                 ForEach(visibleIntermediateStops) { stop in
+                    let stopTime = stop.arrivalTime ?? stop.departureTime
+                    let stopDelay = stop.arrivalTime != nil ? stop.arrivalDelay : stop.departureDelay
                     JourneyStopRow(
-                        name: stop.name, time: stop.arrivalTime, platform: nil, delay: stop.arrivalDelay,
+                        name: stop.name,
+                        time: ConnectionTransferPlanner.plannedTime(from: stopTime, delayMinutes: stopDelay),
+                        platform: nil,
+                        delay: stopDelay,
                         lineNumber: nil, lineColors: nil, isEndpoint: false,
-                        isPassed: stop.arrivalTime.map { now >= $0 } ?? false, showTopConnector: true,
+                        isPassed: (stop.arrivalTime ?? stop.departureTime).map { now >= $0 } ?? false,
+                        showTopConnector: true,
                         showBottomConnector: true, lineColor: legLineColor
                     )
                 }
@@ -463,9 +476,13 @@ private struct JourneyLegSection: View {
             // Show arrival endpoint for each transit leg.
             if arrivalStation != nil {
                 JourneyStopRow(
-                    name: arrivalStation?.name ?? leg.to.name, time: leg.arrivalTime,
+                    name: arrivalStation?.name ?? leg.to.name,
+                    time: ConnectionTransferPlanner.plannedTime(
+                        from: leg.arrivalTime,
+                        delayMinutes: leg.arrivalDelayMinutes ?? leg.delayMinutes
+                    ),
                     platform: arrivalPlatformOverride ?? leg.arrivalPlatform,
-                    delay: nil,
+                    delay: leg.arrivalDelayMinutes ?? leg.delayMinutes,
                     lineNumber: nil, lineColors: nil, isEndpoint: true,
                     isPassed: leg.arrivalTime.map { now >= $0 } ?? false, showTopConnector: true,
                     showBottomConnector: false, lineColor: legLineColor, isTransferBoundary: !isLastLeg

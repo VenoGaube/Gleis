@@ -279,6 +279,8 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
     let platformChanged: Bool
     let stopCount: Int?
     let delayMinutes: Int?
+    let departureDelayMinutes: Int?
+    let arrivalDelayMinutes: Int?
     let intermediateStops: [IntermediateStop]
 
     init(
@@ -287,7 +289,8 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
         lineNumber: String, trainType: TrainType = .other, lineColors: TrainLineColors? = nil, isWalking: Bool,
         duration: TimeInterval?,
         finalDestination: String? = nil, platformChanged: Bool = false, stopCount: Int? = nil,
-        delayMinutes: Int? = nil, intermediateStops: [IntermediateStop] = []
+        delayMinutes: Int? = nil, departureDelayMinutes: Int? = nil, arrivalDelayMinutes: Int? = nil,
+        intermediateStops: [IntermediateStop] = []
     ) {
         self.id = id
         self.from = from
@@ -305,6 +308,8 @@ struct ConnectionLeg: Identifiable, Codable, Equatable {
         self.platformChanged = platformChanged
         self.stopCount = stopCount
         self.delayMinutes = delayMinutes
+        self.departureDelayMinutes = departureDelayMinutes
+        self.arrivalDelayMinutes = arrivalDelayMinutes
         self.intermediateStops = intermediateStops
     }
 }
@@ -341,6 +346,13 @@ struct ConnectionTransferPlanner {
     static func transferMinutes(from currentLeg: ConnectionLeg, to targetLeg: ConnectionLeg) -> Int? {
         guard let arrival = currentLeg.arrivalTime, let departure = targetLeg.departureTime else { return nil }
         return max(0, Int(departure.timeIntervalSince(arrival) / 60))
+    }
+
+    static func plannedTime(from time: Date?, delayMinutes: Int?) -> Date? {
+        guard let time else { return nil }
+        let delay = max(0, delayMinutes ?? 0)
+        guard delay > 0 else { return time }
+        return time.addingTimeInterval(TimeInterval(-delay * 60))
     }
 
     static func walkingDurationMinutes(for leg: ConnectionLeg) -> Int? {

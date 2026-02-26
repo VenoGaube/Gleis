@@ -660,7 +660,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Gleis/Info.plist;
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Gleis uses your location to find the nearest station for faster route selection.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Gleis uses the camera to scan ticket cards.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -688,7 +687,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Gleis/Info.plist;
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Gleis uses your location to find the nearest station for faster route selection.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Gleis uses the camera to scan ticket cards.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

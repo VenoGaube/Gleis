@@ -24,6 +24,8 @@ enum ConnectionMapper {
         let departureDelay =
             connection.from.departureDelay
             ?? sections.first?.from.departureDelay
+            ?? connection.to.arrivalDelay
+            ?? sections.last?.to.arrivalDelay
         let departureTime =
             parseDate(connection.from.departureRealtime)
             ?? parseDate(sections.first?.from.departureRealtime)
@@ -37,6 +39,8 @@ enum ConnectionMapper {
         let arrivalDelay =
             connection.to.arrivalDelay
             ?? sections.last?.to.arrivalDelay
+            ?? connection.from.departureDelay
+            ?? sections.first?.from.departureDelay
         let arrivalTime =
             parseDate(connection.to.arrivalRealtime)
             ?? parseDate(sections.last?.to.arrivalRealtime)
@@ -115,7 +119,8 @@ enum ConnectionMapper {
                 detailSection.intermediatePoints,
                 connectionId: connection.id,
                 fromName: leg.from.name,
-                toName: leg.to.name
+                toName: leg.to.name,
+                fallbackDelayMinutes: leg.delayMinutes
             )
             let resolvedStops = mappedStops.isEmpty ? leg.intermediateStops : mappedStops
             let resolvedStopCount: Int? = {
@@ -129,7 +134,10 @@ enum ConnectionMapper {
                 platform: leg.platform, arrivalPlatform: leg.arrivalPlatform, lineNumber: leg.lineNumber,
                 trainType: leg.trainType, lineColors: leg.lineColors, isWalking: leg.isWalking, duration: leg.duration,
                 finalDestination: leg.finalDestination, platformChanged: leg.platformChanged,
-                stopCount: resolvedStopCount, delayMinutes: leg.delayMinutes,
+                stopCount: resolvedStopCount,
+                delayMinutes: leg.delayMinutes,
+                departureDelayMinutes: leg.departureDelayMinutes,
+                arrivalDelayMinutes: leg.arrivalDelayMinutes,
                 intermediateStops: resolvedStops
             )
         }
@@ -199,6 +207,28 @@ enum ConnectionMapper {
             let arrivalPlatform = section.to.arrivalPlatformDeviation ?? section.to.arrivalPlatform
             let info = lineInfo(for: section.category)
             let legDelay = section.from.departureDelay ?? section.to.arrivalDelay
+            let scheduledDeparture = parseDate(section.from.departure)
+            let scheduledArrival = parseDate(section.to.arrival)
+            let realtimeDeparture = parseDate(section.from.departureRealtime)
+            let realtimeArrival = parseDate(section.to.arrivalRealtime)
+            let departureDelay =
+                section.from.departureDelay
+                ?? realtimeDelayMinutes(scheduled: scheduledDeparture, realtime: realtimeDeparture)
+                ?? legDelay
+            let arrivalDelay =
+                section.to.arrivalDelay
+                ?? realtimeDelayMinutes(scheduled: scheduledArrival, realtime: realtimeArrival)
+                ?? legDelay
+            let normalizedDepartureDelay = departureDelay.map { max(0, $0) }
+            let normalizedArrivalDelay = arrivalDelay.map { max(0, $0) }
+            let normalizedLegDelay: Int? = {
+                let combined = max(
+                    normalizedDepartureDelay ?? 0,
+                    normalizedArrivalDelay ?? 0,
+                    max(0, legDelay ?? 0)
+                )
+                return combined > 0 ? combined : nil
+            }()
             let stopIdPrefix = makeIntermediateStopPrefix(
                 fromStationId: fromStation.id,
                 toStationId: toStation.id,
@@ -212,13 +242,20 @@ enum ConnectionMapper {
                 toName: toStation.name,
                 fromEsn: section.from.esn,
                 toEsn: section.to.esn,
-                stopIdPrefix: stopIdPrefix
+                stopIdPrefix: stopIdPrefix,
+                fallbackDelayMinutes: normalizedLegDelay
             )
             let stopCount = section.stopCount ?? (intermediateStops.isEmpty ? nil : intermediateStops.count)
             return ConnectionLeg(
                 from: fromStation, to: toStation,
-                departureTime: parseDate(section.from.departureRealtime) ?? parseDate(section.from.departure),
-                arrivalTime: parseDate(section.to.arrivalRealtime) ?? parseDate(section.to.arrival),
+                departureTime:
+                    realtimeDeparture
+                    ?? delayedDate(base: scheduledDeparture, delayMinutes: departureDelay)
+                    ?? scheduledDeparture,
+                arrivalTime:
+                    realtimeArrival
+                    ?? delayedDate(base: scheduledArrival, delayMinutes: arrivalDelay)
+                    ?? scheduledArrival,
                 platform: departurePlatform,
                 arrivalPlatform: arrivalPlatform,
                 lineNumber: info.number, trainType: info.trainType, lineColors: info.lineColors,
@@ -226,7 +263,10 @@ enum ConnectionMapper {
                 duration: section.duration.map { max(0, TimeInterval($0) / 1000) },
                 finalDestination: info.isWalking ? nil : toStation.name,
                 platformChanged: section.from.departurePlatformDeviation != nil, stopCount: stopCount,
-                delayMinutes: legDelay.map { max(0, $0) }, intermediateStops: intermediateStops
+                delayMinutes: normalizedLegDelay,
+                departureDelayMinutes: normalizedDepartureDelay,
+                arrivalDelayMinutes: normalizedArrivalDelay,
+                intermediateStops: intermediateStops
             )
         }
     }
@@ -237,7 +277,8 @@ enum ConnectionMapper {
         toName: String,
         fromEsn: Int?,
         toEsn: Int?,
-        stopIdPrefix: String
+        stopIdPrefix: String,
+        fallbackDelayMinutes: Int?
     ) -> [IntermediateStop] {
         guard let stops, !stops.isEmpty else { return [] }
 
@@ -258,6 +299,12 @@ enum ConnectionMapper {
 
         return candidates.enumerated().compactMap { index, stop -> IntermediateStop? in
             guard let name = stop.name, !name.isEmpty else { return nil }
+            let scheduledArrival = parseDate(stop.arrival)
+            let realtimeArrival = parseDate(stop.arrivalRealtime)
+            let scheduledDeparture = parseDate(stop.departure)
+            let realtimeDeparture = parseDate(stop.departureRealtime)
+            let arrivalDelay = stop.arrivalDelay ?? fallbackDelayMinutes
+            let departureDelay = stop.departureDelay ?? fallbackDelayMinutes
             return IntermediateStop(
                 id: stableIntermediateStopID(
                     prefix: stopIdPrefix,
@@ -268,15 +315,27 @@ enum ConnectionMapper {
                     departure: stop.departure
                 ),
                 name: name,
-                arrivalTime: parseDate(stop.arrival),
-                departureTime: parseDate(stop.departure), arrivalDelay: stop.arrivalDelay,
-                departureDelay: stop.departureDelay, platform: stop.arrivalPlatform
+                arrivalTime:
+                    realtimeArrival
+                    ?? delayedDate(base: scheduledArrival, delayMinutes: arrivalDelay)
+                    ?? scheduledArrival,
+                departureTime:
+                    realtimeDeparture
+                    ?? delayedDate(base: scheduledDeparture, delayMinutes: departureDelay)
+                    ?? scheduledDeparture,
+                arrivalDelay: arrivalDelay,
+                departureDelay: departureDelay,
+                platform: stop.arrivalPlatform
             )
         }
     }
 
     private static func mapIntermediateStops(
-        _ stops: [OebbConnectionDetailIntermediatePoint], connectionId: String, fromName: String, toName: String
+        _ stops: [OebbConnectionDetailIntermediatePoint],
+        connectionId: String,
+        fromName: String,
+        toName: String,
+        fallbackDelayMinutes: Int?
     ) -> [IntermediateStop] {
         guard !stops.isEmpty else { return [] }
         let prefix = makeIntermediateStopPrefix(
@@ -296,6 +355,10 @@ enum ConnectionMapper {
             let realtimeArrival = parseDate(stop.realtimeInformation?.arrival)
             let scheduledDeparture = parseDate(stop.departure)
             let realtimeDeparture = parseDate(stop.realtimeInformation?.departure)
+            let arrivalDelay = realtimeDelayMinutes(scheduled: scheduledArrival, realtime: realtimeArrival)
+                ?? fallbackDelayMinutes
+            let departureDelay = realtimeDelayMinutes(scheduled: scheduledDeparture, realtime: realtimeDeparture)
+                ?? fallbackDelayMinutes
 
             return IntermediateStop(
                 id: stableIntermediateStopID(
@@ -307,10 +370,16 @@ enum ConnectionMapper {
                     departure: stop.realtimeInformation?.departure ?? stop.departure
                 ),
                 name: rawName,
-                arrivalTime: realtimeArrival ?? scheduledArrival,
-                departureTime: realtimeDeparture ?? scheduledDeparture,
-                arrivalDelay: realtimeDelayMinutes(scheduled: scheduledArrival, realtime: realtimeArrival),
-                departureDelay: realtimeDelayMinutes(scheduled: scheduledDeparture, realtime: realtimeDeparture),
+                arrivalTime:
+                    realtimeArrival
+                    ?? delayedDate(base: scheduledArrival, delayMinutes: arrivalDelay)
+                    ?? scheduledArrival,
+                departureTime:
+                    realtimeDeparture
+                    ?? delayedDate(base: scheduledDeparture, delayMinutes: departureDelay)
+                    ?? scheduledDeparture,
+                arrivalDelay: arrivalDelay,
+                departureDelay: departureDelay,
                 platform: stop.realtimeInformation?.arrivalPlatform ?? stop.realtimeInformation?.departurePlatform
             )
         }
@@ -508,6 +577,8 @@ enum ConnectionMapper {
                     platformChanged: leg.platformChanged,
                     stopCount: leg.stopCount,
                     delayMinutes: leg.delayMinutes,
+                    departureDelayMinutes: leg.departureDelayMinutes,
+                    arrivalDelayMinutes: leg.arrivalDelayMinutes,
                     intermediateStops: normalizedStops
                 )
             )

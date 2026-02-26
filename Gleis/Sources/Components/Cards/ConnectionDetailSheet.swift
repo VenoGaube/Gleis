@@ -67,7 +67,19 @@ struct ConnectionDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Depart").font(.caption2).foregroundStyle(.secondary)
-                    Text(resolvedConnection.departureTime, style: .time).font(.headline.monospacedDigit())
+                    if let scheduledDepartureTime {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(scheduledDepartureTime, style: .time)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .strikethrough()
+                            Text(resolvedConnection.departureTime, style: .time)
+                                .font(.headline.monospacedDigit())
+                                .foregroundStyle(.orange)
+                        }
+                    } else {
+                        Text(resolvedConnection.departureTime, style: .time).font(.headline.monospacedDigit())
+                    }
                     if let platform = summaryDeparturePlatform {
                         Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -75,7 +87,19 @@ struct ConnectionDetailSheet: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("Arrive").font(.caption2).foregroundStyle(.secondary)
-                    Text(resolvedConnection.arrivalTime, style: .time).font(.headline.monospacedDigit())
+                    if let scheduledArrivalTime {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(scheduledArrivalTime, style: .time)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .strikethrough()
+                            Text(resolvedConnection.arrivalTime, style: .time)
+                                .font(.headline.monospacedDigit())
+                                .foregroundStyle(.orange)
+                        }
+                    } else {
+                        Text(resolvedConnection.arrivalTime, style: .time).font(.headline.monospacedDigit())
+                    }
                     if let platform = summaryArrivalPlatform {
                         Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -134,7 +158,6 @@ struct ConnectionDetailSheet: View {
                             currentPlatform: normalizedPlatform(leg.arrivalPlatform) ?? normalizedPlatform(leg.platform),
                             nextPlatform: normalizedPlatform(transition.targetLeg.platform),
                             destinationPlatform: normalizedPlatform(transition.targetLeg.arrivalPlatform),
-                            incomingDelayMinutes: leg.delayMinutes,
                             nextDepartureTime: transition.targetLeg.departureTime,
                             lineColor: transition.hasUpcomingTransitLeg ? legLineColor(transition.targetLeg) : .gray,
                             isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
@@ -213,6 +236,16 @@ struct ConnectionDetailSheet: View {
         normalizedPlatform(lastTravelLeg?.arrivalPlatform)
     }
 
+    private var scheduledDepartureTime: Date? {
+        guard resolvedConnection.delay > 0 else { return nil }
+        return resolvedConnection.departureTime.addingTimeInterval(TimeInterval(-resolvedConnection.delay * 60))
+    }
+
+    private var scheduledArrivalTime: Date? {
+        guard resolvedConnection.delay > 0 else { return nil }
+        return resolvedConnection.arrivalTime.addingTimeInterval(TimeInterval(-resolvedConnection.delay * 60))
+    }
+
     private func normalizedPlatform(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, !trimmed.isEmpty else { return nil }
@@ -237,6 +270,8 @@ struct ConnectionLegRow: View {
         let id: String
         let name: String
         let time: Date?
+        let scheduledTime: Date?
+        let delayMinutes: Int?
         let platform: String?
         let isEndpoint: Bool
         let showChangedBadge: Bool
@@ -261,6 +296,11 @@ struct ConnectionLegRow: View {
                 id: "\(leg.id)-dep",
                 name: leg.from.name,
                 time: leg.departureTime,
+                scheduledTime: scheduledTime(
+                    from: leg.departureTime,
+                    delayMinutes: leg.departureDelayMinutes ?? leg.delayMinutes
+                ),
+                delayMinutes: leg.departureDelayMinutes ?? leg.delayMinutes,
                 platform: departurePlatform,
                 isEndpoint: true,
                 showChangedBadge: leg.platformChanged
@@ -269,10 +309,14 @@ struct ConnectionLegRow: View {
 
         entries.append(
             contentsOf: leg.intermediateStops.map {
-                LegStopEntry(
+                let displayTime = $0.arrivalTime ?? $0.departureTime
+                let displayDelay = $0.arrivalTime != nil ? $0.arrivalDelay : $0.departureDelay
+                return LegStopEntry(
                     id: $0.id,
                     name: $0.name,
-                    time: $0.arrivalTime ?? $0.departureTime,
+                    time: displayTime,
+                    scheduledTime: scheduledTime(from: displayTime, delayMinutes: displayDelay),
+                    delayMinutes: displayDelay,
                     platform: nil,
                     isEndpoint: false,
                     showChangedBadge: false
@@ -285,6 +329,11 @@ struct ConnectionLegRow: View {
                 id: "\(leg.id)-arr",
                 name: leg.to.name,
                 time: leg.arrivalTime,
+                scheduledTime: scheduledTime(
+                    from: leg.arrivalTime,
+                    delayMinutes: leg.arrivalDelayMinutes ?? leg.delayMinutes
+                ),
+                delayMinutes: leg.arrivalDelayMinutes ?? leg.delayMinutes,
                 platform: arrivalPlatform,
                 isEndpoint: true,
                 showChangedBadge: false
@@ -295,6 +344,11 @@ struct ConnectionLegRow: View {
     }
 
     private var now: Date { Date() }
+
+    private func scheduledTime(from time: Date?, delayMinutes: Int?) -> Date? {
+        guard let time, let delayMinutes, delayMinutes > 0 else { return nil }
+        return time.addingTimeInterval(TimeInterval(-delayMinutes * 60))
+    }
 
     private func normalizedPlatform(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -402,10 +456,23 @@ struct ConnectionLegRow: View {
                     .lineLimit(1)
 
                 HStack(spacing: 4) {
+                    if let scheduledTime = stop.scheduledTime {
+                        Text(scheduledTime, style: .time)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .strikethrough()
+                    }
+
                     if let time = stop.time {
                         Text(time, style: .time)
                             .font(stop.isEndpoint ? .subheadline.monospacedDigit().weight(.semibold) : .caption.monospacedDigit())
                             .foregroundStyle(isPassed ? .secondary : .primary)
+                    }
+
+                    if let delayMinutes = stop.delayMinutes, delayMinutes > 0 {
+                        Text("+\(delayMinutes)'")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.orange)
                     }
 
                     if stop.showChangedBadge {
@@ -441,7 +508,6 @@ struct TransferRow: View {
     let currentPlatform: String?
     let nextPlatform: String?
     let destinationPlatform: String?
-    let incomingDelayMinutes: Int?
     let nextDepartureTime: Date?
     let lineColor: Color
     let isPassed: Bool
@@ -456,35 +522,56 @@ struct TransferRow: View {
         case comfortable
         case tight
         case critical
+        case missed
         case unknown
 
         var color: Color {
             switch self {
             case .walking, .unknown: return .secondary
-            case .comfortable: return .green
-            case .tight: return .orange
-            case .critical: return .red
+            case .comfortable:
+                return Self.paletteColor(
+                    light: (31 / 255, 138 / 255, 59 / 255),
+                    dark: (48 / 255, 209 / 255, 88 / 255)
+                )
+            case .tight:
+                return Self.paletteColor(
+                    light: (178 / 255, 106 / 255, 0 / 255),
+                    dark: (1, 159 / 255, 10 / 255)
+                )
+            case .critical:
+                return Self.paletteColor(
+                    light: (209 / 255, 73 / 255, 0 / 255),
+                    dark: (1, 122 / 255, 0)
+                )
+            case .missed:
+                return Self.paletteColor(
+                    light: (215 / 255, 0, 21 / 255),
+                    dark: (1, 69 / 255, 58 / 255)
+                )
             }
         }
 
         var icon: String {
             switch self {
             case .walking: return "figure.walk"
-            case .comfortable: return "checkmark.circle.fill"
-            case .tight: return "exclamationmark.triangle.fill"
-            case .critical: return "exclamationmark.octagon.fill"
+            case .comfortable: return "checkmark.circle"
+            case .tight: return "exclamationmark.triangle"
+            case .critical: return "clock.badge.exclamationmark"
+            case .missed: return "xmark.octagon"
             case .unknown: return "questionmark.circle"
             }
         }
 
-        var label: String {
-            switch self {
-            case .walking: return "Walk"
-            case .comfortable: return "Comfortable"
-            case .tight: return "Tight"
-            case .critical: return "Critical"
-            case .unknown: return "Check"
-            }
+        private static func paletteColor(
+            light: (CGFloat, CGFloat, CGFloat),
+            dark: (CGFloat, CGFloat, CGFloat)
+        ) -> Color {
+            Color(
+                uiColor: UIColor { traits in
+                    let rgb = traits.userInterfaceStyle == .dark ? dark : light
+                    return UIColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+                }
+            )
         }
     }
 
@@ -492,13 +579,13 @@ struct TransferRow: View {
         if involvesWalking && !hasUpcomingTransitLeg { return .walking }
         guard let effectiveTransferMinutes else { return .unknown }
         let effectiveTransfer = effectiveTransferMinutes
+        if effectiveTransfer <= 0 { return .missed }
         if effectiveTransfer < 5 { return .critical }
         if effectiveTransfer <= 8 { return .tight }
         return .comfortable
     }
     private var effectiveTransferMinutes: Int? {
-        guard let transferMinutes else { return nil }
-        return max(0, transferMinutes - max(0, incomingDelayMinutes ?? 0))
+        transferMinutes
     }
     private var indicatorColor: Color { urgency.color }
     private var transferIconName: String { urgency.icon }
@@ -511,16 +598,18 @@ struct TransferRow: View {
     }
     private var transferTitle: String {
         if nextLegIsWalking, !hasUpcomingTransitLeg { return "Walk to destination" }
+        if urgency == .missed { return "Missed transfer at \(stationName)" }
         return "Transfer at \(stationName)"
     }
     private var riskBadgeText: String? {
+        if urgency == .missed { return "Missed" }
         guard let effectiveTransferMinutes else { return nil }
         return "\(effectiveTransferMinutes) min"
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }
         switch urgency {
-        case .critical: return .red
+        case .tight, .critical, .missed: return indicatorColor
         default: return .primary
         }
     }
@@ -539,6 +628,9 @@ struct TransferRow: View {
         return "Platform \(from) -> \(to)"
     }
     private var detailsText: String {
+        if urgency == .missed {
+            return "Incoming delay likely misses \(normalizedNextLine ?? "the next connection"). Pull to refresh alternatives."
+        }
         let changeText = "Change to \(normalizedNextLine ?? "next connection")"
         if let nextPlatform = normalizedNextPlatform {
             return "\(changeText) · board from Platform \(nextPlatform)"
@@ -641,10 +733,10 @@ struct TransferRow: View {
                     if let riskBadgeText {
                         Text(riskBadgeText)
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(indicatorColor)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(indicatorColor.opacity(colorScheme == .dark ? 0.2 : 0.12), in: Capsule())
+                            .background(indicatorColor, in: Capsule())
                     }
                 }
 
