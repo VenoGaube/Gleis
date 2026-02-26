@@ -46,7 +46,7 @@ struct GleisApp: App {
             case .active:
                 // Force widget refresh when app becomes active (e.g., after unlocking phone)
                 Task(priority: .utility) {
-                    await WidgetRefreshService.shared.refreshWidgetData()
+                    await WidgetRefreshService.shared.refreshWidgetData(force: true)
                 }
                 WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
             case .background:

@@ -245,11 +245,12 @@ enum AppGroupStorage {
         return try? JSONDecoder().decode(WidgetData.self, from: legacyData)
     }
 
-    static func saveWidgetData(for type: TransportType, data: WidgetData) {
+    // Primary widget snapshot used as the single source of truth for all widget families.
+    static func savePrimaryWidgetData(for type: TransportType, data: WidgetData) {
         saveWidgetData(for: .default(for: type), data: data)
     }
 
-    static func loadWidgetData(for type: TransportType) -> WidgetData? {
+    static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
         loadWidgetData(for: .default(for: type))
     }
 

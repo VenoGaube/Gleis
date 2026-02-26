@@ -103,7 +103,7 @@ final class WidgetRefreshService {
             ))
         }
 
-        return contexts.filter { $0.fromStation.id != $0.toStation.id }
+        return contexts.filter { $0.fromStation.id != $0.toStation.id && !$0.storageKey.isDefaultKey }
     }
 
     private func contextsForRoutePair(
@@ -409,6 +409,9 @@ final class WidgetRefreshService {
                     directionScope: direction,
                     dayScope: dayScope
                 )
+                // The primary/default widget snapshot is sourced from TransportViewModel.
+                // Background refresh should not overwrite it.
+                if key.isDefaultKey { continue }
                 let data = WidgetData(
                     transportType: .trainCommute,
                     connections: [],

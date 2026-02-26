@@ -845,30 +845,11 @@ final class TransportViewModel: ObservableObject {
         updateWidget(with: connections, forceRefreshContexts: forceRefreshContexts)
     }
 
-    private func updateWidget(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
+    private func updateWidget(with _: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
-        let futureConnections = connections.filter { $0.departureTime > now }
-        let route = settingsManager.savedCommuteRoute
-        let rankedConnections = futureConnections
-            .map { connection in
-                let isPinned = settingsManager.isPinned(connection.id)
-                let hasReminder =
-                    settingsManager.isReminderSet(for: connection.id)
-                    || route.hasActiveReminder(for: connection)
-                return (connection, isPinned, hasReminder)
-            }
-            .sorted { lhs, rhs in
-                if lhs.1 != rhs.1 { return lhs.1 }
-                if lhs.2 != rhs.2 { return lhs.2 }
-                if lhs.0.departureTime != rhs.0.departureTime {
-                    return lhs.0.departureTime < rhs.0.departureTime
-                }
-                return lhs.0.id < rhs.0.id
-            }
-
-        let topRankedConnections = Array(rankedConnections.prefix(3))
-        let topConnections = topRankedConnections.map(makeWidgetConnection)
-        let leaveTimes = topRankedConnections.map { calculateLeaveTime(for: $0.0) }
+        let topDisplayConnections = prioritizedWidgetDisplayConnections(at: now)
+        let topConnections = topDisplayConnections.map(makeWidgetConnection)
+        let leaveTimes = topDisplayConnections.map(\.leaveTime)
         let isRouteConfigured = config.startStation != nil && config.endStation != nil
         let state: WidgetDataState
         let message: String?
@@ -895,7 +876,7 @@ final class TransportViewModel: ObservableObject {
             stateMessage: message,
             recoveryAction: action
         )
-        AppGroupStorage.saveWidgetData(for: transportType, data: widgetData)
+        AppGroupStorage.savePrimaryWidgetData(for: transportType, data: widgetData)
         // Keep all intent-keyed widget variants (direction/day/route) fresh as well.
         Task(priority: .utility) {
             await WidgetRefreshService.shared.refreshWidgetData(force: forceRefreshContexts)
@@ -903,10 +884,43 @@ final class TransportViewModel: ObservableObject {
         WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
     }
 
-    private func makeWidgetConnection(
-        _ rankedConnection: (connection: TrainConnection, isPinned: Bool, hasReminder: Bool)
-    ) -> WidgetConnection {
-        let connection = rankedConnection.connection
+    private func prioritizedWidgetDisplayConnections(
+        at now: Date
+    ) -> [DisplayConnection] {
+        let routeOrdered = sortedWidgetDisplayConnections(from: displayConnections, excludingPinned: true, now: now)
+        if !routeOrdered.isEmpty {
+            return Array(routeOrdered.prefix(3))
+        }
+
+        let includingPinned = sortedWidgetDisplayConnections(from: displayConnections, excludingPinned: false, now: now)
+        return Array(includingPinned.prefix(3))
+    }
+
+    private func sortedWidgetDisplayConnections(
+        from candidates: [DisplayConnection],
+        excludingPinned: Bool,
+        now: Date
+    ) -> [DisplayConnection] {
+        let pinnedId = settingsManager.pinnedJourney?.connectionId
+
+        return candidates
+            .filter { item in
+                guard item.connection.departureTime > now, item.leaveTime > now else { return false }
+                if excludingPinned {
+                    return item.connection.id != pinnedId && !item.isPinned
+                }
+                return true
+            }
+            .sorted { lhs, rhs in
+                if lhs.connection.departureTime != rhs.connection.departureTime {
+                    return lhs.connection.departureTime < rhs.connection.departureTime
+                }
+                return lhs.connection.id < rhs.connection.id
+            }
+    }
+
+    private func makeWidgetConnection(_ displayConnection: DisplayConnection) -> WidgetConnection {
+        let connection = displayConnection.connection
         let stopCount = connection.legs.first { !$0.isWalking }?.stopCount
         return WidgetConnection(
             id: connection.id,
@@ -919,8 +933,8 @@ final class TransportViewModel: ObservableObject {
             transfers: connection.transfers,
             delay: connection.delay,
             stopCount: stopCount,
-            hasReminder: rankedConnection.hasReminder,
-            isPinned: rankedConnection.isPinned,
+            hasReminder: displayConnection.isSelected,
+            isPinned: displayConnection.isPinned,
             hasServiceAlert: (connection.serviceAlerts ?? []).contains(where: \.isActive)
         )
     }

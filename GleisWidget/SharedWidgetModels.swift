@@ -119,10 +119,10 @@ struct WidgetData: Codable {
     private var scheduledConnections: [(connection: WidgetConnection, leaveTime: Date)] {
         let paired = Array(zip(connections, leaveTimes))
         return paired.sorted { lhs, rhs in
-            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             if lhs.0.departureTime != rhs.0.departureTime {
                 return lhs.0.departureTime < rhs.0.departureTime
             }
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             return lhs.0.id < rhs.0.id
         }
     }
@@ -131,45 +131,9 @@ struct WidgetData: Codable {
         let scheduled = scheduledConnections
         guard !scheduled.isEmpty else { return nil }
 
-        // Find the next regular (non-pinned) connection by leave time
-        var nextRegular: (connection: WidgetConnection, leaveTime: Date)?
-        for item in scheduled where date < item.leaveTime && !item.connection.isPinned {
-            nextRegular = item
-            break
-        }
-
-        // Priority 1: Show pinned "My Journey" only if:
-        // - Its departure time hasn't passed, AND
-        // - Its leave time is within 20 minutes of the next regular connection (or no regular connection exists)
-        for item in scheduled where item.connection.isPinned && item.connection.departureTime > date {
-            let pinnedLeaveTime = item.leaveTime
-
-            // If pinned leave time has passed, show it (it's time!)
-            if pinnedLeaveTime <= date { return (item.connection, pinnedLeaveTime) }
-
-            // If no regular connection, show pinned
-            guard let regular = nextRegular else { return (item.connection, pinnedLeaveTime) }
-
-            let timeDifference = abs(pinnedLeaveTime.timeIntervalSince(regular.leaveTime))
-
-            // Only prioritize pinned if within 20 minutes of next regular connection
-            if timeDifference <= 20 * 60 { return (item.connection, pinnedLeaveTime) }
-            // Otherwise, don't prioritize pinned yet - fall through to regular logic
-        }
-
-        // Priority 2: Show reminder-set connection until its departure (pinned until GO! completes)
-        for item in scheduled where item.connection.hasReminder && item.connection.departureTime > date {
+        // Always mirror the top-most Train View item: earliest upcoming departure.
+        for item in scheduled where item.connection.departureTime > date {
             return item
-        }
-
-        // Priority 3: Find first connection whose leave time hasn't passed
-        for item in scheduled where date < item.leaveTime {
-            return item
-        }
-
-        // Priority 4: Show in-flight train if departure already happened but no next leave yet.
-        if let inFlight = scheduled.first(where: { $0.leaveTime <= date && $0.connection.departureTime > date }) {
-            return inFlight
         }
         return nil
     }
@@ -178,8 +142,8 @@ struct WidgetData: Codable {
     var isStale: Bool {
         if state == .stale { return true }
         let now = Date()
-        // Data is stale if updated more than 6 hours ago
-        if now.timeIntervalSince(updatedAt) > 6 * 60 * 60 { return true }
+        // Widget snapshots should be considered stale if not refreshed for too long.
+        if now.timeIntervalSince(updatedAt) > 90 * 60 { return true }
         // Data is stale if all connections have departed
         guard let lastDeparture = connections.map(\.departureTime).max() else { return true }
         return lastDeparture < now
@@ -189,12 +153,7 @@ struct WidgetData: Codable {
 
     /// Returns connections that haven't departed yet
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        var result: [(connection: WidgetConnection, leaveTime: Date)] = []
-        for item in scheduledConnections {
-            // Include if departure is in the future OR if leave time hasn't passed yet
-            if item.connection.departureTime > date || item.leaveTime > date { result.append(item) }
-        }
-        return result
+        scheduledConnections.filter { $0.connection.departureTime > date }
     }
 }
 
@@ -353,11 +312,12 @@ enum AppGroupStorage {
         return try? JSONDecoder().decode(WidgetData.self, from: legacyData)
     }
 
-    static func saveWidgetData(for type: TransportType, data: WidgetData) {
+    // Primary widget snapshot used as the single source of truth for all widget families.
+    static func savePrimaryWidgetData(for type: TransportType, data: WidgetData) {
         saveWidgetData(for: .default(for: type), data: data)
     }
 
-    static func loadWidgetData(for type: TransportType) -> WidgetData? {
+    static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
         loadWidgetData(for: .default(for: type))
     }
 

@@ -28,13 +28,13 @@ enum TransportTypeOption: String, AppEnum {
 }
 
 enum WidgetRouteOption: String, AppEnum {
-    case repeatJourney = "Repeat Journey"
     case liveRoute = "Current Route"
+    case repeatJourney = "Repeat Journey"
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Route"
     static var caseDisplayRepresentations: [WidgetRouteOption: DisplayRepresentation] = [
-        .repeatJourney: DisplayRepresentation(title: "Repeat Journey", image: .init(systemName: "repeat")),
         .liveRoute: DisplayRepresentation(title: "Current Route", image: .init(systemName: "location")),
+        .repeatJourney: DisplayRepresentation(title: "Repeat Journey", image: .init(systemName: "repeat")),
     ]
 
     var storageScope: WidgetRouteScope {
@@ -96,52 +96,98 @@ struct GleisProvider: AppIntentTimelineProvider {
         let data = loadData(for: configuration)
         let now = Date()
         var entries: [GleisEntry] = []
+        var scheduledTimestamps = Set<Int>()
 
-        // Explicit stale state should be surfaced to the user with a clear CTA.
-        if let data, data.state == .stale {
-            entries.append(GleisEntry(date: now, data: data, configuration: configuration))
-            return Timeline(entries: entries, policy: .after(now.addingTimeInterval(15 * 60)))
+        // Surface stale snapshots quickly and keep polling in short intervals.
+        if let data, data.isStale {
+            let staleSnapshot = data.state == .stale
+                ? data
+                : staleData(from: data, updatedAt: now, message: "Refreshing departures...")
+            entries.append(GleisEntry(date: now, data: staleSnapshot, configuration: configuration))
+            return Timeline(entries: entries, policy: .after(now.addingTimeInterval(5 * 60)))
         }
 
         if let data, let current = data.connection(at: now) {
             let remaining = current.leaveTime.timeIntervalSince(now)
+            appendTimelineEntry(
+                at: now,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
 
             if remaining > 60 {
                 // Create entries for each minute until we reach 1-minute timer mode
                 let minutesUntilTimer = Int((remaining - 60) / 60) + 1
                 for i in 0 ..< min(minutesUntilTimer, 30) {
-                    entries.append(
-                        GleisEntry(
-                            date: now.addingTimeInterval(TimeInterval(i * 60)), data: data, configuration: configuration
-                        ))
+                    appendTimelineEntry(
+                        at: now.addingTimeInterval(TimeInterval(i * 60)),
+                        data: data,
+                        configuration: configuration,
+                        entries: &entries,
+                        scheduledTimestamps: &scheduledTimestamps
+                    )
                 }
                 // Add entry at 1 minute before (when timer mode starts)
-                entries.append(
-                    GleisEntry(
-                        date: current.leaveTime.addingTimeInterval(-60), data: data, configuration: configuration
-                    ))
+                let timerModeStart = current.leaveTime.addingTimeInterval(-60)
+                appendTimelineEntry(
+                    at: timerModeStart,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+                appendSecondCountdownEntries(
+                    from: max(timerModeStart, now),
+                    through: current.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             } else if remaining > 0 {
                 // Already in timer mode or about to leave
-                entries.append(GleisEntry(date: now, data: data, configuration: configuration))
-                entries.append(GleisEntry(date: current.leaveTime, data: data, configuration: configuration))
+                appendSecondCountdownEntries(
+                    from: now,
+                    through: current.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             } else {
-                entries.append(GleisEntry(date: now, data: data, configuration: configuration))
+                appendTimelineEntry(
+                    at: now,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             }
 
             // Add entries for the transition to next connection
             let nextConnectionDate = current.leaveTime.addingTimeInterval(1)
             if nextConnectionDate > now {
-                entries.append(GleisEntry(date: nextConnectionDate, data: data, configuration: configuration))
+                appendTimelineEntry(
+                    at: nextConnectionDate,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             }
             if let nextCurrent = data.connection(at: nextConnectionDate) {
                 // Add entry for next connection's timer mode
                 let nextRemaining = nextCurrent.leaveTime.timeIntervalSince(nextConnectionDate)
                 if nextRemaining > 60 {
-                    entries.append(
-                        GleisEntry(
-                            date: nextCurrent.leaveTime.addingTimeInterval(-60), data: data,
-                            configuration: configuration
-                        ))
+                    appendTimelineEntry(
+                        at: nextCurrent.leaveTime.addingTimeInterval(-60),
+                        data: data,
+                        configuration: configuration,
+                        entries: &entries,
+                        scheduledTimestamps: &scheduledTimestamps
+                    )
                 }
             }
 
@@ -154,7 +200,13 @@ struct GleisProvider: AppIntentTimelineProvider {
                         updatedAt: staleDate,
                         message: "No more departures right now."
                     )
-                    entries.append(GleisEntry(date: staleDate, data: staleData, configuration: configuration))
+                    appendTimelineEntry(
+                        at: staleDate,
+                        data: staleData,
+                        configuration: configuration,
+                        entries: &entries,
+                        scheduledTimestamps: &scheduledTimestamps
+                    )
                 }
             }
         } else if let data {
@@ -167,68 +219,70 @@ struct GleisProvider: AppIntentTimelineProvider {
                     updatedAt: now,
                     message: "No upcoming departures."
                 )
-                entries.append(GleisEntry(date: now, data: staleData, configuration: configuration))
+                appendTimelineEntry(
+                    at: now,
+                    data: staleData,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             } else {
-                entries.append(GleisEntry(date: now, data: data, configuration: configuration))
+                appendTimelineEntry(
+                    at: now,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
 
                 // Find the first future leave time and create entries leading up to it
                 for leaveTime in data.leaveTimes.sorted() where leaveTime > now {
                     // Create entry 30 mins before leave time (when countdown becomes relevant)
                     let thirtyMinBefore = leaveTime.addingTimeInterval(-30 * 60)
                     if thirtyMinBefore > now {
-                        entries.append(GleisEntry(date: thirtyMinBefore, data: data, configuration: configuration))
+                        appendTimelineEntry(
+                            at: thirtyMinBefore,
+                            data: data,
+                            configuration: configuration,
+                            entries: &entries,
+                            scheduledTimestamps: &scheduledTimestamps
+                        )
                     }
                     // Create entry at leave time minus 1 min (for timer mode)
                     let oneMinBefore = leaveTime.addingTimeInterval(-60)
                     if oneMinBefore > now {
-                        entries.append(GleisEntry(date: oneMinBefore, data: data, configuration: configuration))
+                        appendTimelineEntry(
+                            at: oneMinBefore,
+                            data: data,
+                            configuration: configuration,
+                            entries: &entries,
+                            scheduledTimestamps: &scheduledTimestamps
+                        )
                     }
                     // Only handle first future connection
                     break
                 }
             }
         } else {
-            entries.append(GleisEntry(date: now, data: nil, configuration: configuration))
+            appendTimelineEntry(
+                at: now,
+                data: nil,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
         }
 
         let sortedEntries = entries.sorted { $0.date < $1.date }
+        let fallbackReloadDate = staleAwareReloadDate(now: now, data: data)
         let refreshPolicy: TimelineReloadPolicy =
-            sortedEntries.contains(where: { $0.date > now }) ? .atEnd : .after(now.addingTimeInterval(15 * 60))
+            sortedEntries.contains(where: { $0.date > now }) ? .atEnd : .after(fallbackReloadDate)
 
         return Timeline(entries: sortedEntries, policy: refreshPolicy)
     }
 
     private func loadData(for configuration: SelectTransportIntent) -> WidgetData? {
-        let storageKey = WidgetDataStorageKey(
-            transportType: configuration.transportType.modelValue,
-            routeScope: configuration.route.storageScope,
-            directionScope: configuration.direction.storageScope,
-            dayScope: configuration.day.storageScope
-        )
-        if let primary = AppGroupStorage.loadWidgetData(for: storageKey),
-           hasUsableConnection(primary, now: Date())
-        {
-            return primary
-        }
-
-        // Overnight fallback:
-        // when "today" data is stale (e.g. phone was off), reuse the preloaded "tomorrow"
-        // data for the same route/direction if it still contains future departures.
-        if configuration.day == .today {
-            let rolloverKey = WidgetDataStorageKey(
-                transportType: configuration.transportType.modelValue,
-                routeScope: configuration.route.storageScope,
-                directionScope: configuration.direction.storageScope,
-                dayScope: .tomorrow
-            )
-            if let rolloverData = AppGroupStorage.loadWidgetData(for: rolloverKey),
-               hasUsableConnection(rolloverData, now: Date())
-            {
-                return rolloverData
-            }
-        }
-
-        return AppGroupStorage.loadWidgetData(for: storageKey)
+        AppGroupStorage.loadPrimaryWidgetData(for: configuration.transportType.modelValue)
     }
 
     private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
@@ -245,10 +299,49 @@ struct GleisProvider: AppIntentTimelineProvider {
         )
     }
 
-    private func hasUsableConnection(_ data: WidgetData, now: Date) -> Bool {
-        if data.connection(at: now) != nil { return true }
-        return !data.futureConnections(from: now).isEmpty
+    private func staleAwareReloadDate(now: Date, data: WidgetData?) -> Date {
+        guard let data else { return now.addingTimeInterval(15 * 60) }
+        if data.state != .fresh || now.timeIntervalSince(data.updatedAt) > 45 * 60 {
+            return now.addingTimeInterval(5 * 60)
+        }
+        return now.addingTimeInterval(15 * 60)
     }
+
+    private func appendSecondCountdownEntries(
+        from start: Date,
+        through end: Date,
+        data: WidgetData,
+        configuration: SelectTransportIntent,
+        entries: inout [GleisEntry],
+        scheduledTimestamps: inout Set<Int>
+    ) {
+        guard end > start else { return }
+        var cursor = start
+        while cursor <= end {
+            appendTimelineEntry(
+                at: cursor,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
+            cursor = cursor.addingTimeInterval(1)
+        }
+    }
+
+    private func appendTimelineEntry(
+        at date: Date,
+        data: WidgetData?,
+        configuration: SelectTransportIntent,
+        entries: inout [GleisEntry],
+        scheduledTimestamps: inout Set<Int>
+    ) {
+        let key = Int(date.timeIntervalSince1970.rounded())
+        guard !scheduledTimestamps.contains(key) else { return }
+        scheduledTimestamps.insert(key)
+        entries.append(GleisEntry(date: date, data: data, configuration: configuration))
+    }
+
 }
 
 // MARK: - GleisEntry
@@ -431,7 +524,7 @@ struct MediumWidgetView: View {
                         Text(timeFormatter.string(from: conn.departureTime))
                             .font(.title3.weight(.bold).monospacedDigit())
                             .scalableText(minimumScale: 0.75)
-                        Text("Pl \(conn.platform ?? "–")")
+                        Text("Platform \(conn.platform ?? "–")")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .scalableText(minimumScale: 0.75)
@@ -726,14 +819,14 @@ struct DepartureInfo: View {
         var labelFont: Font { .system(size: 9, weight: .semibold) }
         var departureLabel: String {
             switch self {
-            case .small: "DEP"
+            case .small: "Departure"
             case .medium: "DEPARTURE"
             }
         }
 
         var platformLabel: String {
             switch self {
-            case .small: "PL"
+            case .small: "Platform"
             case .medium: "PLATFORM"
             }
         }
@@ -757,7 +850,11 @@ struct DepartureInfo: View {
         HStack(alignment: .top) {
             // Departure time
             VStack(alignment: .leading, spacing: 2) {
-                Text(size.departureLabel).font(size.labelFont).foregroundStyle(.secondary)
+                Text(size.departureLabel)
+                    .font(size.labelFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
                 if connection.isDelayed {
                     HStack(spacing: 4) {
@@ -776,7 +873,11 @@ struct DepartureInfo: View {
 
             // Platform
             VStack(alignment: .trailing, spacing: 2) {
-                Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
+                Text(size.platformLabel)
+                    .font(size.labelFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(displayPlatform).font(size.valueFont).scalableText(minimumScale: 0.7)
             }
         }
