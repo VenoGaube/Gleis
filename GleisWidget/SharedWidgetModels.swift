@@ -119,10 +119,10 @@ struct WidgetData: Codable {
     private var scheduledConnections: [(connection: WidgetConnection, leaveTime: Date)] {
         let paired = Array(zip(connections, leaveTimes))
         return paired.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             if lhs.0.departureTime != rhs.0.departureTime {
                 return lhs.0.departureTime < rhs.0.departureTime
             }
-            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             return lhs.0.id < rhs.0.id
         }
     }
@@ -131,8 +131,9 @@ struct WidgetData: Codable {
         let scheduled = scheduledConnections
         guard !scheduled.isEmpty else { return nil }
 
-        // Always mirror the top-most Train View item: earliest upcoming departure.
-        for item in scheduled where item.connection.departureTime > date {
+        // Pick the next actionable trip (leave time still in the future), otherwise
+        // we can get stuck showing GO! for trips that are already no longer catchable.
+        for item in scheduled where item.leaveTime > date {
             return item
         }
         return nil
@@ -149,7 +150,7 @@ struct WidgetData: Codable {
 
     /// Returns connections that haven't departed yet
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        scheduledConnections.filter { $0.connection.departureTime > date }
+        scheduledConnections.filter { $0.leaveTime > date }
     }
 }
 

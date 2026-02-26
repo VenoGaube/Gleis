@@ -6,10 +6,10 @@ import WidgetKit
 final class WidgetRefreshService {
     static let shared = WidgetRefreshService()
     static let taskIdentifier = "com.veno.gleis.widgetRefresh"
+    static let minimumRefreshInterval: TimeInterval = 45
     private let stateLock = NSLock()
     private var isRefreshing = false
     private var lastRefreshAt: Date?
-    private let minimumRefreshInterval: TimeInterval = 45
 
     private init() {}
 
@@ -162,8 +162,21 @@ final class WidgetRefreshService {
             let typeFilteredConnections = excludedTrainTypes.isEmpty
                 ? dayFilteredConnections
                 : dayFilteredConnections.filter { !excludedTrainTypes.contains($0.trainType) }
+            let travelTime = snapshot.config.travelTime(for: context.fromStation.id) ?? 0
+            let bufferTime = snapshot.config.bufferTime(for: context.fromStation.id) ?? 0
+            let leaveOffset = TimeInterval((travelTime + bufferTime) * 60)
+            let leaveTime: (TrainConnection) -> Date = { connection in
+                connection.departureTime.addingTimeInterval(-leaveOffset)
+            }
+            let actionableConnections: [TrainConnection]
+            switch context.dayScope {
+            case .today:
+                actionableConnections = typeFilteredConnections.filter { leaveTime($0) > now }
+            case .tomorrow:
+                actionableConnections = typeFilteredConnections
+            }
             let selectedConnections = prioritizeConnections(
-                typeFilteredConnections,
+                actionableConnections,
                 pinnedConnectionId: snapshot.pinnedConnectionId,
                 reminderIds: snapshot.reminderIds,
                 savedRoute: snapshot.savedRoute
@@ -213,11 +226,7 @@ final class WidgetRefreshService {
                 )
             }
 
-            let travelTime = snapshot.config.travelTime(for: context.fromStation.id) ?? 0
-            let bufferTime = snapshot.config.bufferTime(for: context.fromStation.id) ?? 0
-            let leaveTimes = selectedConnections.map { connection in
-                connection.departureTime.addingTimeInterval(TimeInterval(-(travelTime + bufferTime) * 60))
-            }
+            let leaveTimes = selectedConnections.map(leaveTime)
 
             let widgetData = WidgetData(
                 transportType: .trainCommute,
@@ -242,7 +251,7 @@ final class WidgetRefreshService {
         if isRefreshing { return false }
         if !force,
            let last = lastRefreshAt,
-           Date().timeIntervalSince(last) < minimumRefreshInterval
+           Date().timeIntervalSince(last) < Self.minimumRefreshInterval
         {
             return false
         }

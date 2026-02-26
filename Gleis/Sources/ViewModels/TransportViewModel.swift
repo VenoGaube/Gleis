@@ -58,6 +58,7 @@ final class TransportViewModel: ObservableObject {
     private var pendingRefreshRequest: (showFeedback: Bool, isUserInitiated: Bool)?
     private var isLoadingStations = false
     private var lastWidgetUpdate: Date?
+    private var lastWidgetSnapshotSignature: String?
     private var dismissedRecoverySignatures = Set<String>()
     private var reminderResyncSignatures = Set<String>()
     private var deliveredServiceAlertSignatures = Set<String>()
@@ -835,14 +836,47 @@ final class TransportViewModel: ObservableObject {
 
     private func updateWidgetIfNeeded(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
         let now = Date()
-        if !forceRefreshContexts,
-           let lastUpdate = lastWidgetUpdate,
-           now.timeIntervalSince(lastUpdate) < 5
+        let signature = widgetSnapshotSignature(from: connections, at: now)
+        if !forceRefreshContexts, signature == lastWidgetSnapshotSignature { return }
+
+        let shouldForceContextRefresh: Bool
+        if forceRefreshContexts {
+            shouldForceContextRefresh = true
+        } else if let lastWidgetUpdate,
+                  now.timeIntervalSince(lastWidgetUpdate) < WidgetRefreshService.minimumRefreshInterval
         {
-            return
+            // The refresh service throttles closely spaced updates. Force only when we
+            // have a real snapshot change inside that window so widgets update instantly.
+            shouldForceContextRefresh = true
+        } else {
+            shouldForceContextRefresh = false
         }
+
+        lastWidgetSnapshotSignature = signature
         lastWidgetUpdate = now
-        updateWidget(with: connections, forceRefreshContexts: forceRefreshContexts)
+        updateWidget(with: connections, forceRefreshContexts: shouldForceContextRefresh)
+    }
+
+    private func widgetSnapshotSignature(from connections: [TrainConnection], at now: Date) -> String {
+        let routeSignature = "\(config.startStation?.id ?? "nil")->\(config.endStation?.id ?? "nil")"
+        let stateSignature = (isServiceDegraded && isShowingCachedData) ? "fallback" : "fresh"
+        let topDisplayConnections = prioritizedWidgetDisplayConnections(from: connections, at: now)
+        let itemsSignature = topDisplayConnections.map { item in
+            let connection = item.connection
+            let departure = Int(connection.departureTime.timeIntervalSince1970)
+            let leave = Int(item.leaveTime.timeIntervalSince1970)
+            return [
+                connection.id,
+                String(departure),
+                String(leave),
+                String(connection.delay),
+                normalizePlatform(connection.platform),
+                item.isSelected ? "1" : "0",
+                item.isPinned ? "1" : "0",
+            ].joined(separator: "#")
+        }.joined(separator: "|")
+
+        return "\(routeSignature)|\(stateSignature)|\(itemsSignature)"
     }
 
     private func updateWidget(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
