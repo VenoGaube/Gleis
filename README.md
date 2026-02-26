@@ -18,41 +18,50 @@ Then it shows a clear leave-time on each connection card.
 
 ## Screenshots
 
-### Train Overview
-![Train tab with route and leave-time cards](Screenshots/TransportView_Connection_HomeScreen.png)
-Main board with your route, filters, and upcoming trains.
-
-### More Connections
-![Train tab list with extra upcoming trains](Screenshots/TransportView_Connections_Delay_Alert.png)
-Scroll for more trains and compare leave-times quickly.
-
-### Connection Details
-![Connection detail sheet with transfer timeline](Screenshots/Connection_Details.png)
-Detailed route timeline with transfer windows and platform changes.
-
-### Delay + Transfer Risk View
-![Connection details showing delay and transfer timing](Screenshots/Connection_Details_Delay.png)
-Shows delay impact and whether your transfer is still realistic.
-
-### Service Alerts
-![Connection details with disruption alert](Screenshots/Connection_Details_Alert.png)
-Important trip alerts are surfaced inside the journey details.
-
-### Station Picker
-![Station picker with favorites, recent, and popular stations](Screenshots/Stations_List.png)
-Pick stations faster with favorites, recent stops, and search.
-
-### Repeat Journeys Setup
-![Repeat journeys setup view](Screenshots/Repeat_Journey_Loading.png)
-Set your route, choose active commute days, and start building your schedule.
-
-### Repeat Journeys Suggestions
-![Repeat journeys with suggested schedules](Screenshots/Repeat_Journey_Suggested.png)
-Accept or dismiss suggested trains to complete your week faster.
-
-### Settings
-![Settings screen with permission and reminders](Screenshots/Settings.png)
-Manage permissions, active reminders, and app details.
+<table>
+  <tr>
+    <td align="center">
+      <img src="Screenshots/TransportView_Connection_HomeScreen.png" width="220" alt="Train overview" /><br />
+      <sub>Train overview</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/TransportView_Connections_Delay_Alert.png" width="220" alt="More connections" /><br />
+      <sub>More connections</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Connection_Details.png" width="220" alt="Connection details" /><br />
+      <sub>Connection details</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="Screenshots/Connection_Details_Delay.png" width="220" alt="Delay and transfer risk" /><br />
+      <sub>Delay + transfer risk</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Connection_Details_Alert.png" width="220" alt="Service alerts" /><br />
+      <sub>Service alerts</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Stations_List.png" width="220" alt="Station picker" /><br />
+      <sub>Station picker</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="Screenshots/Repeat_Journey_Loading.png" width="220" alt="Repeat journeys setup" /><br />
+      <sub>Repeat setup</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Repeat_Journey_Suggested.png" width="220" alt="Repeat journeys suggestions" /><br />
+      <sub>Repeat suggestions</sub>
+    </td>
+    <td align="center">
+      <img src="Screenshots/Settings.png" width="220" alt="Settings screen" /><br />
+      <sub>Settings</sub>
+    </td>
+  </tr>
+</table>
 
 ## Requirements
 
