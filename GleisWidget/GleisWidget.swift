@@ -117,6 +117,13 @@ struct GleisProvider: AppIntentTimelineProvider {
             }
 
             let nextTransition = current.leaveTime.addingTimeInterval(1)
+            appendTimelineEntry(
+                at: nextTransition,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
             if let next = data.connection(at: nextTransition) {
                 appendMinuteCountdownEntries(
                     for: next.leaveTime,
@@ -270,12 +277,16 @@ struct GleisProvider: AppIntentTimelineProvider {
             return .after(now.addingTimeInterval(10 * 60))
         }
         if data.state == .stale || data.isCoverageExhausted(at: now) {
-            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_stale_or_exhausted_5m")
-            return .after(now.addingTimeInterval(5 * 60))
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_stale_or_exhausted_1m")
+            return .after(now.addingTimeInterval(60))
         }
 
         let futureCount = data.futureConnections(from: now).count
         let coverageRemaining = data.coverageEnd.timeIntervalSince(now)
+        if futureCount == 0 {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_no_future_1m")
+            return .after(now.addingTimeInterval(60))
+        }
         if futureCount <= 2 || coverageRemaining <= 30 * 60 {
             WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_low_coverage_5m")
             return .after(now.addingTimeInterval(5 * 60))
@@ -488,7 +499,7 @@ struct MediumWidgetView: View {
                         if conn.isDelayed {
                             HStack(spacing: 4) {
                                 Image(systemName: "clock.badge.exclamationmark").font(.caption2)
-                                Text("+\(conn.delay) m").font(.caption.weight(.semibold))
+                                Text("+\(conn.delay) min").font(.caption.weight(.semibold))
                             }.foregroundStyle(.orange)
                         }
                         if conn.hasServiceAlert {
@@ -806,7 +817,7 @@ struct DepartureInfo: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
 
@@ -988,12 +999,6 @@ private func emptyHintText(for data: WidgetData?) -> String {
     default:
         return "Tap to set up your commute"
     }
-}
-
-private func countdownInterval(referenceDate: Date, leaveTime: Date) -> ClosedRange<Date> {
-    let start = min(referenceDate, leaveTime)
-    let end = max(referenceDate, leaveTime)
-    return start ... end
 }
 
 private func minutesRemaining(_ remaining: TimeInterval) -> Int {
