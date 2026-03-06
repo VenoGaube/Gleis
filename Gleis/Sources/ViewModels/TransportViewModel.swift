@@ -57,8 +57,9 @@ final class TransportViewModel: ObservableObject {
     private var isFetching = false
     private var pendingRefreshRequest: (showFeedback: Bool, isUserInitiated: Bool)?
     private var isLoadingStations = false
-    private var lastWidgetUpdate: Date?
     private var lastWidgetSnapshotSignature: String?
+    private var widgetCoverageTopUpTask: Task<Void, Never>?
+    private var lastWidgetCoverageTopUpAttemptAt: Date?
     private var dismissedRecoverySignatures = Set<String>()
     private var reminderResyncSignatures = Set<String>()
     private var deliveredServiceAlertSignatures = Set<String>()
@@ -69,6 +70,9 @@ final class TransportViewModel: ObservableObject {
     private var automaticRefreshBackoffUntil: Date?
     private var alertStabilityByConnectionID: [String: AlertStabilityState] = [:]
     private var lastCommuteNotificationReconcileDay: Date?
+    private let widgetStoredConnectionLimit = 60
+    private let widgetTopUpBatchSize = 12
+    private let widgetTopUpMinimumInterval: TimeInterval = 10 * 60
 
     private struct AlertStabilityState {
         var activeAlerts: [ServiceAlert]
@@ -109,7 +113,8 @@ final class TransportViewModel: ObservableObject {
                 guard let self else { return }
                 // Immediately invalidate widget route snapshots to avoid showing the old station pair
                 // while the new route fetch is still in progress.
-                updateWidget(with: [], forceRefreshContexts: true)
+                resetWidgetSyncStateForRouteChange()
+                updateWidget(with: [])
                 currentFetchTask?.cancel()
                 currentFetchTask = Task { await self.refreshConnections(isUserInitiated: false) }
             }
@@ -205,7 +210,8 @@ final class TransportViewModel: ObservableObject {
             availableTrainTypes = []
             lastInitializedFilterRouteKey = nil
             connectionRecovery = nil
-            updateWidget(with: [], forceRefreshContexts: true)
+            resetWidgetSyncStateForRouteChange()
+            updateWidget(with: [])
             return
         }
 
@@ -222,6 +228,7 @@ final class TransportViewModel: ObservableObject {
             deliveredServiceAlertSignatures.removeAll()
             alertStabilityByConnectionID.removeAll()
             clearServiceDegradedState()
+            resetWidgetSyncStateForRouteChange()
         }
 
         if !isUserInitiated,
@@ -575,13 +582,18 @@ final class TransportViewModel: ObservableObject {
         availableTrainTypes = []
         isShowingCachedData = false
         connectionRecovery = nil
-        if !hasValidRoute { clearServiceDegradedState() }
+        if !hasValidRoute {
+            clearServiceDegradedState()
+            resetWidgetSyncStateForRouteChange()
+            updateWidget(with: [])
+        }
     }
 
     deinit {
         refreshTimer?.invalidate()
         displayTimer?.invalidate()
         currentFetchTask?.cancel()
+        widgetCoverageTopUpTask?.cancel()
     }
 
     // MARK: - Display Connection Management
@@ -829,65 +841,67 @@ final class TransportViewModel: ObservableObject {
 
     // MARK: - Widget
 
-    private func refreshWidgetsFromLoadedConnections(forceRefreshContexts: Bool = true) {
+    private func refreshWidgetsFromLoadedConnections() {
         guard case let .loaded(loadedConnections) = connections else { return }
-        updateWidgetIfNeeded(with: loadedConnections, forceRefreshContexts: forceRefreshContexts)
+        updateWidgetIfNeeded(with: loadedConnections)
     }
 
-    private func updateWidgetIfNeeded(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
+    private func updateWidgetIfNeeded(with connections: [TrainConnection], scheduleCoverageTopUp: Bool = true) {
         let now = Date()
+        if scheduleCoverageTopUp {
+            scheduleWidgetCoverageTopUpIfNeeded(from: connections, referenceDate: now)
+        }
         let signature = widgetSnapshotSignature(from: connections, at: now)
-        if !forceRefreshContexts, signature == lastWidgetSnapshotSignature { return }
-
-        let shouldForceContextRefresh: Bool
-        if forceRefreshContexts {
-            shouldForceContextRefresh = true
-        } else if let lastWidgetUpdate,
-                  now.timeIntervalSince(lastWidgetUpdate) < WidgetRefreshService.minimumRefreshInterval
-        {
-            // The refresh service throttles closely spaced updates. Force only when we
-            // have a real snapshot change inside that window so widgets update instantly.
-            shouldForceContextRefresh = true
-        } else {
-            shouldForceContextRefresh = false
+        if signature == lastWidgetSnapshotSignature {
+            WidgetSyncDiagnostics.snapshotWriteSkipped(
+                reason: "signature_unchanged",
+                routeSignature: widgetRouteSignature(),
+                snapshotSignature: signature
+            )
+            return
         }
 
-        lastWidgetSnapshotSignature = signature
-        lastWidgetUpdate = now
-        updateWidget(with: connections, forceRefreshContexts: shouldForceContextRefresh)
+        updateWidget(with: connections, referenceDate: now, snapshotSignature: signature)
+    }
+
+    private func widgetRouteSignature() -> String {
+        WidgetSnapshotBuilder.routeSignature(
+            startStationId: config.startStation?.id,
+            endStationId: config.endStation?.id
+        )
     }
 
     private func widgetSnapshotSignature(from connections: [TrainConnection], at now: Date) -> String {
-        let routeSignature = "\(config.startStation?.id ?? "nil")->\(config.endStation?.id ?? "nil")"
+        let routeSignature = widgetRouteSignature()
         let stateSignature = (isServiceDegraded && isShowingCachedData) ? "fallback" : "fresh"
-        let topDisplayConnections = prioritizedWidgetDisplayConnections(from: connections, at: now)
-        let itemsSignature = topDisplayConnections.map { item in
-            let connection = item.connection
-            let departure = Int(connection.departureTime.timeIntervalSince1970)
-            let leave = Int(item.leaveTime.timeIntervalSince1970)
-            return [
-                connection.id,
-                String(departure),
-                String(leave),
-                String(connection.delay),
-                normalizePlatform(connection.platform),
-                item.isSelected ? "1" : "0",
-                item.isPinned ? "1" : "0",
-            ].joined(separator: "#")
-        }.joined(separator: "|")
-
-        return "\(routeSignature)|\(stateSignature)|\(itemsSignature)"
+        let candidates = widgetSnapshotCandidates(from: connections, at: now)
+        let coverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: now)
+        return WidgetSnapshotBuilder.snapshotSignature(
+            routeSignature: routeSignature,
+            stateSignature: stateSignature,
+            candidates: candidates,
+            coverageRange: coverage
+        )
     }
 
-    private func updateWidget(with connections: [TrainConnection], forceRefreshContexts: Bool = false) {
-        let now = Date()
-        let topDisplayConnections = prioritizedWidgetDisplayConnections(from: connections, at: now)
-        let topConnections = topDisplayConnections.map(makeWidgetConnection)
-        let leaveTimes = topDisplayConnections.map(\.leaveTime)
+    private func updateWidget(
+        with connections: [TrainConnection],
+        referenceDate now: Date = Date(),
+        snapshotSignature: String? = nil
+    ) {
+        let candidates = widgetSnapshotCandidates(from: connections, at: now)
+        let storedConnections = candidates.map(WidgetSnapshotBuilder.makeWidgetConnection)
+        let leaveTimes = candidates.map(\.leaveTime)
+        let routeSignature = widgetRouteSignature()
+        let coverageRange = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: now)
+        let computedSnapshotSignature = snapshotSignature ?? widgetSnapshotSignature(from: connections, at: now)
         let isRouteConfigured = config.startStation != nil && config.endStation != nil
         let state: WidgetDataState
         let message: String?
-        if topConnections.isEmpty {
+        if !isRouteConfigured {
+            state = .fresh
+            message = "Set up your route to see departures."
+        } else if storedConnections.isEmpty {
             state = .fresh
             message = "No upcoming departures."
         } else if isServiceDegraded, isShowingCachedData {
@@ -901,102 +915,219 @@ final class TransportViewModel: ObservableObject {
 
         let widgetData = WidgetData(
             transportType: transportType,
-            connections: topConnections,
+            connections: storedConnections,
             leaveTimes: leaveTimes,
             fromStationName: config.startStation?.name,
             toStationName: config.endStation?.name,
-            updatedAt: Date(),
+            updatedAt: now,
+            generatedAt: now,
+            coverageStart: coverageRange.start,
+            coverageEnd: coverageRange.end,
+            routeSignature: routeSignature,
+            snapshotSignature: computedSnapshotSignature,
             state: state,
             stateMessage: message,
             recoveryAction: action
         )
+        lastWidgetSnapshotSignature = computedSnapshotSignature
         AppGroupStorage.savePrimaryWidgetData(for: transportType, data: widgetData)
-        // Keep all intent-keyed widget variants (direction/day/route) fresh as well.
-        Task(priority: .utility) {
-            await WidgetRefreshService.shared.refreshWidgetData(force: forceRefreshContexts)
-        }
+        WidgetSyncDiagnostics.snapshotWriteApplied(
+            reason: "transport_view_model",
+            routeSignature: routeSignature,
+            snapshotSignature: computedSnapshotSignature,
+            connectionCount: storedConnections.count,
+            coverageStart: coverageRange.start,
+            coverageEnd: coverageRange.end,
+            state: state.rawValue
+        )
+        WidgetSyncDiagnostics.timelineReloadTriggered(reason: "transport_view_model_write")
         WidgetCenter.shared.reloadTimelines(ofKind: "GleisWidget")
     }
 
-    private func prioritizedWidgetDisplayConnections(
-        from sourceConnections: [TrainConnection]? = nil,
+    private func widgetSnapshotCandidates(
+        from sourceConnections: [TrainConnection],
         at now: Date
-    ) -> [DisplayConnection] {
-        let candidates: [DisplayConnection]
-        if let sourceConnections {
-            let excluded = config.excludedTrainTypes
-            let filtered = excluded.isEmpty
-                ? sourceConnections
-                : sourceConnections.filter { !excluded.contains($0.trainType) }
-            let route = settingsManager.savedCommuteRoute
-            candidates = filtered.map { connection in
-                let leaveTime = calculateLeaveTime(for: connection)
-                let isSelected =
-                    settingsManager.isReminderSet(for: connection.id)
-                    || route.hasActiveReminder(for: connection)
-                let isPinned = settingsManager.isPinned(connection.id)
-                return DisplayConnection(
-                    connection: connection,
-                    leaveTime: leaveTime,
-                    isSelected: isSelected,
-                    isPinned: isPinned,
-                    currentTime: now
-                )
-            }
-        } else {
-            candidates = displayConnections
-        }
-
-        let routeOrdered = sortedWidgetDisplayConnections(from: candidates, excludingPinned: true, now: now)
-        if !routeOrdered.isEmpty {
-            return Array(routeOrdered.prefix(3))
-        }
-
-        let includingPinned = sortedWidgetDisplayConnections(from: candidates, excludingPinned: false, now: now)
-        return Array(includingPinned.prefix(3))
-    }
-
-    private func sortedWidgetDisplayConnections(
-        from candidates: [DisplayConnection],
-        excludingPinned: Bool,
-        now: Date
-    ) -> [DisplayConnection] {
-        let pinnedId = settingsManager.pinnedJourney?.connectionId
-
-        return candidates
-            .filter { item in
-                guard item.connection.departureTime > now, item.leaveTime > now else { return false }
-                if excludingPinned {
-                    return item.connection.id != pinnedId && !item.isPinned
-                }
-                return true
-            }
-            .sorted { lhs, rhs in
-                if lhs.connection.departureTime != rhs.connection.departureTime {
-                    return lhs.connection.departureTime < rhs.connection.departureTime
-                }
-                return lhs.connection.id < rhs.connection.id
-            }
-    }
-
-    private func makeWidgetConnection(_ displayConnection: DisplayConnection) -> WidgetConnection {
-        let connection = displayConnection.connection
-        let stopCount = connection.legs.first { !$0.isWalking }?.stopCount
-        return WidgetConnection(
-            id: connection.id,
-            lineNumber: connection.lineNumber,
-            lineColors: connection.lineColors,
-            departureTime: connection.departureTime,
-            arrivalTime: connection.arrivalTime,
-            destination: connection.arrivalStation.name,
-            platform: connection.platform,
-            transfers: connection.transfers,
-            delay: connection.delay,
-            stopCount: stopCount,
-            hasReminder: displayConnection.isSelected,
-            isPinned: displayConnection.isPinned,
-            hasServiceAlert: (connection.serviceAlerts ?? []).contains(where: \.isActive)
+    ) -> [WidgetSnapshotCandidate] {
+        let reminderIds = Set(settingsManager.scheduledReminders.map(\.id))
+        return WidgetSnapshotBuilder.selectCandidates(
+            from: sourceConnections,
+            config: config,
+            savedRoute: settingsManager.savedCommuteRoute,
+            reminderIds: reminderIds,
+            pinnedConnectionId: settingsManager.pinnedJourney?.connectionId,
+            referenceDate: now,
+            limit: widgetStoredConnectionLimit
         )
+    }
+
+    private func upcomingMorningCoverageWindow(from referenceDate: Date) -> (start: Date, end: Date) {
+        WidgetSnapshotBuilder.morningCoverageWindow(from: referenceDate)
+    }
+
+    private func scheduleWidgetCoverageTopUpIfNeeded(
+        from sourceConnections: [TrainConnection],
+        referenceDate: Date
+    ) {
+        guard let start = config.startStation, let end = config.endStation, start.id != end.id else {
+            widgetCoverageTopUpTask?.cancel()
+            widgetCoverageTopUpTask = nil
+            return
+        }
+        guard widgetCoverageTopUpTask == nil else { return }
+        if let lastAttempt = lastWidgetCoverageTopUpAttemptAt,
+           referenceDate.timeIntervalSince(lastAttempt) < widgetTopUpMinimumInterval
+        {
+            return
+        }
+
+        let morningWindow = upcomingMorningCoverageWindow(from: referenceDate)
+        let hoursUntilWindowEnd = morningWindow.end.timeIntervalSince(referenceDate)
+        guard hoursUntilWindowEnd > 0, hoursUntilWindowEnd <= 12 * 60 * 60 else { return }
+
+        let routeSignature = widgetRouteSignature()
+        if let stored = AppGroupStorage.loadPrimaryWidgetData(for: transportType),
+           stored.routeSignature == routeSignature,
+           !stored.needsTopUp(referenceDate: referenceDate, targetEnd: morningWindow.end)
+        {
+            WidgetSyncDiagnostics.coverageDecision(
+                reason: "topup_not_needed_stored_coverage",
+                referenceDate: referenceDate,
+                coverageEnd: stored.coverageEnd,
+                targetEnd: morningWindow.end,
+                futureCount: stored.futureConnections(from: referenceDate).count
+            )
+            return
+        }
+
+        let candidates = widgetSnapshotCandidates(from: sourceConnections, at: referenceDate)
+        let baselineCoverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: referenceDate)
+        let baselineWidgetData = WidgetData(
+            transportType: transportType,
+            connections: candidates.map(WidgetSnapshotBuilder.makeWidgetConnection),
+            leaveTimes: candidates.map(\.leaveTime),
+            fromStationName: config.startStation?.name,
+            toStationName: config.endStation?.name,
+            updatedAt: referenceDate,
+            generatedAt: referenceDate,
+            coverageStart: baselineCoverage.start,
+            coverageEnd: baselineCoverage.end,
+            routeSignature: routeSignature
+        )
+        guard baselineWidgetData.needsTopUp(referenceDate: referenceDate, targetEnd: morningWindow.end) else {
+            WidgetSyncDiagnostics.coverageDecision(
+                reason: "topup_not_needed_baseline",
+                referenceDate: referenceDate,
+                coverageEnd: baselineWidgetData.coverageEnd,
+                targetEnd: morningWindow.end,
+                futureCount: baselineWidgetData.futureConnections(from: referenceDate).count
+            )
+            return
+        }
+
+        WidgetSyncDiagnostics.coverageDecision(
+            reason: "topup_scheduled",
+            referenceDate: referenceDate,
+            coverageEnd: baselineWidgetData.coverageEnd,
+            targetEnd: morningWindow.end,
+            futureCount: baselineWidgetData.futureConnections(from: referenceDate).count
+        )
+
+        lastWidgetCoverageTopUpAttemptAt = referenceDate
+        widgetCoverageTopUpTask = Task { [weak self] in
+            await self?.performWidgetCoverageTopUp(
+                fromStation: start,
+                toStation: end,
+                sourceConnections: sourceConnections,
+                referenceDate: referenceDate,
+                targetEnd: morningWindow.end
+            )
+        }
+    }
+
+    private func performWidgetCoverageTopUp(
+        fromStation: Station,
+        toStation: Station,
+        sourceConnections: [TrainConnection],
+        referenceDate: Date,
+        targetEnd: Date
+    ) async {
+        defer { widgetCoverageTopUpTask = nil }
+        guard !Task.isCancelled else { return }
+
+        var mergedConnections = sourceConnections.filter { $0.departureTime > referenceDate }
+        var seenIds = Set(mergedConnections.map(\.id))
+        var cursor =
+            (mergedConnections.map(\.departureTime).max() ?? referenceDate)
+                .addingTimeInterval(1)
+        if cursor < referenceDate { cursor = referenceDate }
+
+        let targetConnectionFloor = WidgetSnapshotBuilder.targetConnectionFloor(
+            referenceDate: referenceDate,
+            targetEnd: targetEnd,
+            cap: widgetStoredConnectionLimit
+        )
+        let maxHops = max(4, (widgetStoredConnectionLimit / max(1, widgetTopUpBatchSize)) + 2)
+        for _ in 0 ..< maxHops {
+            guard !Task.isCancelled else { return }
+
+            let candidates = widgetSnapshotCandidates(from: mergedConnections, at: referenceDate)
+            let coverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: referenceDate)
+            let hasEnoughCoverage = coverage.end >= targetEnd
+                && candidates.count >= targetConnectionFloor
+            if hasEnoughCoverage || candidates.count >= widgetStoredConnectionLimit || cursor > targetEnd {
+                WidgetSyncDiagnostics.coverageDecision(
+                    reason: "topup_complete",
+                    referenceDate: referenceDate,
+                    coverageEnd: coverage.end,
+                    targetEnd: targetEnd,
+                    futureCount: candidates.count
+                )
+                break
+            }
+
+            do {
+                let page = try await transportService.fetchConnections(
+                    from: fromStation,
+                    to: toStation,
+                    transportType: transportType,
+                    departureTime: cursor,
+                    count: widgetTopUpBatchSize
+                )
+                guard !page.isEmpty else { break }
+
+                var furthestDeparture = cursor
+                for connection in page {
+                    if connection.departureTime > referenceDate, seenIds.insert(connection.id).inserted {
+                        mergedConnections.append(connection)
+                    }
+                    if connection.departureTime > furthestDeparture {
+                        furthestDeparture = connection.departureTime
+                    }
+                }
+
+                guard furthestDeparture > cursor else { break }
+                cursor = furthestDeparture.addingTimeInterval(1)
+                if page.count < widgetTopUpBatchSize { break }
+            } catch {
+                WidgetSyncDiagnostics.coverageDecision(
+                    reason: "topup_fetch_failed",
+                    referenceDate: referenceDate,
+                    coverageEnd: nil,
+                    targetEnd: targetEnd,
+                    futureCount: mergedConnections.count
+                )
+                return
+            }
+        }
+
+        updateWidgetIfNeeded(with: mergedConnections, scheduleCoverageTopUp: false)
+    }
+
+    private func resetWidgetSyncStateForRouteChange() {
+        widgetCoverageTopUpTask?.cancel()
+        widgetCoverageTopUpTask = nil
+        lastWidgetCoverageTopUpAttemptAt = nil
+        lastWidgetSnapshotSignature = nil
     }
 
     // MARK: - Reminder Reliability

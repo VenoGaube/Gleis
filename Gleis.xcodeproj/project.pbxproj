@@ -7,55 +7,56 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B001 /* GleisApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001; };
-		B002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002; };
-		B003 /* TransportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003; };
-		B004 /* TransportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004; };
-		B005 /* ServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005; };
-		B006 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006; };
-		B008 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008; };
-		B009 /* TransportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009; };
-		B046 /* CameraService2.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046; };
-		B010 /* OebbAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F010; };
-		B011 /* ConnectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011; };
-		B012 /* ColorExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012; };
-		B013 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013; };
-		B014 /* ConnectionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014; };
-		B015 /* OebbAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F015; };
-		B016 /* OebbRequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016; };
-		B017 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017; };
-		B018 /* TrainConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018; };
-		B019 /* TransportType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019; };
-		B020 /* RouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020; };
-		B021 /* CommuteSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021; };
-		B022 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022; };
-		B023 /* WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023; };
-		B024 /* ConnectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024; };
-		B025 /* ConnectionDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025; };
-		B026 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026; };
-		B027 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027; };
-		B028 /* StationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028; };
-		B029 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029; };
-		B031 /* TicketWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F031; };
-		B032 /* CommuteScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F032; };
-		B033 /* WidgetRefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F033; };
-		B034 /* PinnedJourney.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034; };
-		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035; };
-		B039 /* DisplayConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039; };
-		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041; };
-		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043; };
-		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044; };
-		W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01; };
-		W002 /* SharedWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF02; };
-		W003 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF03; };
-		W004 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF04; };
-		W005 /* GleisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = WF00; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B001 /* GleisApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* GleisApp.swift */; };
+		B002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
+		B003 /* TransportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* TransportView.swift */; };
+		B004 /* TransportViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004 /* TransportViewModel.swift */; };
+		B005 /* ServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005 /* ServiceProtocols.swift */; };
+		B006 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006 /* StorageService.swift */; };
+		B008 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008 /* NotificationService.swift */; };
+		B009 /* TransportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009 /* TransportService.swift */; };
+		B010 /* OebbAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F010 /* OebbAPIClient.swift */; };
+		B011 /* ConnectionMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011 /* ConnectionMapper.swift */; };
+		B012 /* ColorExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012 /* ColorExtensions.swift */; };
+		B013 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013 /* NetworkMonitor.swift */; };
+		B014 /* ConnectionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014 /* ConnectionCache.swift */; };
+		B015 /* OebbAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F015 /* OebbAPIModels.swift */; };
+		B016 /* OebbRequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016 /* OebbRequestModels.swift */; };
+		B017 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017 /* Station.swift */; };
+		B018 /* TrainConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018 /* TrainConnection.swift */; };
+		B019 /* TransportType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019 /* TransportType.swift */; };
+		B020 /* RouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020 /* RouteConfiguration.swift */; };
+		B021 /* CommuteSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* CommuteSchedule.swift */; };
+		B022 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* AppSettings.swift */; };
+		B023 /* WidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023 /* WidgetModels.swift */; };
+		B024 /* ConnectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024 /* ConnectionCard.swift */; };
+		B025 /* ConnectionDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025 /* ConnectionDetailSheet.swift */; };
+		B026 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026 /* CommonComponents.swift */; };
+		B027 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* OnboardingView.swift */; };
+		B028 /* StationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028 /* StationPicker.swift */; };
+		B029 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029 /* SettingsView.swift */; };
+		B031 /* TicketWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F031 /* TicketWalletView.swift */; };
+		B032 /* CommuteScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F032 /* CommuteScheduleView.swift */; };
+		B034 /* PinnedJourney.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034 /* PinnedJourney.swift */; };
+		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035 /* MyJourneyCard.swift */; };
+		B039 /* DisplayConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039 /* DisplayConnection.swift */; };
+		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041 /* ToastManager.swift */; };
+		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043 /* StationSearchService.swift */; };
+		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044 /* CommuteScheduleViewModel.swift */; };
+		B046 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046 /* CameraService.swift */; };
+		B047 /* WidgetSyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047 /* WidgetSyncDiagnostics.swift */; };
+		W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01 /* GleisWidget.swift */; };
+		W002 /* SharedWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF02 /* SharedWidgetModels.swift */; };
+		W003 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF03 /* WidgetKit.framework */; };
+		W004 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF04 /* SwiftUI.framework */; };
+		W005 /* GleisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = WF00 /* GleisWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		W007 /* WidgetSyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047 /* WidgetSyncDiagnostics.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		W200 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 500;
+			containerPortal = 500 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = W300;
 			remoteInfo = GleisWidgetExtension;
@@ -69,7 +70,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				W005,
+				W005 /* GleisWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -86,7 +87,6 @@
 		F006 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
 		F008 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		F009 /* TransportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportService.swift; sourceTree = "<group>"; };
-		F046 /* CameraService2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F010 /* OebbAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbAPIClient.swift; sourceTree = "<group>"; };
 		F011 /* ConnectionMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMapper.swift; sourceTree = "<group>"; };
 		F012 /* ColorExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorExtensions.swift; sourceTree = "<group>"; };
@@ -109,13 +109,14 @@
 		F029 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F031 /* TicketWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketWalletView.swift; sourceTree = "<group>"; };
 		F032 /* CommuteScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleView.swift; sourceTree = "<group>"; };
-		F033 /* WidgetRefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetRefreshService.swift; sourceTree = "<group>"; };
 		F034 /* PinnedJourney.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedJourney.swift; sourceTree = "<group>"; };
 		F035 /* MyJourneyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyJourneyCard.swift; sourceTree = "<group>"; };
 		F039 /* DisplayConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConnection.swift; sourceTree = "<group>"; };
 		F041 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
 		F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
 		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
+		F046 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
+		F047 /* WidgetSyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSyncDiagnostics.swift; sourceTree = "<group>"; };
 		F100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F101 /* Gleis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gleis.entitlements; sourceTree = "<group>"; };
 		WF00 /* GleisWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GleisWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,8 +140,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				W003,
-				W004,
+				W003 /* WidgetKit.framework in Frameworks */,
+				W004 /* SwiftUI.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -279,8 +280,7 @@
 				F006 /* StorageService.swift */,
 				F008 /* NotificationService.swift */,
 				F009 /* TransportService.swift */,
-				F046 /* CameraService2.swift */,
-				F033 /* WidgetRefreshService.swift */,
+				F046 /* CameraService.swift */,
 				F043 /* StationSearchService.swift */,
 			);
 			path = Services;
@@ -308,6 +308,7 @@
 				F013 /* NetworkMonitor.swift */,
 				F014 /* ConnectionCache.swift */,
 				F041 /* ToastManager.swift */,
+				F047 /* WidgetSyncDiagnostics.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -390,7 +391,7 @@
 /* Begin PBXNativeTarget section */
 		300 /* Gleis */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 400;
+			buildConfigurationList = 400 /* Build configuration list for PBXNativeTarget "Gleis" */;
 			buildPhases = (
 				301 /* Sources */,
 				302 /* Frameworks */,
@@ -400,16 +401,16 @@
 			buildRules = (
 			);
 			dependencies = (
-				W201D,
+				W201D /* PBXTargetDependency */,
 			);
 			name = Gleis;
 			productName = Gleis;
-			productReference = 100;
+			productReference = 100 /* Gleis.app */;
 			productType = "com.apple.product-type.application";
 		};
 		W300 /* GleisWidgetExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = W400;
+			buildConfigurationList = W400 /* Build configuration list for PBXNativeTarget "GleisWidgetExtension" */;
 			buildPhases = (
 				W301 /* Sources */,
 				W302 /* Frameworks */,
@@ -421,7 +422,7 @@
 			);
 			name = GleisWidgetExtension;
 			productName = GleisWidgetExtension;
-			productReference = WF00;
+			productReference = WF00 /* GleisWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -442,7 +443,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 501;
+			buildConfigurationList = 501 /* Build configuration list for PBXProject "Gleis" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -451,7 +452,7 @@
 				Base,
 			);
 			mainGroup = G000;
-			productRefGroup = G002;
+			productRefGroup = G002 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -483,44 +484,44 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B001,
-				B002,
-				B003,
-				B004,
-				B005,
-				B006,
-				B008,
-				B009,
-				B046,
-				B010,
-				B011,
-				B012,
-				B013,
-				B014,
-				B015,
-				B016,
-				B017,
-				B018,
-				B019,
-				B020,
-				B021,
-				B022,
-				B023,
-				B024,
-				B025,
-				B026,
-				B027,
-				B028,
-				B029,
-				B031,
-				B032,
-				B033,
-				B034,
-				B035,
-				B039,
-				B041,
-				B043,
-				B044,
+				B001 /* GleisApp.swift in Sources */,
+				B002 /* ContentView.swift in Sources */,
+				B003 /* TransportView.swift in Sources */,
+				B004 /* TransportViewModel.swift in Sources */,
+				B005 /* ServiceProtocols.swift in Sources */,
+				B006 /* StorageService.swift in Sources */,
+				B008 /* NotificationService.swift in Sources */,
+				B009 /* TransportService.swift in Sources */,
+				B046 /* CameraService.swift in Sources */,
+				B010 /* OebbAPIClient.swift in Sources */,
+				B011 /* ConnectionMapper.swift in Sources */,
+				B012 /* ColorExtensions.swift in Sources */,
+				B013 /* NetworkMonitor.swift in Sources */,
+				B014 /* ConnectionCache.swift in Sources */,
+				B015 /* OebbAPIModels.swift in Sources */,
+				B016 /* OebbRequestModels.swift in Sources */,
+				B017 /* Station.swift in Sources */,
+				B018 /* TrainConnection.swift in Sources */,
+				B019 /* TransportType.swift in Sources */,
+				B020 /* RouteConfiguration.swift in Sources */,
+				B021 /* CommuteSchedule.swift in Sources */,
+				B022 /* AppSettings.swift in Sources */,
+				B023 /* WidgetModels.swift in Sources */,
+				B024 /* ConnectionCard.swift in Sources */,
+				B025 /* ConnectionDetailSheet.swift in Sources */,
+				B026 /* CommonComponents.swift in Sources */,
+				B027 /* OnboardingView.swift in Sources */,
+				B028 /* StationPicker.swift in Sources */,
+				B029 /* SettingsView.swift in Sources */,
+				B031 /* TicketWalletView.swift in Sources */,
+				B032 /* CommuteScheduleView.swift in Sources */,
+				B034 /* PinnedJourney.swift in Sources */,
+				B035 /* MyJourneyCard.swift in Sources */,
+				B039 /* DisplayConnection.swift in Sources */,
+				B041 /* ToastManager.swift in Sources */,
+				B043 /* StationSearchService.swift in Sources */,
+				B044 /* CommuteScheduleViewModel.swift in Sources */,
+				B047 /* WidgetSyncDiagnostics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -528,8 +529,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				W001,
-				W002,
+				W001 /* GleisWidget.swift in Sources */,
+				W002 /* SharedWidgetModels.swift in Sources */,
+				W007 /* WidgetSyncDiagnostics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -538,8 +540,8 @@
 /* Begin PBXTargetDependency section */
 		W201D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = W300;
-			targetProxy = W200;
+			target = W300 /* GleisWidgetExtension */;
+			targetProxy = W200 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

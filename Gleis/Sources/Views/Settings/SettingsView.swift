@@ -19,6 +19,9 @@ struct SettingsView: View {
             List {
                 notificationSection
                 remindersSection
+                #if DEBUG
+                widgetDebugSection
+                #endif
                 aboutSection
             }
         }.background {
@@ -95,6 +98,46 @@ struct SettingsView: View {
             Text("About")
         }
     }
+
+    #if DEBUG
+    private var widgetDebugSection: some View {
+        Section {
+            if let data = AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute) {
+                widgetDebugRow(title: "State", value: data.state.rawValue)
+                widgetDebugRow(title: "Generated", value: debugDateTime(data.generatedAt))
+                widgetDebugRow(title: "Coverage End", value: debugDateTime(data.coverageEnd))
+                widgetDebugRow(title: "Route", value: data.routeSignature)
+                widgetDebugRow(title: "Signature", value: String(data.snapshotSignature.prefix(44)))
+                widgetDebugRow(title: "Connections", value: "\(data.connections.count)")
+                if let message = data.stateMessage, !message.isEmpty {
+                    widgetDebugRow(title: "Message", value: message)
+                }
+            } else {
+                Text("No widget snapshot stored.").font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Widget Debug")
+        } footer: {
+            Text("Debug-only snapshot metadata from App Group storage.")
+        }
+    }
+
+    private func widgetDebugRow(title: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).multilineTextAlignment(.trailing)
+        }
+        .font(.caption)
+    }
+
+    private func debugDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        return formatter.string(from: date)
+    }
+    #endif
 
     private var remindersSection: some View {
         Section {

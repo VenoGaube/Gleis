@@ -27,65 +27,58 @@ enum WidgetRecoveryAction: String, Codable {
 }
 
 struct WidgetData: Codable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
     let transportType: TransportType
     let connections: [WidgetConnection]
     let leaveTimes: [Date]
     let fromStationName: String?
     let toStationName: String?
     let updatedAt: Date
+    let generatedAt: Date
+    let coverageStart: Date
+    let coverageEnd: Date
+    let routeSignature: String
+    let snapshotSignature: String
     let state: WidgetDataState
     let stateMessage: String?
     let recoveryAction: WidgetRecoveryAction?
 
-    // Backwards compatibility
-    var nextConnection: WidgetConnection? { connections.first }
-    var leaveTime: Date? { leaveTimes.first }
-
     init(
+        schemaVersion: Int = Self.currentSchemaVersion,
         transportType: TransportType,
         connections: [WidgetConnection],
         leaveTimes: [Date],
         fromStationName: String? = nil,
         toStationName: String? = nil,
         updatedAt: Date,
+        generatedAt: Date? = nil,
+        coverageStart: Date? = nil,
+        coverageEnd: Date? = nil,
+        routeSignature: String = "",
+        snapshotSignature: String = "",
         state: WidgetDataState = .fresh,
         stateMessage: String? = nil,
         recoveryAction: WidgetRecoveryAction? = nil
     ) {
+        let inferredRange = Self.inferredCoverageRange(connections: connections, leaveTimes: leaveTimes, fallback: updatedAt)
+
+        self.schemaVersion = schemaVersion
         self.transportType = transportType
         self.connections = connections
         self.leaveTimes = leaveTimes
         self.fromStationName = fromStationName
         self.toStationName = toStationName
         self.updatedAt = updatedAt
+        self.generatedAt = generatedAt ?? updatedAt
+        self.coverageStart = coverageStart ?? inferredRange.start
+        self.coverageEnd = coverageEnd ?? inferredRange.end
+        self.routeSignature = routeSignature
+        self.snapshotSignature = snapshotSignature
         self.state = state
         self.stateMessage = stateMessage
         self.recoveryAction = recoveryAction
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case transportType
-        case connections
-        case leaveTimes
-        case fromStationName
-        case toStationName
-        case updatedAt
-        case state
-        case stateMessage
-        case recoveryAction
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        transportType = try container.decode(TransportType.self, forKey: .transportType)
-        connections = try container.decode([WidgetConnection].self, forKey: .connections)
-        leaveTimes = try container.decode([Date].self, forKey: .leaveTimes)
-        fromStationName = try container.decodeIfPresent(String.self, forKey: .fromStationName)
-        toStationName = try container.decodeIfPresent(String.self, forKey: .toStationName)
-        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
-        state = try container.decodeIfPresent(WidgetDataState.self, forKey: .state) ?? .fresh
-        stateMessage = try container.decodeIfPresent(String.self, forKey: .stateMessage)
-        recoveryAction = try container.decodeIfPresent(WidgetRecoveryAction.self, forKey: .recoveryAction)
     }
 
     static let placeholder = WidgetData(
@@ -116,6 +109,54 @@ struct WidgetData: Codable {
         state: .fresh
     )
 
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case transportType
+        case connections
+        case leaveTimes
+        case fromStationName
+        case toStationName
+        case updatedAt
+        case generatedAt
+        case coverageStart
+        case coverageEnd
+        case routeSignature
+        case snapshotSignature
+        case state
+        case stateMessage
+        case recoveryAction
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported WidgetData schema version \(schemaVersion)."
+            )
+        }
+
+        self.init(
+            schemaVersion: schemaVersion,
+            transportType: try container.decode(TransportType.self, forKey: .transportType),
+            connections: try container.decode([WidgetConnection].self, forKey: .connections),
+            leaveTimes: try container.decode([Date].self, forKey: .leaveTimes),
+            fromStationName: try container.decodeIfPresent(String.self, forKey: .fromStationName),
+            toStationName: try container.decodeIfPresent(String.self, forKey: .toStationName),
+            updatedAt: try container.decode(Date.self, forKey: .updatedAt),
+            generatedAt: try container.decodeIfPresent(Date.self, forKey: .generatedAt),
+            coverageStart: try container.decodeIfPresent(Date.self, forKey: .coverageStart),
+            coverageEnd: try container.decodeIfPresent(Date.self, forKey: .coverageEnd),
+            routeSignature: try container.decodeIfPresent(String.self, forKey: .routeSignature) ?? "",
+            snapshotSignature: try container.decodeIfPresent(String.self, forKey: .snapshotSignature) ?? "",
+            state: try container.decodeIfPresent(WidgetDataState.self, forKey: .state) ?? .fresh,
+            stateMessage: try container.decodeIfPresent(String.self, forKey: .stateMessage),
+            recoveryAction: try container.decodeIfPresent(WidgetRecoveryAction.self, forKey: .recoveryAction)
+        )
+    }
+
     private var scheduledConnections: [(connection: WidgetConnection, leaveTime: Date)] {
         let paired = Array(zip(connections, leaveTimes))
         return paired.sorted { lhs, rhs in
@@ -131,72 +172,47 @@ struct WidgetData: Codable {
         let scheduled = scheduledConnections
         guard !scheduled.isEmpty else { return nil }
 
-        // Pick the next actionable trip (leave time still in the future), otherwise
-        // we can get stuck showing GO! for trips that are already no longer catchable.
         for item in scheduled where item.leaveTime > date {
             return item
         }
         return nil
     }
 
-    /// A snapshot is stale only when explicitly marked stale or when it has not
-    /// been refreshed for a long time.
     var isStale: Bool {
         if state == .stale { return true }
-        return Date().timeIntervalSince(updatedAt) > 90 * 60
+        let now = Date()
+        if isCoverageExhausted(at: now) { return true }
+        return now.timeIntervalSince(updatedAt) > 6 * 60 * 60
     }
 
     var isFallback: Bool { state == .fallback }
 
-    /// Returns connections that haven't departed yet
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
         scheduledConnections.filter { $0.leaveTime > date }
     }
-}
 
-// MARK: - WidgetDataStorageKey
-
-enum WidgetRouteScope: String, Codable {
-    case liveRoute
-    case repeatJourney
-}
-
-enum WidgetDirectionScope: String, Codable {
-    case forward
-    case reverse
-}
-
-enum WidgetDayScope: String, Codable {
-    case today
-    case tomorrow
-}
-
-struct WidgetDataStorageKey: Codable, Hashable {
-    let transportType: TransportType
-    let routeScope: WidgetRouteScope
-    let directionScope: WidgetDirectionScope
-    let dayScope: WidgetDayScope
-
-    var storageSuffix: String {
-        [
-            AppGroupStorage.normalizedKeyComponent(transportType.rawValue),
-            routeScope.rawValue,
-            directionScope.rawValue,
-            dayScope.rawValue,
-        ].joined(separator: "_")
+    func hasCoverage(at date: Date) -> Bool {
+        coverageStart <= date && coverageEnd >= date
     }
 
-    var isDefaultKey: Bool {
-        routeScope == .liveRoute && directionScope == .forward && dayScope == .today
+    func isCoverageExhausted(at date: Date) -> Bool {
+        date > coverageEnd
     }
 
-    static func `default`(for type: TransportType) -> WidgetDataStorageKey {
-        WidgetDataStorageKey(
-            transportType: type,
-            routeScope: .liveRoute,
-            directionScope: .forward,
-            dayScope: .today
-        )
+    func needsTopUp(referenceDate: Date, targetEnd: Date, minimumFutureConnections: Int = 3) -> Bool {
+        if isCoverageExhausted(at: referenceDate) { return true }
+        if coverageEnd < targetEnd { return true }
+        return futureConnections(from: referenceDate).count < minimumFutureConnections
+    }
+
+    private static func inferredCoverageRange(
+        connections: [WidgetConnection],
+        leaveTimes: [Date],
+        fallback: Date
+    ) -> (start: Date, end: Date) {
+        let values = leaveTimes + connections.map(\.departureTime)
+        guard let start = values.min(), let end = values.max() else { return (fallback, fallback) }
+        return (start, max(start, end))
     }
 }
 
@@ -220,9 +236,19 @@ struct WidgetConnection: Codable {
     var isDelayed: Bool { delay > 0 }
 
     init(
-        id: String, lineNumber: String, lineColors: TrainLineColors? = nil, departureTime: Date, arrivalTime: Date,
-        destination: String, platform: String?, transfers: Int?, delay: Int, stopCount: Int?, hasReminder: Bool,
-        isPinned: Bool, hasServiceAlert: Bool = false
+        id: String,
+        lineNumber: String,
+        lineColors: TrainLineColors? = nil,
+        departureTime: Date,
+        arrivalTime: Date,
+        destination: String,
+        platform: String?,
+        transfers: Int?,
+        delay: Int,
+        stopCount: Int?,
+        hasReminder: Bool,
+        isPinned: Bool,
+        hasServiceAlert: Bool = false
     ) {
         self.id = id
         self.lineNumber = lineNumber
@@ -237,39 +263,6 @@ struct WidgetConnection: Codable {
         self.hasReminder = hasReminder
         self.isPinned = isPinned
         self.hasServiceAlert = hasServiceAlert
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case lineNumber
-        case lineColors
-        case departureTime
-        case arrivalTime
-        case destination
-        case platform
-        case transfers
-        case delay
-        case stopCount
-        case hasReminder
-        case isPinned
-        case hasServiceAlert
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        lineNumber = try container.decode(String.self, forKey: .lineNumber)
-        lineColors = try container.decodeIfPresent(TrainLineColors.self, forKey: .lineColors)
-        departureTime = try container.decode(Date.self, forKey: .departureTime)
-        arrivalTime = try container.decode(Date.self, forKey: .arrivalTime)
-        destination = try container.decode(String.self, forKey: .destination)
-        platform = try container.decodeIfPresent(String.self, forKey: .platform)
-        transfers = try container.decodeIfPresent(Int.self, forKey: .transfers)
-        delay = try container.decode(Int.self, forKey: .delay)
-        stopCount = try container.decodeIfPresent(Int.self, forKey: .stopCount)
-        hasReminder = try container.decodeIfPresent(Bool.self, forKey: .hasReminder) ?? false
-        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
-        hasServiceAlert = try container.decodeIfPresent(Bool.self, forKey: .hasServiceAlert) ?? false
     }
 }
 
@@ -288,49 +281,24 @@ enum AppGroupStorage {
             .replacingOccurrences(of: " ", with: "_")
     }
 
-    static func saveWidgetData(for key: WidgetDataStorageKey, data: WidgetData) {
+    static func savePrimaryWidgetData(for type: TransportType, data: WidgetData) {
         guard let defaults = sharedDefaults, let encoded = try? JSONEncoder().encode(data) else { return }
-        defaults.set(encoded, forKey: "\(widgetDataKey)_\(key.storageSuffix)")
+        defaults.set(encoded, forKey: primaryStorageKey(for: type))
     }
 
-    static func loadWidgetData(for key: WidgetDataStorageKey) -> WidgetData? {
+    static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
         guard let defaults = sharedDefaults else { return nil }
-        if let data = defaults.data(forKey: "\(widgetDataKey)_\(key.storageSuffix)"),
-           let decoded = try? JSONDecoder().decode(WidgetData.self, from: data)
+
+        if let primary = defaults.data(forKey: primaryStorageKey(for: type)),
+           let decoded = try? JSONDecoder().decode(WidgetData.self, from: primary)
         {
             return decoded
         }
 
-        // Legacy fallback from pre-intent-keyed storage only for default key to
-        // avoid showing forward-route data in reverse/day-specific widgets.
-        guard key.isDefaultKey else { return nil }
-        let legacyKey = "\(widgetDataKey)_\(key.transportType.rawValue)"
-        guard let legacyData = defaults.data(forKey: legacyKey) else { return nil }
-        return try? JSONDecoder().decode(WidgetData.self, from: legacyData)
+        return nil
     }
 
-    // Primary widget snapshot used as the single source of truth for all widget families.
-    static func savePrimaryWidgetData(for type: TransportType, data: WidgetData) {
-        saveWidgetData(for: .default(for: type), data: data)
-    }
-
-    static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
-        loadWidgetData(for: .default(for: type))
-    }
-
-    static func markWidgetDataAsFallback(for key: WidgetDataStorageKey, message: String, updatedAt: Date = Date()) {
-        guard var existing = loadWidgetData(for: key) else { return }
-        existing = WidgetData(
-            transportType: existing.transportType,
-            connections: existing.connections,
-            leaveTimes: existing.leaveTimes,
-            fromStationName: existing.fromStationName,
-            toStationName: existing.toStationName,
-            updatedAt: updatedAt,
-            state: .fallback,
-            stateMessage: message,
-            recoveryAction: existing.recoveryAction
-        )
-        saveWidgetData(for: key, data: existing)
+    private static func primaryStorageKey(for type: TransportType) -> String {
+        "\(widgetDataKey)_\(normalizedKeyComponent(type.rawValue))"
     }
 }

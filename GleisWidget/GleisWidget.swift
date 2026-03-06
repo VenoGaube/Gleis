@@ -5,80 +5,8 @@ import WidgetKit
 // MARK: - SelectTransportIntent
 
 struct SelectTransportIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Configure Commute Widget"
-    static var description: IntentDescription = "Choose route, direction, and day"
-
-    @Parameter(title: "Transport Type", default: .trainCommute) var transportType: TransportTypeOption
-    @Parameter(title: "Route", default: .liveRoute) var route: WidgetRouteOption
-    @Parameter(title: "Direction", default: .forward) var direction: WidgetDirectionOption
-    @Parameter(title: "Day", default: .today) var day: WidgetDayOption
-}
-
-// MARK: - TransportTypeOption
-
-enum TransportTypeOption: String, AppEnum {
-    case trainCommute = "Train"
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Transport Type"
-    static var caseDisplayRepresentations: [TransportTypeOption: DisplayRepresentation] = [
-        .trainCommute: DisplayRepresentation(title: "Train", image: .init(systemName: "tram.fill")),
-    ]
-
-    var modelValue: TransportType { .trainCommute }
-}
-
-enum WidgetRouteOption: String, AppEnum {
-    case liveRoute = "Current Route"
-    case repeatJourney = "Repeat Journey"
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Route"
-    static var caseDisplayRepresentations: [WidgetRouteOption: DisplayRepresentation] = [
-        .liveRoute: DisplayRepresentation(title: "Current Route", image: .init(systemName: "location")),
-        .repeatJourney: DisplayRepresentation(title: "Repeat Journey", image: .init(systemName: "repeat")),
-    ]
-
-    var storageScope: WidgetRouteScope {
-        switch self {
-        case .repeatJourney: .repeatJourney
-        case .liveRoute: .liveRoute
-        }
-    }
-}
-
-enum WidgetDirectionOption: String, AppEnum {
-    case forward = "Forward"
-    case reverse = "Reverse"
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Direction"
-    static var caseDisplayRepresentations: [WidgetDirectionOption: DisplayRepresentation] = [
-        .forward: DisplayRepresentation(title: "From → To", image: .init(systemName: "arrow.right")),
-        .reverse: DisplayRepresentation(title: "To → From", image: .init(systemName: "arrow.left")),
-    ]
-
-    var storageScope: WidgetDirectionScope {
-        switch self {
-        case .forward: .forward
-        case .reverse: .reverse
-        }
-    }
-}
-
-enum WidgetDayOption: String, AppEnum {
-    case today = "Today"
-    case tomorrow = "Tomorrow"
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Day"
-    static var caseDisplayRepresentations: [WidgetDayOption: DisplayRepresentation] = [
-        .today: DisplayRepresentation(title: "Today", image: .init(systemName: "calendar")),
-        .tomorrow: DisplayRepresentation(title: "Tomorrow", image: .init(systemName: "calendar.badge.clock")),
-    ]
-
-    var storageScope: WidgetDayScope {
-        switch self {
-        case .today: .today
-        case .tomorrow: .tomorrow
-        }
-    }
+    static var title: LocalizedStringResource = "Gleis Widget"
+    static var description: IntentDescription = "Shows the same departures as the Transport view"
 }
 
 // MARK: - GleisProvider
@@ -89,181 +17,40 @@ struct GleisProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: SelectTransportIntent, in _: Context) async -> GleisEntry {
-        GleisEntry(date: Date(), data: loadData(for: configuration), configuration: configuration)
+        GleisEntry(date: Date(), data: loadData(), configuration: configuration)
     }
 
     func timeline(for configuration: SelectTransportIntent, in _: Context) async -> Timeline<GleisEntry> {
-        let data = loadData(for: configuration)
+        let data = loadData()
         let now = Date()
         var entries: [GleisEntry] = []
         var scheduledTimestamps = Set<Int>()
 
-        // Surface stale snapshots quickly and keep polling in short intervals.
-        if let data, data.isStale {
-            let staleSnapshot = data.state == .stale
-                ? data
-                : staleData(from: data, updatedAt: now, message: "Refreshing departures...")
-            entries.append(GleisEntry(date: now, data: staleSnapshot, configuration: configuration))
-            return Timeline(entries: entries, policy: .after(now.addingTimeInterval(5 * 60)))
-        }
-
-        if let data, let current = data.connection(at: now) {
-            let remaining = current.leaveTime.timeIntervalSince(now)
+        if let data {
+            let activeData = staleAdjustedData(data, now: now)
             appendTimelineEntry(
                 at: now,
-                data: data,
+                data: activeData,
                 configuration: configuration,
                 entries: &entries,
                 scheduledTimestamps: &scheduledTimestamps
             )
 
-            if remaining > 60 {
-                // Create entries for each minute until we reach 1-minute timer mode
-                let minutesUntilTimer = Int((remaining - 60) / 60) + 1
-                for i in 0 ..< min(minutesUntilTimer, 30) {
-                    appendTimelineEntry(
-                        at: now.addingTimeInterval(TimeInterval(i * 60)),
-                        data: data,
-                        configuration: configuration,
-                        entries: &entries,
-                        scheduledTimestamps: &scheduledTimestamps
-                    )
-                }
-                // Add entry at 1 minute before (when timer mode starts)
-                let timerModeStart = current.leaveTime.addingTimeInterval(-60)
-                appendTimelineEntry(
-                    at: timerModeStart,
-                    data: data,
+            if activeData.state != .stale {
+                appendBoundaryEntries(
+                    for: activeData,
+                    now: now,
                     configuration: configuration,
                     entries: &entries,
                     scheduledTimestamps: &scheduledTimestamps
                 )
-                appendSecondCountdownEntries(
-                    from: max(timerModeStart, now),
-                    through: current.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            } else if remaining > 0 {
-                // Already in timer mode or about to leave
-                appendSecondCountdownEntries(
-                    from: now,
-                    through: current.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            } else {
-                appendTimelineEntry(
-                    at: now,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
-
-            // Add entries for the transition to next connection
-            let nextConnectionDate = current.leaveTime.addingTimeInterval(1)
-            if nextConnectionDate > now {
-                appendTimelineEntry(
-                    at: nextConnectionDate,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
-            if let nextCurrent = data.connection(at: nextConnectionDate) {
-                // Add entry for next connection's timer mode
-                let nextRemaining = nextCurrent.leaveTime.timeIntervalSince(nextConnectionDate)
-                if nextRemaining > 60 {
-                    appendTimelineEntry(
-                        at: nextCurrent.leaveTime.addingTimeInterval(-60),
-                        data: data,
-                        configuration: configuration,
-                        entries: &entries,
-                        scheduledTimestamps: &scheduledTimestamps
-                    )
-                }
-            }
-
-            // Add an entry for when all connections will have departed.
-            if let latestDeparture = data.connections.map(\.departureTime).max() {
-                let staleDate = latestDeparture.addingTimeInterval(1)
-                if staleDate > now {
-                    let emptyData = noDeparturesData(
-                        from: data,
-                        updatedAt: staleDate,
-                        message: "No more departures right now."
-                    )
-                    appendTimelineEntry(
-                        at: staleDate,
-                        data: emptyData,
-                        configuration: configuration,
-                        entries: &entries,
-                        scheduledTimestamps: &scheduledTimestamps
-                    )
-                }
-            }
-        } else if let data {
-            // No current connection - check for future connections and create entries for them
-            let futureConnections = data.futureConnections(from: now)
-
-            if futureConnections.isEmpty {
-                let emptyData = noDeparturesData(
-                    from: data,
-                    updatedAt: now,
-                    message: "No upcoming departures."
-                )
-                appendTimelineEntry(
-                    at: now,
-                    data: emptyData,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            } else {
-                appendTimelineEntry(
-                    at: now,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-
-                // Find the first future leave time and create entries leading up to it
-                for leaveTime in data.leaveTimes.sorted() where leaveTime > now {
-                    // Create entry 30 mins before leave time (when countdown becomes relevant)
-                    let thirtyMinBefore = leaveTime.addingTimeInterval(-30 * 60)
-                    if thirtyMinBefore > now {
-                        appendTimelineEntry(
-                            at: thirtyMinBefore,
-                            data: data,
-                            configuration: configuration,
-                            entries: &entries,
-                            scheduledTimestamps: &scheduledTimestamps
-                        )
-                    }
-                    // Create entry at leave time minus 1 min (for timer mode)
-                    let oneMinBefore = leaveTime.addingTimeInterval(-60)
-                    if oneMinBefore > now {
-                        appendTimelineEntry(
-                            at: oneMinBefore,
-                            data: data,
-                            configuration: configuration,
-                            entries: &entries,
-                            scheduledTimestamps: &scheduledTimestamps
-                        )
-                    }
-                    // Only handle first future connection
-                    break
-                }
             }
         } else {
+            WidgetSyncDiagnostics.staleDisplay(
+                reason: "no_snapshot_available",
+                generatedAt: now,
+                coverageEnd: now
+            )
             appendTimelineEntry(
                 at: now,
                 data: nil,
@@ -274,137 +61,129 @@ struct GleisProvider: AppIntentTimelineProvider {
         }
 
         let sortedEntries = entries.sorted { $0.date < $1.date }
-        let fallbackReloadDate = staleAwareReloadDate(now: now, data: data)
-        let hasFutureEntries = sortedEntries.contains(where: { $0.date > now })
-        let hasLowFutureBuffer = data.map { $0.futureConnections(from: now).count <= 1 } ?? false
-        let refreshPolicy: TimelineReloadPolicy = if hasLowFutureBuffer {
-            .after(fallbackReloadDate)
-        } else if hasFutureEntries {
-            .atEnd
-        } else {
-            .after(fallbackReloadDate)
-        }
+        let refreshPolicy = timelineReloadPolicy(now: now, data: data, entryCount: sortedEntries.count)
 
         return Timeline(entries: sortedEntries, policy: refreshPolicy)
     }
 
-    private func loadData(for configuration: SelectTransportIntent) -> WidgetData? {
-        let now = Date()
-        let transportType = configuration.transportType.modelValue
-        let scopedKey = WidgetDataStorageKey(
-            transportType: transportType,
-            routeScope: configuration.route.storageScope,
-            directionScope: configuration.direction.storageScope,
-            dayScope: configuration.day.storageScope
+    private func loadData() -> WidgetData? {
+        AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute)
+    }
+
+    private func staleAdjustedData(_ data: WidgetData, now: Date) -> WidgetData {
+        guard data.state != .stale else { return data }
+        guard data.isCoverageExhausted(at: now) else { return data }
+        WidgetSyncDiagnostics.staleDisplay(
+            reason: "coverage_exhausted",
+            generatedAt: data.generatedAt,
+            coverageEnd: data.coverageEnd
         )
+        return staleData(from: data, updatedAt: now, message: "Refreshing departures...")
+    }
 
-        if let scopedData = AppGroupStorage.loadWidgetData(for: scopedKey) {
-            let adjustedScopedData = freshnessAdjustedData(scopedData, now: now)
-            let hasFutureScopedConnections = !adjustedScopedData.futureConnections(from: now).isEmpty
-            if hasFutureScopedConnections || configuration.day.storageScope != .today {
-                return adjustedScopedData
-            }
-        }
-
-        // If the app has been inactive since day rollover, today's scoped key may
-        // be missing while tomorrow's precomputed data is still useful.
-        if configuration.day.storageScope == .today {
-            let rolloverKey = WidgetDataStorageKey(
-                transportType: transportType,
-                routeScope: configuration.route.storageScope,
-                directionScope: configuration.direction.storageScope,
-                dayScope: .tomorrow
+    private func appendBoundaryEntries(
+        for data: WidgetData,
+        now: Date,
+        configuration: SelectTransportIntent,
+        entries: inout [GleisEntry],
+        scheduledTimestamps: inout Set<Int>
+    ) {
+        if let current = data.connection(at: now) {
+            appendMinuteCountdownEntries(
+                for: current.leaveTime,
+                now: now,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
+            appendSecondCountdownEntries(
+                from: max(now, current.leaveTime.addingTimeInterval(-60)),
+                through: current.leaveTime,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
             )
 
-            if let rolloverData = AppGroupStorage.loadWidgetData(for: rolloverKey),
-               let recovered = rolloverDataForToday(fromTomorrow: rolloverData, now: now)
-            {
-                return recovered
+            if current.leaveTime > now {
+                appendTimelineEntry(
+                    at: current.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+            }
+
+            let nextTransition = current.leaveTime.addingTimeInterval(1)
+            if let next = data.connection(at: nextTransition) {
+                appendMinuteCountdownEntries(
+                    for: next.leaveTime,
+                    now: now,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+                appendSecondCountdownEntries(
+                    from: max(now, next.leaveTime.addingTimeInterval(-60)),
+                    through: next.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+
+                if next.leaveTime > now {
+                    appendTimelineEntry(
+                        at: next.leaveTime,
+                        data: data,
+                        configuration: configuration,
+                        entries: &entries,
+                        scheduledTimestamps: &scheduledTimestamps
+                    )
+                }
+            }
+        } else if let firstFuture = data.futureConnections(from: now).first {
+            appendMinuteCountdownEntries(
+                for: firstFuture.leaveTime,
+                now: now,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
+            appendSecondCountdownEntries(
+                from: max(now, firstFuture.leaveTime.addingTimeInterval(-60)),
+                through: firstFuture.leaveTime,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
+            if firstFuture.leaveTime > now {
+                appendTimelineEntry(
+                    at: firstFuture.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
             }
         }
 
-        if let primaryData = AppGroupStorage.loadPrimaryWidgetData(for: transportType) {
-            return freshnessAdjustedData(primaryData, now: now)
+        let coverageBoundary = data.coverageEnd.addingTimeInterval(1)
+        if coverageBoundary > now {
+            let staleSnapshot = staleData(from: data, updatedAt: coverageBoundary, message: "Refreshing departures...")
+            appendTimelineEntry(
+                at: coverageBoundary,
+                data: staleSnapshot,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
         }
-
-        return nil
-    }
-
-    private func freshnessAdjustedData(_ data: WidgetData, now: Date) -> WidgetData {
-        let hasFutureConnections = !data.futureConnections(from: now).isEmpty
-        guard hasFutureConnections else { return data }
-
-        let isFreshEnough = data.state == .fresh && now.timeIntervalSince(data.updatedAt) <= 90 * 60
-        if isFreshEnough || data.state == .fallback { return data }
-
-        return WidgetData(
-            transportType: data.transportType,
-            connections: data.connections,
-            leaveTimes: data.leaveTimes,
-            fromStationName: data.fromStationName,
-            toStationName: data.toStationName,
-            updatedAt: data.updatedAt,
-            state: .fallback,
-            stateMessage: data.stateMessage ?? "Showing last known departures.",
-            recoveryAction: data.recoveryAction
-        )
-    }
-
-    private func rolloverDataForToday(fromTomorrow data: WidgetData, now: Date) -> WidgetData? {
-        guard !data.futureConnections(from: now).isEmpty else { return nil }
-
-        return WidgetData(
-            transportType: data.transportType,
-            connections: data.connections,
-            leaveTimes: data.leaveTimes,
-            fromStationName: data.fromStationName,
-            toStationName: data.toStationName,
-            updatedAt: data.updatedAt,
-            state: .fallback,
-            stateMessage: data.stateMessage ?? "Showing saved departures while app is inactive.",
-            recoveryAction: data.recoveryAction
-        )
-    }
-
-    private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
-        WidgetData(
-            transportType: data.transportType,
-            connections: [],
-            leaveTimes: [],
-            fromStationName: data.fromStationName,
-            toStationName: data.toStationName,
-            updatedAt: updatedAt,
-            state: .stale,
-            stateMessage: message,
-            recoveryAction: data.recoveryAction
-        )
-    }
-
-    private func noDeparturesData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
-        WidgetData(
-            transportType: data.transportType,
-            connections: [],
-            leaveTimes: [],
-            fromStationName: data.fromStationName,
-            toStationName: data.toStationName,
-            updatedAt: updatedAt,
-            state: .fresh,
-            stateMessage: message,
-            recoveryAction: data.recoveryAction
-        )
-    }
-
-    private func staleAwareReloadDate(now: Date, data: WidgetData?) -> Date {
-        guard let data else { return now.addingTimeInterval(15 * 60) }
-        let futureCount = data.futureConnections(from: now).count
-        if futureCount <= 1 {
-            // Proactively reload when we're about to exhaust the queued departures.
-            return now.addingTimeInterval(2 * 60)
-        }
-        if data.state != .fresh || now.timeIntervalSince(data.updatedAt) > 45 * 60 {
-            return now.addingTimeInterval(5 * 60)
-        }
-        return now.addingTimeInterval(15 * 60)
     }
 
     private func appendSecondCountdownEntries(
@@ -427,6 +206,82 @@ struct GleisProvider: AppIntentTimelineProvider {
             )
             cursor = cursor.addingTimeInterval(1)
         }
+    }
+
+    private func appendMinuteCountdownEntries(
+        for leaveTime: Date,
+        now: Date,
+        data: WidgetData,
+        configuration: SelectTransportIntent,
+        entries: inout [GleisEntry],
+        scheduledTimestamps: inout Set<Int>
+    ) {
+        // Minute updates happen exactly when remaining time crosses a minute boundary.
+        // We cap at 12h to avoid excessively large timelines on very distant departures.
+        let maximumMinuteEntries = 12 * 60
+        var added = 0
+        var tick = leaveTime.addingTimeInterval(-60)
+
+        while tick > now, added < maximumMinuteEntries {
+            appendTimelineEntry(
+                at: tick,
+                data: data,
+                configuration: configuration,
+                entries: &entries,
+                scheduledTimestamps: &scheduledTimestamps
+            )
+            tick = tick.addingTimeInterval(-60)
+            added += 1
+        }
+    }
+
+    private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
+        WidgetData(
+            transportType: data.transportType,
+            connections: [],
+            leaveTimes: [],
+            fromStationName: data.fromStationName,
+            toStationName: data.toStationName,
+            updatedAt: updatedAt,
+            generatedAt: updatedAt,
+            coverageStart: data.coverageStart,
+            coverageEnd: data.coverageEnd,
+            routeSignature: data.routeSignature,
+            snapshotSignature: data.snapshotSignature,
+            state: .stale,
+            stateMessage: message,
+            recoveryAction: data.recoveryAction
+        )
+    }
+
+    private func timelineReloadPolicy(
+        now: Date,
+        data: WidgetData?,
+        entryCount: Int
+    ) -> TimelineReloadPolicy {
+        // When we already provided concrete boundary entries, let the system consume them first.
+        if let data, data.state == .fresh, entryCount > 1 {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_boundary_entries_at_end")
+            return .atEnd
+        }
+
+        guard let data else {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_no_data_10m")
+            return .after(now.addingTimeInterval(10 * 60))
+        }
+        if data.state == .stale || data.isCoverageExhausted(at: now) {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_stale_or_exhausted_5m")
+            return .after(now.addingTimeInterval(5 * 60))
+        }
+
+        let futureCount = data.futureConnections(from: now).count
+        let coverageRemaining = data.coverageEnd.timeIntervalSince(now)
+        if futureCount <= 2 || coverageRemaining <= 30 * 60 {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_low_coverage_5m")
+            return .after(now.addingTimeInterval(5 * 60))
+        }
+        WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_normal_10m")
+        return .after(now.addingTimeInterval(10 * 60))
     }
 
     private func appendTimelineEntry(
@@ -513,7 +368,6 @@ struct SmallWidgetView: View {
 
     var body: some View {
         if let data = entry.data, let current = data.connection(at: entry.date) {
-            let remaining = current.leaveTime.timeIntervalSince(entry.date)
             let conn = current.connection
 
             VStack(spacing: 0) {
@@ -555,7 +409,6 @@ struct SmallWidgetView: View {
 
                 // Center: Countdown - the hero element
                 CountdownDisplay(
-                    remaining: remaining,
                     leaveTime: current.leaveTime,
                     referenceDate: entry.date,
                     size: .medium
@@ -591,7 +444,6 @@ struct MediumWidgetView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
                     CountdownDisplay(
-                        remaining: remaining,
                         leaveTime: current.leaveTime,
                         referenceDate: entry.date,
                         size: .medium
@@ -636,7 +488,7 @@ struct MediumWidgetView: View {
                         if conn.isDelayed {
                             HStack(spacing: 4) {
                                 Image(systemName: "clock.badge.exclamationmark").font(.caption2)
-                                Text("+\(conn.delay) min").font(.caption.weight(.semibold))
+                                Text("+\(conn.delay) m").font(.caption.weight(.semibold))
                             }.foregroundStyle(.orange)
                         }
                         if conn.hasServiceAlert {
@@ -683,24 +535,19 @@ struct CircularWidgetView: View {
                         Text("GO").font(.system(size: 18, weight: .black, design: .rounded)).scalableText(
                             minimumScale: 0.6)
                     } else if remaining <= 60 {
-                        // Under 1 minute: live countdown with seconds
-                        Text(
-                            timerInterval: countdownInterval(referenceDate: entry.date, leaveTime: current.leaveTime),
-                            pauseTime: current.leaveTime,
-                            countsDown: true,
-                            showsHours: false
-                        )
-                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                        .multilineTextAlignment(.center)
-                        .scalableText(minimumScale: 0.6)
+                        Text(current.leaveTime, style: .timer)
+                            .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .scalableText(minimumScale: 0.6)
                     } else {
-                        Text("\(Int(ceil(remaining / 60)))").font(
-                            .system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
-                        ).scalableText(minimumScale: 0.6)
-                        Text("min").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        Text("\(minutesRemaining(remaining)) m")
+                            .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                            .multilineTextAlignment(.center)
+                            .scalableText(minimumScale: 0.6)
                     }
                 }
-            }.widgetURL(entryURL(entry, fallbackConnectionId: current.connection.id))
+            }
+            .widgetURL(entryURL(entry, fallbackConnectionId: current.connection.id))
         } else {
             ZStack {
                 AccessoryWidgetBackground()
@@ -756,23 +603,16 @@ struct RectangularWidgetView: View {
                             .widgetAccentable()
                             .scalableText(minimumScale: 0.8)
                     } else if remaining <= 60 {
-                        // Under 1 minute: live countdown with seconds
-                        Text(
-                            timerInterval: countdownInterval(referenceDate: entry.date, leaveTime: current.leaveTime),
-                            pauseTime: current.leaveTime,
-                            countsDown: true,
-                            showsHours: false
-                        )
+                        Text(current.leaveTime, style: .timer)
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .widgetAccentable()
                             .scalableText(minimumScale: 0.8)
                         Text("to go").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text(formatCountdown(remaining))
+                        Text("\(minutesRemaining(remaining)) m")
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .widgetAccentable()
                             .scalableText(minimumScale: 0.8)
-                        Text("to go").font(.caption).foregroundStyle(.secondary)
                     }
 
                     if conn.isDelayed {
@@ -853,7 +693,6 @@ struct LineBadge: View {
 // MARK: - CountdownDisplay
 
 struct CountdownDisplay: View {
-    let remaining: TimeInterval
     let leaveTime: Date
     let referenceDate: Date
     let size: CountdownSize
@@ -877,27 +716,28 @@ struct CountdownDisplay: View {
     }
 
     var body: some View {
+        let remaining = leaveTime.timeIntervalSince(referenceDate)
         VStack(spacing: 2) {
             if remaining <= 0 {
                 Text("GO!").font(size.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
             } else if remaining <= 60 {
-                // Under 1 minute: live countdown timer with seconds
-                Text(
-                    timerInterval: countdownInterval(referenceDate: referenceDate, leaveTime: leaveTime),
-                    pauseTime: leaveTime,
-                    countsDown: true,
-                    showsHours: false
-                )
-                .font(size.mainFont.monospacedDigit())
-                .foregroundStyle(urgencyColor(remaining))
-                .multilineTextAlignment(.center)
-                .scalableText(minimumScale: 0.6)
-                Text("leave now").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
+                Text(leaveTime, style: .timer)
+                    .font(size.mainFont.monospacedDigit())
+                    .foregroundStyle(urgencyColor(remaining))
+                    .multilineTextAlignment(.center)
+                    .scalableText(minimumScale: 0.6)
+                Text("leave now")
+                    .font(size.labelFont.weight(.medium))
+                    .foregroundStyle(.secondary)
             } else {
-                Text(formatCountdown(remaining)).font(size.mainFont.monospacedDigit()).foregroundStyle(
-                    urgencyColor(remaining)
-                ).scalableText(minimumScale: 0.6)
-                Text("to leave").font(size.labelFont.weight(.medium)).foregroundStyle(.secondary)
+                Text("\(minutesRemaining(remaining)) m")
+                    .font(size.mainFont.monospacedDigit())
+                    .foregroundStyle(urgencyColor(remaining))
+                    .multilineTextAlignment(.center)
+                    .scalableText(minimumScale: 0.6)
+                Text("to leave")
+                    .font(size.labelFont.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -950,11 +790,24 @@ struct DepartureInfo: View {
     var body: some View {
         switch size {
         case .small:
-            HStack(alignment: .top) {
-                departureColumn
+            VStack(spacing: 4) {
+                HStack(alignment: .top) {
+                    departureColumn
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    platformColumn(alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                if connection.isDelayed {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Delay +\(connection.delay) m")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                platformColumn(alignment: .center)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
 
         case .medium:
@@ -975,12 +828,10 @@ struct DepartureInfo: View {
                 .minimumScaleFactor(0.7)
 
             if connection.isDelayed {
-                HStack(spacing: 4) {
-                    Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).foregroundStyle(
-                        .orange
-                    ).scalableText(minimumScale: 0.7)
-                    Text("+\(connection.delay)'").font(size.delayFont).foregroundStyle(.orange)
-                }
+                Text(timeFormatter.string(from: connection.departureTime))
+                    .font(size.valueFont)
+                    .foregroundStyle(.orange)
+                    .scalableText(minimumScale: 0.7)
             } else {
                 Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
                     minimumScale: 0.7)
@@ -1081,18 +932,7 @@ private func widgetRouteText(for entry: GleisEntry, data: WidgetData) -> String 
     let from = normalizedWidgetStationName(data.fromStationName)
     let to = normalizedWidgetStationName(data.toStationName)
     if let from, let to { return "\(from) → \(to)" }
-    return entry.configuration.direction == .forward ? "From → To" : "To → From"
-}
-
-private func widgetCompactRouteText(for entry: GleisEntry, data: WidgetData) -> String {
-    let from = normalizedWidgetStationName(data.fromStationName)
-    let to = normalizedWidgetStationName(data.toStationName)
-    if let from, let to {
-        let fromCompact = from.components(separatedBy: .whitespaces).first ?? from
-        let toCompact = to.components(separatedBy: .whitespaces).first ?? to
-        return "\(fromCompact)→\(toCompact)"
-    }
-    return entry.configuration.direction == .forward ? "F→T" : "T→F"
+    return "From → To"
 }
 
 private func widgetFirstWordRouteText(for entry: GleisEntry, data: WidgetData) -> String {
@@ -1103,7 +943,7 @@ private func widgetFirstWordRouteText(for entry: GleisEntry, data: WidgetData) -
         let toCompact = to.components(separatedBy: .whitespaces).first ?? to
         return "\(fromCompact) → \(toCompact)"
     }
-    return entry.configuration.direction == .forward ? "From → To" : "To → From"
+    return "From → To"
 }
 
 private func normalizedWidgetStationName(_ name: String?) -> String? {
@@ -1150,23 +990,14 @@ private func emptyHintText(for data: WidgetData?) -> String {
     }
 }
 
-private func formatCountdown(_ seconds: TimeInterval) -> String {
-    // Truncate to show remaining time (0m appears in final minute)
-    let totalMinutes = Int(ceil(max(0, seconds) / 60))
-    let hours = totalMinutes / 60
-    let minutes = totalMinutes % 60
-
-    if hours > 0 {
-        if minutes == 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
-    }
-    return "\(minutes)m"
-}
-
 private func countdownInterval(referenceDate: Date, leaveTime: Date) -> ClosedRange<Date> {
     let start = min(referenceDate, leaveTime)
     let end = max(referenceDate, leaveTime)
     return start ... end
+}
+
+private func minutesRemaining(_ remaining: TimeInterval) -> Int {
+    max(1, Int(ceil(remaining / 60)))
 }
 
 private func urgencyColor(_ remaining: TimeInterval) -> Color {
