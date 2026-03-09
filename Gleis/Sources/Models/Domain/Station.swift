@@ -1,5 +1,3 @@
-import Foundation
-
 struct Station: Identifiable, Codable, Equatable, Hashable {
     let id: String
     let name: String
@@ -23,15 +21,5 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
         self.transportTypes = transportTypes
         self.lines = lines
         self.countryCode = countryCode
-    }
-
-    var flagEmoji: String? {
-        guard let code = countryCode?.uppercased(), code.count == 2 else { return nil }
-        let base: UInt32 = 127_397
-        var emoji = ""
-        for scalar in code.unicodeScalars {
-            if let flag = UnicodeScalar(base + scalar.value) { emoji.append(String(flag)) }
-        }
-        return emoji.isEmpty ? nil : emoji
     }
 }

@@ -25,10 +25,6 @@ final class ToastManager {
         }
     }
 
-    func dismiss() {
-        dismissTask?.cancel()
-        currentToast = nil
-    }
 }
 
 // MARK: - ToastOverlay ViewModifier

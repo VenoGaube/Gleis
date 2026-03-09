@@ -207,10 +207,6 @@ enum LoadingState<T> {
     case idle, loading
     case loaded(T)
     case error(GleisError)
-    var isLoading: Bool {
-        if case .loading = self { return true }
-        return false
-    }
 
     var isLoaded: Bool {
         if case .loaded = self { return true }

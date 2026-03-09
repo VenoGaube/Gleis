@@ -189,26 +189,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         return bestSuggestedSchedule(in: connections, template: template)
     }
 
-    func findSuggestedSchedules(
-        for days: [Weekday],
-        basedOn template: DaySchedule,
-        direction: CommuteDirection
-    ) async -> [Weekday: DaySchedule] {
-        var suggestions: [Weekday: DaySchedule] = [:]
-        for day in days {
-            if Task.isCancelled { return suggestions }
-            if let suggestion = await findSuggestedSchedule(
-                for: day,
-                basedOn: template,
-                direction: direction
-            ) {
-                suggestions[day] = suggestion
-            }
-        }
-
-        return suggestions
-    }
-
     // MARK: - Notifications
 
     func rescheduleAllNotifications() {

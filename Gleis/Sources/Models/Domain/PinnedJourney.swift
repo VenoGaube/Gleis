@@ -26,9 +26,6 @@ struct PinnedJourney: Codable, Equatable {
     /// Returns whether the journey has departed
     var hasDeparted: Bool { Date() >= departureTime }
 
-    /// All intermediate stops across all legs
-    var allIntermediateStops: [IntermediateStop] { legs.filter { !$0.isWalking }.flatMap(\.intermediateStops) }
-
     /// Creates a PinnedJourney from a TrainConnection
     init(from connection: TrainConnection) {
         connectionId = connection.id

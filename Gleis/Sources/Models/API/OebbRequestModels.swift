@@ -1,5 +1,3 @@
-import Foundation
-
 struct OebbTimetableRequest: Encodable {
     let reverse: Bool
     let datetimeDeparture: String

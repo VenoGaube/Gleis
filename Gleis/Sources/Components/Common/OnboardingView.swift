@@ -1359,7 +1359,7 @@ struct OnboardingSmallWidgetView: View {
             let conn = current.connection
 
             VStack(spacing: 0) {
-                Text(onboardingWidgetRouteText(for: data))
+                Text(data.routeText)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1422,7 +1422,7 @@ struct OnboardingMediumWidgetView: View {
                 .frame(maxHeight: .infinity)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(onboardingWidgetRouteText(for: data))
+                    Text(data.routeText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1674,7 +1674,7 @@ struct OnboardingWidgetEmptyState: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.headline)
-                    Text(onboardingEmptyHintText(for: data)).font(.subheadline).foregroundStyle(.secondary)
+                    Text(WidgetData.emptyHintText(for: data)).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -1706,28 +1706,9 @@ private func onboardingCurrentWidgetConnection(
     return nil
 }
 
-private func onboardingWidgetRouteText(for data: WidgetData) -> String {
-    let from = data.fromStationName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let to = data.toStationName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let from, !from.isEmpty, let to, !to.isEmpty { return "\(from) → \(to)" }
-    return "From → To"
-}
-
 private func onboardingScheduledTime(_ actual: Date, delay: Int) -> String {
     let scheduled = actual.addingTimeInterval(TimeInterval(-delay * 60))
     return onboardingWidgetTimeFormatter.string(from: scheduled)
-}
-
-private func onboardingEmptyHintText(for data: WidgetData?) -> String {
-    if let message = data?.stateMessage, !message.isEmpty { return message }
-    switch data?.state {
-    case .fallback:
-        return "Open the app to refresh."
-    case .stale:
-        return "Check again soon or update route."
-    default:
-        return "Tap to set up your commute"
-    }
 }
 
 private func onboardingFormatCountdown(_ seconds: TimeInterval) -> String {

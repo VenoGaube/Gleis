@@ -13,7 +13,6 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var maxConnections: Int?
     var notificationSettings: NotificationSettings
     var activeDays: Set<Weekday>
-    var activeTimeRange: TimeRange
     var recentStations: [Station]
     var favoriteStations: [Station]
     var stationTravelTimes: [String: Int]
@@ -29,7 +28,6 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
         maxConnections = 25
         notificationSettings = NotificationSettings(transportType: transportType)
         activeDays = Set(Weekday.allCases)
-        activeTimeRange = TimeRange()
         recentStations = []
         favoriteStations = []
         stationTravelTimes = [:]
@@ -91,11 +89,6 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
         return baseDepartureTime.addingTimeInterval(TimeInterval(delayMinutes * 60))
     }
 
-    func leaveTime(for connection: TrainConnection) -> Date {
-        effectiveDepartureTime(for: connection).addingTimeInterval(
-            -TimeInterval((walkingTimeMinutes + bufferTimeMinutes) * 60))
-    }
-
     /// Calculates leave time using station-specific travel time and buffer time.
     /// Falls back to general walking/buffer times if station-specific times aren't configured.
     func leaveTime(for connection: TrainConnection, fromStationId: String?) -> Date {
@@ -131,15 +124,6 @@ struct NotificationSettings: Codable, Equatable {
         soundEnabled = true
         customMessage = transportType == .trainCommute ? "🚂 Time to catch your train!" : "🚇 Time to go!"
     }
-}
-
-// MARK: - TimeRange
-
-struct TimeRange: Codable, Equatable {
-    var startHour: Int = 6
-    var startMinute: Int = 0
-    var endHour: Int = 22
-    var endMinute: Int = 0
 }
 
 // MARK: - Weekday

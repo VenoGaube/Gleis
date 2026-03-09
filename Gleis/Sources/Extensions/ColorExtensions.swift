@@ -9,17 +9,10 @@ struct LineBadgeStyle {
 extension Color {
     // Brand colors
     static let trainBlue = Color(red: 0.0, green: 0.48, blue: 0.85)
-    static let settingsSilver = Color(red: 0.55, green: 0.55, blue: 0.58)
     static let sBahnGreen = Color(red: 0.2, green: 0.6, blue: 0.3)
     static let repeatLeaveChip = Color(red: 0.12, green: 0.31, blue: 0.55) // #1F4E8C
     static let repeatNotificationChip = Color(red: 0.0, green: 0.34, blue: 0.82) // #0057D2
     static let repeatSuggestionText = Color(red: 0.72, green: 0.37, blue: 0.0) // #B85E00
-
-    // Header gradient colors - travel-inspired palette
-    static let headerGradientStart = Color(red: 0.12, green: 0.16, blue: 0.32) // Deep midnight blue
-    static let headerGradientMid = Color(red: 0.15, green: 0.35, blue: 0.55) // Ocean blue
-    static let headerGradientEnd = Color(red: 0.20, green: 0.50, blue: 0.65) // Teal horizon
-    static let headerAccent = Color(red: 0.95, green: 0.55, blue: 0.25) // Warm sunset orange
 
     // Vienna U-Bahn colors
     static let u1Red = Color(red: 0.89, green: 0.15, blue: 0.21)
@@ -47,10 +40,6 @@ extension Color {
 
     static func lineColor(for line: String, apiColors: TrainLineColors?) -> Color {
         lineBadgeStyle(for: line, apiColors: apiColors).background
-    }
-
-    static func lineTextColor(for line: String, apiColors: TrainLineColors?) -> Color {
-        lineBadgeStyle(for: line, apiColors: apiColors).foreground
     }
 
     static func lineBadgeStyle(for line: String, apiColors: TrainLineColors?) -> LineBadgeStyle {
@@ -87,8 +76,6 @@ extension Color {
 
     // Dark mode adaptive colors
     static let cardBackground = Color("CardBackground")
-    static let elevatedBackground = Color("ElevatedBackground")
-    static let subtleText = Color("SubtleText")
 }
 
 extension View {

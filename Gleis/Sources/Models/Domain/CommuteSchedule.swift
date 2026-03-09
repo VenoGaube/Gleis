@@ -238,7 +238,6 @@ enum CommuteDirection: String, Codable, CaseIterable {
     case toWork = "To Work"
     case toHome = "To Home"
 
-    var icon: String { self == .toWork ? "building.2.fill" : "house.fill" }
     var title: String { self == .toWork ? "Morning" : "Afternoon" }
 }
 

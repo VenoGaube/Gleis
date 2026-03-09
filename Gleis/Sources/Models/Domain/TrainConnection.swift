@@ -251,11 +251,6 @@ struct IntermediateStop: Identifiable, Codable, Equatable {
     let departureDelay: Int?
     let platform: String?
 
-    /// Returns the actual arrival time including delay
-    var actualArrivalTime: Date? {
-        guard let arrival = arrivalTime, let delay = arrivalDelay, delay > 0 else { return arrivalTime }
-        return arrival.addingTimeInterval(TimeInterval(delay * 60))
-    }
 }
 
 // MARK: - ConnectionLeg
@@ -362,19 +357,6 @@ struct ConnectionTransferPlanner {
         }
         guard let departure = leg.departureTime, let arrival = leg.arrivalTime else { return nil }
         return max(1, Int(ceil(arrival.timeIntervalSince(departure) / 60)))
-    }
-
-    static func walkingDurationMinutes(for legs: [ConnectionLeg]) -> Int? {
-        var total = 0
-        var hasDuration = false
-
-        for leg in legs {
-            guard let minutes = walkingDurationMinutes(for: leg) else { continue }
-            total += minutes
-            hasDuration = true
-        }
-
-        return hasDuration ? max(1, total) : nil
     }
 
     private static func consecutiveWalkingLegs(startingAt index: Int, in legs: [ConnectionLeg]) -> [ConnectionLeg] {

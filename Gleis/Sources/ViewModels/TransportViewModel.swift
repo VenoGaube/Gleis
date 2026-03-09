@@ -495,8 +495,6 @@ final class TransportViewModel: ObservableObject {
         refreshWidgetsFromLoadedConnections()
     }
 
-    func isPinned(_ connectionId: String) -> Bool { settingsManager.isPinned(connectionId) }
-
     func addRecentStation(_ station: Station) {
         settingsManager.addRecentStation(station, for: transportType)
     }

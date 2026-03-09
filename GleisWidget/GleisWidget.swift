@@ -383,7 +383,7 @@ struct SmallWidgetView: View {
 
             VStack(spacing: 0) {
                 ViewThatFits(in: .horizontal) {
-                    Text(widgetRouteText(for: entry, data: data))
+                    Text(data.routeText)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -391,7 +391,7 @@ struct SmallWidgetView: View {
                         .minimumScaleFactor(0.62)
                         .allowsTightening(true)
 
-                    Text(widgetFirstWordRouteText(for: entry, data: data))
+                    Text(data.compactRouteText)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -468,7 +468,7 @@ struct MediumWidgetView: View {
                 }.frame(width: 88).frame(maxHeight: .infinity)
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(widgetRouteText(for: entry, data: data))
+                    Text(data.routeText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -584,7 +584,7 @@ struct RectangularWidgetView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 // Line 1: Route (origin -> destination)
-                Text(widgetRouteText(for: entry, data: data))
+                Text(data.routeText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -648,7 +648,7 @@ struct RectangularWidgetView: View {
                     Image(systemName: "tram.fill").widgetAccentable()
                     Text("Gleis").fontWeight(.semibold)
                 }.font(.headline)
-                Text(emptyHintText(for: entry.data)).font(.subheadline).foregroundStyle(.secondary)
+                Text(WidgetData.emptyHintText(for: entry.data)).font(.subheadline).foregroundStyle(.secondary)
             }.widgetURL(entryURL(entry))
         }
     }
@@ -885,7 +885,7 @@ struct EmptyWidgetView: View {
         case .stale: "No departures"
         default: hasSnapshot ? "No departures" : "Set up route"
         }
-        let subtitle = emptyHintText(for: data)
+        let subtitle = WidgetData.emptyHintText(for: data)
 
         switch size {
         case .small:
@@ -942,29 +942,6 @@ private let timeFormatter: DateFormatter = {
     return f
 }()
 
-private func widgetRouteText(for entry: GleisEntry, data: WidgetData) -> String {
-    let from = normalizedWidgetStationName(data.fromStationName)
-    let to = normalizedWidgetStationName(data.toStationName)
-    if let from, let to { return "\(from) → \(to)" }
-    return "From → To"
-}
-
-private func widgetFirstWordRouteText(for entry: GleisEntry, data: WidgetData) -> String {
-    let from = normalizedWidgetStationName(data.fromStationName)
-    let to = normalizedWidgetStationName(data.toStationName)
-    if let from, let to {
-        let fromCompact = from.components(separatedBy: .whitespaces).first ?? from
-        let toCompact = to.components(separatedBy: .whitespaces).first ?? to
-        return "\(fromCompact) → \(toCompact)"
-    }
-    return "From → To"
-}
-
-private func normalizedWidgetStationName(_ name: String?) -> String? {
-    guard let raw = name?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
-    return raw
-}
-
 private func entryURL(_ entry: GleisEntry, fallbackConnectionId: String? = nil) -> URL? {
     if let data = entry.data, data.state != .fresh, let url = recoveryURL(for: data) { return url }
     if let fallbackConnectionId { return connectionDeepLink(id: fallbackConnectionId) }
@@ -990,18 +967,6 @@ private func recoveryURL(for data: WidgetData?) -> URL? {
 private func connectionDeepLink(id: String) -> URL? {
     let encodedId = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
     return URL(string: "gleis://connection?id=\(encodedId)")
-}
-
-private func emptyHintText(for data: WidgetData?) -> String {
-    if let message = data?.stateMessage, !message.isEmpty { return message }
-    switch data?.state {
-    case .fallback:
-        return "Open the app to refresh."
-    case .stale:
-        return "Check again soon or update route."
-    default:
-        return "Tap to set up your commute"
-    }
 }
 
 private func minutesRemaining(_ remaining: TimeInterval) -> Int {

@@ -1,7 +1,6 @@
 import AVFoundation
 import PhotosUI
 import SwiftUI
-import Vision
 
 // MARK: - TicketWalletView
 
