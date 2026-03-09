@@ -2,6 +2,20 @@ import Foundation
 
 final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
+    private static let gateDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter
+    }()
+    private static let gateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "HHmmss"
+        return formatter
+    }()
     private let apiClient: OebbAPIClient
     private let storage: StorageServiceProtocol
     private let stationCacheLock = NSLock()
@@ -78,6 +92,42 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
+    func fetchConnectionsPage(
+        from: Station,
+        to: Station,
+        transportType: TransportType,
+        seedDateTime: Date,
+        pageSize: Int,
+        cursor: String?
+    ) async throws -> ConnectionPage {
+        let normalizedPageSize = max(1, pageSize)
+        let prefetchedNearNow =
+            cursor == nil && isNearNow(seedDateTime)
+                ? consumePrefetchedCurrentConnections(from: from, to: to, transportType: transportType) : nil
+
+        do {
+            return try await fetchConnectionsPageFromAPI(
+                from: from,
+                to: to,
+                transportType: transportType,
+                seedDateTime: seedDateTime,
+                pageSize: normalizedPageSize,
+                cursor: cursor
+            )
+        } catch {
+            if isCancellation(error) { throw error }
+            guard let prefetchedNearNow else { throw error }
+            return ConnectionPage(
+                connections: Array(prefetchedNearNow.prefix(normalizedPageSize)),
+                forwardCursor: nil,
+                backwardCursor: nil,
+                requestDate: Self.gateDateFormatter.string(from: seedDateTime),
+                requestTime: Self.gateTimeFormatter.string(from: seedDateTime),
+                pageSize: normalizedPageSize
+            )
+        }
+    }
+
     func preloadCurrentConnections(
         from: Station,
         to: Station,
@@ -127,19 +177,49 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         departureTime: Date,
         count: Int
     ) async throws -> [TrainConnection] {
+        let page = try await fetchConnectionsPageFromAPI(
+            from: from,
+            to: to,
+            transportType: transportType,
+            seedDateTime: departureTime,
+            pageSize: count,
+            cursor: nil
+        )
+        return page.connections
+    }
+
+    private func fetchConnectionsPageFromAPI(
+        from: Station,
+        to: Station,
+        transportType: TransportType,
+        seedDateTime: Date,
+        pageSize: Int,
+        cursor: String?
+    ) async throws -> ConnectionPage {
         do {
             async let resolvedFromTask = resolveStation(from, transportType: transportType)
             async let resolvedToTask = resolveStation(to, transportType: transportType)
             let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
-            let response = try await apiClient.fetchTimetable(
-                from: resolvedFrom.ref, to: resolvedTo.ref, count: count, departure: departureTime
+            let page = try await apiClient.fetchConnectionsPage(
+                from: resolvedFrom.ref,
+                to: resolvedTo.ref,
+                pageSize: pageSize,
+                seedDateTime: seedDateTime,
+                cursor: cursor
             )
-            let connections = response.connections.map {
+            let connections = page.connections.map {
                 ConnectionMapper.map(
                     $0, from: resolvedFrom.station, to: resolvedTo.station, transportType: transportType
                 )
             }
-            return connections
+            return ConnectionPage(
+                connections: connections,
+                forwardCursor: page.forwardCursor,
+                backwardCursor: page.backwardCursor,
+                requestDate: page.requestDate,
+                requestTime: page.requestTime,
+                pageSize: page.pageSize
+            )
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)

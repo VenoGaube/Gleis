@@ -173,13 +173,8 @@ struct CommuteScheduleView: View {
 
             ScrollViewReader { proxy in
                 List {
-                    Color.clear
-                        .frame(height: 1)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .id(listTopAnchorId)
-
                     scheduleSection
+                        .id(listTopAnchorId)
                     Section {
                         Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
                             "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
@@ -1303,6 +1298,8 @@ struct DayTrainPicker: View {
     @State private var hasMore = true
     @State private var selectedConnection: TrainConnection?
     @State private var showDetail: TrainConnection?
+    @State private var paginationSeedDateTime = Calendar.current.startOfDay(for: Date())
+    @State private var forwardCursor: String?
 
     init(
         day: Weekday, from: Station, to: Station, direction: CommuteDirection,
@@ -1364,15 +1361,31 @@ struct DayTrainPicker: View {
 
     private func loadConnections() async {
         isLoading = true
-        connections =
-            await
-                (try? transportService.fetchConnectionsFromMidnight(
-                    from: from,
-                    to: to,
-                    transportType: transportType
-                ))
-                ?? []
-        hasMore = connections.count >= FetchLimits.connectionBatchSize
+        paginationSeedDateTime = Calendar.current.startOfDay(for: Date())
+
+        if let firstPage = try? await transportService.fetchConnectionsPage(
+            from: from,
+            to: to,
+            transportType: transportType,
+            seedDateTime: paginationSeedDateTime,
+            pageSize: FetchLimits.connectionBatchSize,
+            cursor: nil
+        ) {
+            connections = firstPage.connections
+            forwardCursor = firstPage.forwardCursor
+        } else {
+            connections =
+                await
+                    (try? transportService.fetchConnectionsFromMidnight(
+                        from: from,
+                        to: to,
+                        transportType: transportType
+                    ))
+                    ?? []
+            forwardCursor = nil
+        }
+
+        hasMore = forwardCursor != nil || connections.count >= FetchLimits.connectionBatchSize
         isLoading = false
         preselectExisting()
     }
@@ -1380,24 +1393,45 @@ struct DayTrainPicker: View {
     private func loadMore() {
         guard hasMore, !isLoadingMore, let last = connections.last else { return }
         let endOfDay = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: Date())!
-        guard last.departureTime < endOfDay else {
+        guard last.departureTime < endOfDay || forwardCursor != nil else {
             hasMore = false
             return
         }
         isLoadingMore = true
         Task {
-            let more =
-                await
-                    (try? transportService.fetchMoreConnections(
-                        from: from, to: to, transportType: transportType, after: last.departureTime
-                    )) ?? []
+            let more: [TrainConnection]
+            if let cursor = forwardCursor,
+               let page = try? await transportService.fetchConnectionsPage(
+                   from: from,
+                   to: to,
+                   transportType: transportType,
+                   seedDateTime: paginationSeedDateTime,
+                   pageSize: FetchLimits.connectionBatchSize,
+                   cursor: cursor
+               )
+            {
+                more = page.connections
+                if let nextCursor = page.forwardCursor, nextCursor != cursor {
+                    forwardCursor = nextCursor
+                } else {
+                    forwardCursor = nil
+                }
+            } else {
+                if forwardCursor != nil { forwardCursor = nil }
+                more =
+                    await
+                        (try? transportService.fetchMoreConnections(
+                            from: from, to: to, transportType: transportType, after: last.departureTime
+                        )) ?? []
+            }
+
             let today = Calendar.current.startOfDay(for: Date())
             let newConns = more.filter { new in
                 !connections.contains { $0.id == new.id }
                     && Calendar.current.isDate(new.departureTime, inSameDayAs: today)
             }
             connections.append(contentsOf: newConns)
-            hasMore = more.count >= FetchLimits.connectionBatchSize
+            hasMore = (forwardCursor != nil || more.count >= FetchLimits.connectionBatchSize)
                 && (connections.last?.departureTime ?? Date()) < endOfDay
             isLoadingMore = false
         }

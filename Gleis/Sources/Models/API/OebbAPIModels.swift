@@ -62,6 +62,15 @@ struct OebbTimetableResponse: Decodable {
     }
 }
 
+struct OebbTimetablePage: Sendable {
+    let connections: [OebbConnection]
+    let forwardCursor: String?
+    let backwardCursor: String?
+    let requestDate: String
+    let requestTime: String
+    let pageSize: Int
+}
+
 // MARK: - OebbConnection
 
 struct OebbConnection: Decodable {
@@ -416,14 +425,18 @@ struct OebbGateServicePayload: Decodable {
     let locL: [OebbGateLocation]?
     let common: OebbGateTripCommon?
     let outConL: [OebbGateTripConnection]?
+    let outCtxScrF: String?
+    let outCtxScrB: String?
 
-    enum CodingKeys: String, CodingKey { case locL, common, outConL }
+    enum CodingKeys: String, CodingKey { case locL, common, outConL, outCtxScrF, outCtxScrB }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         locL = OebbDecoding.lossyArrayIfPresent(container, forKey: .locL)
         common = try? container.decodeIfPresent(OebbGateTripCommon.self, forKey: .common)
         outConL = OebbDecoding.lossyArrayIfPresent(container, forKey: .outConL)
+        outCtxScrF = try? container.decodeIfPresent(String.self, forKey: .outCtxScrF)
+        outCtxScrB = try? container.decodeIfPresent(String.self, forKey: .outCtxScrB)
     }
 }
 

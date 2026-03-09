@@ -16,6 +16,7 @@ struct TransportView: View {
     @State private var showTravelTimeSheet: Station?
     @State private var showBufferTimeSheet: Station?
     @State private var hasAppearedOnce = false
+    @State private var isPassedSectionExpanded = false
 
     let highlightConnectionId: String?
     let scrollToTopTrigger: Int
@@ -32,8 +33,6 @@ struct TransportView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
-                    Color.clear.frame(height: 0).id(topAnchorId)
-
                     HStack(alignment: .center) {
                         Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
                         Spacer()
@@ -43,7 +42,7 @@ struct TransportView: View {
                             )
                         }
                         QuickTicketButton().font(.title2).padding(.trailing, 4)
-                    }
+                    }.id(topAnchorId)
 
                     if !networkMonitor.isConnected {
                         OfflineBanner()
@@ -110,7 +109,8 @@ struct TransportView: View {
                     }
 
                     connectionsSection
-                }.padding()
+                }
+                .padding()
             }.onChange(of: scrollToTopTrigger) { _, _ in
                 withAnimation(.easeInOut) { proxy.scrollTo(topAnchorId, anchor: .top) }
             }
@@ -130,7 +130,7 @@ struct TransportView: View {
             Task { await viewModel.refreshConnections(isUserInitiated: true) }
         }
         .onDisappear { viewModel.stopAutoRefresh() }.onChange(of: scenePhase) { oldPhase, newPhase in
-                // When app becomes active after being in background, refresh to filter out past connections
+                // When app becomes active after being in background, refresh to drop departed connections
                 if oldPhase != .active, newPhase == .active, hasAppearedOnce {
                     viewModel.cancelCurrentFetch()
                     Task { await viewModel.refreshConnections(isUserInitiated: false) }
@@ -175,7 +175,7 @@ struct TransportView: View {
             }
         case .loading: SkeletonLoadingView(count: 3).padding(.top, 8)
         case .loaded:
-            let displayConnections = Array(viewModel.displayConnections.prefix(viewModel.config.displayMaxConnections))
+            let displayConnections = viewModel.displayConnections
             if displayConnections.isEmpty {
                 EmptyStateView(
                     icon: "tram.fill.tunnel", title: "No Connections",
@@ -193,43 +193,60 @@ struct TransportView: View {
 
     private func connectionsList(_ displayConnections: [DisplayConnection]) -> some View {
         // Filter out pinned journey (it's shown in the separate MyJourneyCard)
-        // Filter out past connections (already handled in ViewModel)
+        // Hide departed trains immediately, but keep leave-window-passed trains visible
+        // until their actual departure time.
         let pinnedId = settingsManager.pinnedJourney?.connectionId
-        let filteredConnections = displayConnections.filter { $0.connection.id != pinnedId && !$0.isMissed }
-        let sortedConnections = filteredConnections.sorted { $0.connection.departureTime < $1.connection.departureTime }
+        let visibleConnections = displayConnections.filter { $0.connection.id != pinnedId && !$0.hasDeparted }
+        let upcomingConnections = visibleConnections
+            .filter { !$0.isLeaveWindowPassed }
+            .sorted { $0.connection.departureTime < $1.connection.departureTime }
+        let visibleUpcomingConnections = Array(upcomingConnections.prefix(viewModel.config.displayMaxConnections))
+        let passedLeaveWindowConnections = visibleConnections
+            .filter(\.isLeaveWindowPassed)
+            .sorted { $0.connection.departureTime > $1.connection.departureTime }
 
         return VStack(spacing: 12) {
-            if sortedConnections.isEmpty, pinnedId != nil {
+            if upcomingConnections.isEmpty, passedLeaveWindowConnections.isEmpty, pinnedId != nil {
                 // All connections filtered out because one is pinned - show helpful message
                 Text("Other connections").font(.caption.weight(.medium)).foregroundStyle(.secondary).frame(
                     maxWidth: .infinity, alignment: .leading
                 )
             }
 
-            ForEach(sortedConnections) { displayConnection in
-                ConnectionCard(
-                    displayConnection: displayConnection,
-                    onSchedule: { Task { await viewModel.scheduleNotification(for: displayConnection.connection) } },
-                    onCancel: { viewModel.cancelNotification(for: displayConnection.connection) },
-                    onPin: { viewModel.pinJourney(for: displayConnection.connection) },
-                    onUnpin: { viewModel.unpinJourney() },
-                    onTap: {
-                        Haptics.selection()
-                        detailConnection = displayConnection.connection
+            if !passedLeaveWindowConnections.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isPassedSectionExpanded.toggle()
                     }
-                ).id(displayConnection.id).overlay(
-                    Group {
-                        if highlightConnectionId == displayConnection.id {
-                            RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor, lineWidth: 3).animation(
-                                .easeInOut(duration: 0.5).repeatCount(3), value: highlightConnectionId
-                            )
-                        }
-                    })
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Leave window passed (\(passedLeaveWindowConnections.count))")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: isPassedSectionExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 4)
+                }
+                .buttonStyle(.plain)
+
+                if isPassedSectionExpanded {
+                    ForEach(passedLeaveWindowConnections) { displayConnection in
+                        connectionRow(displayConnection)
+                    }
+                }
             }
+
+            ForEach(visibleUpcomingConnections) { displayConnection in
+                connectionRow(displayConnection)
+            }
+
             if viewModel.isLoadingMore {
                 SkeletonLoadingView(count: 1)
-            } else if sortedConnections.count >= viewModel.config.displayMaxConnections {
-                EndOfListFooter(count: sortedConnections.count)
+            } else if upcomingConnections.count >= viewModel.config.displayMaxConnections {
+                EndOfListFooter(count: visibleUpcomingConnections.count)
             } else {
                 BottomScrollSentinel(
                     onScrollPastEnd: { Task { await viewModel.loadMoreConnections() } },
@@ -237,6 +254,30 @@ struct TransportView: View {
                 )
             }
         }
+    }
+
+    private func connectionRow(_ displayConnection: DisplayConnection) -> some View {
+        ConnectionCard(
+            displayConnection: displayConnection,
+            onSchedule: { Task { await viewModel.scheduleNotification(for: displayConnection.connection) } },
+            onCancel: { viewModel.cancelNotification(for: displayConnection.connection) },
+            onPin: { viewModel.pinJourney(for: displayConnection.connection) },
+            onUnpin: { viewModel.unpinJourney() },
+            onTap: {
+                Haptics.selection()
+                detailConnection = displayConnection.connection
+            }
+        )
+        .id(displayConnection.id)
+        .overlay(
+            Group {
+                if highlightConnectionId == displayConnection.id {
+                    RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor, lineWidth: 3).animation(
+                        .easeInOut(duration: 0.5).repeatCount(3), value: highlightConnectionId
+                    )
+                }
+            }
+        )
     }
 
     private func stationPicker(title: String, selection: Binding<Station?>) -> some View {

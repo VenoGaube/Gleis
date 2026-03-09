@@ -57,12 +57,36 @@ actor OebbAPIClient {
         return try await performAuthorized(url: components?.url, method: "GET", decode: [OebbStation].self)
     }
 
-    func fetchTimetable(
-        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
-    ) async throws -> OebbTimetableResponse {
+    func fetchConnectionsPage(
+        from: OebbStationRef,
+        to: OebbStationRef,
+        pageSize: Int,
+        seedDateTime: Date,
+        cursor: String? = nil
+    ) async throws -> OebbTimetablePage {
+        let normalizedPageSize = max(1, min(pageSize, 30))
+        let requestDate = gateDateFormatter.string(from: seedDateTime)
+        let requestTime = gateTimeFormatter.string(from: seedDateTime)
+
+        if let cursor {
+            return try await fetchTimetableViaGateTripSearch(
+                from: from,
+                to: to,
+                pageSize: normalizedPageSize,
+                requestDate: requestDate,
+                requestTime: requestTime,
+                cursor: cursor
+            )
+        }
+
         do {
             let gateResponse = try await fetchTimetableViaGateTripSearch(
-                from: from, to: to, count: count, departure: departure
+                from: from,
+                to: to,
+                pageSize: normalizedPageSize,
+                requestDate: requestDate,
+                requestTime: requestTime,
+                cursor: nil
             )
             if !gateResponse.connections.isEmpty { return gateResponse }
         } catch {
@@ -70,21 +94,46 @@ actor OebbAPIClient {
             // Fall back to the authenticated shop endpoint if gate TripSearch fails.
         }
 
-        return try await fetchTimetableViaShop(from: from, to: to, count: count, departure: departure)
+        return try await fetchTimetableViaShop(
+            from: from,
+            to: to,
+            pageSize: normalizedPageSize,
+            seedDateTime: seedDateTime
+        )
+    }
+
+    func fetchTimetable(
+        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
+    ) async throws -> OebbTimetableResponse {
+        let page = try await fetchConnectionsPage(
+            from: from,
+            to: to,
+            pageSize: count,
+            seedDateTime: departure
+        )
+        return OebbTimetableResponse(connections: page.connections)
     }
 
     private func fetchTimetableViaShop(
-        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
-    ) async throws -> OebbTimetableResponse {
+        from: OebbStationRef, to: OebbStationRef, pageSize: Int, seedDateTime: Date
+    ) async throws -> OebbTimetablePage {
         let payload = OebbTimetableRequest(
-            reverse: false, datetimeDeparture: dateFormatter.string(from: departure), filter: .default,
-            passengers: [.default], count: count, debugFilter: .default,
+            reverse: false, datetimeDeparture: dateFormatter.string(from: seedDateTime), filter: .default,
+            passengers: [.default], count: pageSize, debugFilter: .default,
             from: .init(latitude: from.latitude, longitude: from.longitude, name: from.name, number: from.number),
             to: .init(latitude: to.latitude, longitude: to.longitude, name: to.name, number: to.number), timeout: [:]
         )
         let url = baseURL.appendingPathComponent("api/hafas/v4/timetable")
-        return try await performAuthorized(
+        let response = try await performAuthorized(
             url: url, method: "POST", body: encoder.encode(payload), decode: OebbTimetableResponse.self
+        )
+        return OebbTimetablePage(
+            connections: Array(response.connections.prefix(pageSize)),
+            forwardCursor: nil,
+            backwardCursor: nil,
+            requestDate: gateDateFormatter.string(from: seedDateTime),
+            requestTime: gateTimeFormatter.string(from: seedDateTime),
+            pageSize: pageSize
         )
     }
 
@@ -99,8 +148,13 @@ actor OebbAPIClient {
     }
 
     private func fetchTimetableViaGateTripSearch(
-        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
-    ) async throws -> OebbTimetableResponse {
+        from: OebbStationRef,
+        to: OebbStationRef,
+        pageSize: Int,
+        requestDate: String,
+        requestTime: String,
+        cursor: String?
+    ) async throws -> OebbTimetablePage {
         var components = URLComponents(url: fahrplanBaseURL.appendingPathComponent("gate"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "rnd", value: String(Int(Date().timeIntervalSince1970 * 1000)))
@@ -125,12 +179,14 @@ actor OebbAPIClient {
                         liveSearch: false,
                         maxChg: "1000",
                         outFrwd: true,
-                        outTime: gateTimeFormatter.string(from: departure),
-                        outDate: gateDateFormatter.string(from: departure),
+                        outTime: requestTime,
+                        outDate: requestDate,
                         getPasslist: true,
                         getTariff: false,
                         getPolyline: false,
-                        numF: max(1, min(count, 30))
+                        numF: pageSize,
+                        ctxScr: cursor,
+                        pt: cursor == nil ? nil : .null
                     ),
                     id: "1|0|"
                 )
@@ -139,15 +195,18 @@ actor OebbAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.httpBody = try encoder.encode(payload)
+        let encodedPayload = try encoder.encode(payload)
+        request.httpBody = encodedPayload
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
+        var rawResponseData: Data?
         let response = try await perform(
             request,
             decode: OebbGateResponse.self,
             retryAuth: false,
-            retryTransient: false
+            retryTransient: false,
+            captureRaw: { rawResponseData = $0 }
         )
         if let err = response.err, err.uppercased() != "OK" { throw GleisError.apiError("Gate error: \(err)") }
 
@@ -162,7 +221,25 @@ actor OebbAPIClient {
             fallbackTo: to
         )
 
-        return OebbTimetableResponse(connections: Array(mappedConnections.prefix(max(1, count))))
+        let result = OebbTimetablePage(
+            connections: Array(mappedConnections.prefix(pageSize)),
+            forwardCursor: service?.res?.outCtxScrF,
+            backwardCursor: service?.res?.outCtxScrB,
+            requestDate: requestDate,
+            requestTime: requestTime,
+            pageSize: pageSize
+        )
+        if let rawResponseData {
+            persistGateSnapshotArtifact(
+                routeSignature: "\(from.number)-\(to.number)",
+                requestData: encodedPayload,
+                responseData: rawResponseData,
+                extractedConnectionIDs: result.connections.map(\.id),
+                forwardCursor: result.forwardCursor,
+                backwardCursor: result.backwardCursor
+            )
+        }
+        return result
     }
 
     private func mapGateTripConnections(
@@ -724,6 +801,64 @@ actor OebbAPIClient {
         return type.contains("walk") || type.contains("footpath")
     }
 
+    private struct GateSnapshotMetadata: Codable {
+        struct CursorInfo: Codable {
+            let forward: String?
+            let backward: String?
+        }
+
+        struct FileInfo: Codable {
+            let request: String
+            let response: String
+        }
+
+        let timestamp: Date
+        let routeSignature: String
+        let extractedConnectionIDs: [String]
+        let cursors: CursorInfo
+        let files: FileInfo
+    }
+
+    private func persistGateSnapshotArtifact(
+        routeSignature: String,
+        requestData: Data,
+        responseData: Data,
+        extractedConnectionIDs: [String],
+        forwardCursor: String?,
+        backwardCursor: String?
+    ) {
+        let fileManager = FileManager.default
+        guard let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+
+        let now = Date()
+        let safeRoute = routeSignature.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+        let folderName = "\(Int(now.timeIntervalSince1970))_\(safeRoute)"
+        let folderURL = baseURL.appendingPathComponent("oebb_gate_snapshots", isDirectory: true)
+            .appendingPathComponent(folderName, isDirectory: true)
+
+        do {
+            try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
+            try requestData.write(to: folderURL.appendingPathComponent("request.json"), options: .atomic)
+            try responseData.write(to: folderURL.appendingPathComponent("response.json"), options: .atomic)
+
+            let metadata = GateSnapshotMetadata(
+                timestamp: now,
+                routeSignature: routeSignature,
+                extractedConnectionIDs: extractedConnectionIDs,
+                cursors: .init(forward: forwardCursor, backward: backwardCursor),
+                files: .init(request: "request.json", response: "response.json")
+            )
+            let metadataData = try JSONEncoder().encode(metadata)
+            try metadataData.write(to: folderURL.appendingPathComponent("meta.json"), options: .atomic)
+        } catch {
+            // Best effort only.
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func performAuthorized<T: Decodable>(
@@ -752,7 +887,11 @@ actor OebbAPIClient {
     }
 
     private func perform<T: Decodable>(
-        _ request: URLRequest, decode: T.Type, retryAuth: Bool = true, retryTransient: Bool = true
+        _ request: URLRequest,
+        decode: T.Type,
+        retryAuth: Bool = true,
+        retryTransient: Bool = true,
+        captureRaw: ((Data) -> Void)? = nil
     ) async throws -> T {
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw GleisError.networkError("Invalid response") }
@@ -762,7 +901,11 @@ actor OebbAPIClient {
                 authSession = nil
                 try? storage.delete(forKey: StorageKey.oebbAuthSession.rawValue)
                 return try await perform(
-                    applyAuth(to: request), decode: decode, retryAuth: false, retryTransient: retryTransient
+                    try await applyAuth(to: request),
+                    decode: decode,
+                    retryAuth: false,
+                    retryTransient: retryTransient,
+                    captureRaw: captureRaw
                 )
             }
             throw GleisError.apiError(http.statusCode == 440 ? "Session expired" : "Auth failed")
@@ -770,10 +913,17 @@ actor OebbAPIClient {
 
         if retryTransient, http.statusCode == 429 || (500 ... 504).contains(http.statusCode) {
             try? await Task.sleep(nanoseconds: http.statusCode == 429 ? 2_000_000_000 : 1_000_000_000)
-            return try await perform(request, decode: decode, retryAuth: retryAuth, retryTransient: false)
+            return try await perform(
+                request,
+                decode: decode,
+                retryAuth: retryAuth,
+                retryTransient: false,
+                captureRaw: captureRaw
+            )
         }
 
         guard (200 ..< 300).contains(http.statusCode) else { throw GleisError.apiError("HTTP \(http.statusCode)") }
+        captureRaw?(data)
         return try decoder.decode(T.self, from: data)
     }
 

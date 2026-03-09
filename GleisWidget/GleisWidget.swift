@@ -89,24 +89,23 @@ struct GleisProvider: AppIntentTimelineProvider {
         scheduledTimestamps: inout Set<Int>
     ) {
         if let current = data.connection(at: now) {
-            appendMinuteCountdownEntries(
-                for: current.leaveTime,
-                now: now,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-            appendSecondCountdownEntries(
-                from: max(now, current.leaveTime.addingTimeInterval(-60)),
-                through: current.leaveTime,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-
             if current.leaveTime > now {
+                appendMinuteCountdownEntries(
+                    for: current.leaveTime,
+                    now: now,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+                appendSecondCountdownEntries(
+                    from: max(now, current.leaveTime.addingTimeInterval(-60)),
+                    through: current.leaveTime,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
                 appendTimelineEntry(
                     at: current.leaveTime,
                     data: data,
@@ -116,15 +115,17 @@ struct GleisProvider: AppIntentTimelineProvider {
                 )
             }
 
-            let nextTransition = current.leaveTime.addingTimeInterval(1)
-            appendTimelineEntry(
-                at: nextTransition,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-            if let next = data.connection(at: nextTransition) {
+            let nextTransition = current.connection.departureTime.addingTimeInterval(1)
+            if nextTransition > now {
+                appendTimelineEntry(
+                    at: nextTransition,
+                    data: data,
+                    configuration: configuration,
+                    entries: &entries,
+                    scheduledTimestamps: &scheduledTimestamps
+                )
+            }
+            if let next = data.connection(at: nextTransition), next.connection.id != current.connection.id {
                 appendMinuteCountdownEntries(
                     for: next.leaveTime,
                     now: now,

@@ -163,7 +163,7 @@ private final class AppLaunchBootstrapper: ObservableObject {
 }
 
 private enum WidgetSnapshotReconciler {
-    private static let fetchPageSize = 12
+    private static let fetchPageSize = FetchLimits.connectionBatchSize
 
     private struct Context {
         let config: RouteConfiguration
@@ -378,23 +378,44 @@ private enum WidgetSnapshotReconciler {
     ) async -> [TrainConnection]? {
         var allConnections: [TrainConnection] = []
         var seenIds = Set<String>()
-        var cursor = startDate
+        var cursorToken: String?
+        var useCursorPagination = true
+        var departureCursor = startDate
         let maxHops = max(4, (targetCount / max(1, fetchPageSize)) + 2)
 
         for _ in 0 ..< maxHops {
-            if cursor > targetEnd { break }
+            if !useCursorPagination, departureCursor > targetEnd { break }
             do {
-                let page = try await TransportService.shared.fetchConnections(
-                    from: start,
-                    to: end,
-                    transportType: .trainCommute,
-                    departureTime: cursor,
-                    count: fetchPageSize
-                )
-                guard !page.isEmpty else { break }
+                let pageConnections: [TrainConnection]
+                if useCursorPagination {
+                    let page = try await TransportService.shared.fetchConnectionsPage(
+                        from: start,
+                        to: end,
+                        transportType: .trainCommute,
+                        seedDateTime: startDate,
+                        pageSize: fetchPageSize,
+                        cursor: cursorToken
+                    )
+                    pageConnections = page.connections
+                    if let nextCursor = page.forwardCursor, nextCursor != cursorToken {
+                        cursorToken = nextCursor
+                    } else {
+                        useCursorPagination = false
+                    }
+                } else {
+                    pageConnections = try await TransportService.shared.fetchConnections(
+                        from: start,
+                        to: end,
+                        transportType: .trainCommute,
+                        departureTime: departureCursor,
+                        count: fetchPageSize
+                    )
+                }
 
-                var furthestDeparture = cursor
-                for connection in page {
+                guard !pageConnections.isEmpty else { break }
+
+                var furthestDeparture = departureCursor
+                for connection in pageConnections {
                     if seenIds.insert(connection.id).inserted {
                         allConnections.append(connection)
                     }
@@ -403,9 +424,14 @@ private enum WidgetSnapshotReconciler {
                     }
                 }
 
-                guard furthestDeparture > cursor else { break }
-                cursor = furthestDeparture.addingTimeInterval(1)
-                if allConnections.count >= targetCount || page.count < fetchPageSize { break }
+                if furthestDeparture > departureCursor {
+                    departureCursor = furthestDeparture.addingTimeInterval(1)
+                } else if !useCursorPagination {
+                    break
+                }
+
+                if allConnections.count >= targetCount { break }
+                if !useCursorPagination, pageConnections.count < fetchPageSize { break }
             } catch {
                 WidgetSyncDiagnostics.coverageDecision(
                     reason: "reconcile_network_fetch_failed",

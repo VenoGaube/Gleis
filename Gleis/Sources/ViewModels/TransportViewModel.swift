@@ -60,6 +60,9 @@ final class TransportViewModel: ObservableObject {
     private var lastWidgetSnapshotSignature: String?
     private var widgetCoverageTopUpTask: Task<Void, Never>?
     private var lastWidgetCoverageTopUpAttemptAt: Date?
+    private var paginationRouteKey: String?
+    private var paginationSeedDateTime: Date?
+    private var forwardPaginationCursor: String?
     private var dismissedRecoverySignatures = Set<String>()
     private var reminderResyncSignatures = Set<String>()
     private var deliveredServiceAlertSignatures = Set<String>()
@@ -71,7 +74,7 @@ final class TransportViewModel: ObservableObject {
     private var alertStabilityByConnectionID: [String: AlertStabilityState] = [:]
     private var lastCommuteNotificationReconcileDay: Date?
     private let widgetStoredConnectionLimit = 60
-    private let widgetTopUpBatchSize = 12
+    private let widgetTopUpBatchSize = FetchLimits.connectionBatchSize
     private let widgetTopUpMinimumInterval: TimeInterval = 10 * 60
 
     private struct AlertStabilityState {
@@ -207,6 +210,7 @@ final class TransportViewModel: ObservableObject {
             connections = .idle
             isShowingCachedData = false
             clearServiceDegradedState()
+            resetPaginationState()
             availableTrainTypes = []
             lastInitializedFilterRouteKey = nil
             connectionRecovery = nil
@@ -228,6 +232,7 @@ final class TransportViewModel: ObservableObject {
             deliveredServiceAlertSignatures.removeAll()
             alertStabilityByConnectionID.removeAll()
             clearServiceDegradedState()
+            resetPaginationState()
             resetWidgetSyncStateForRouteChange()
         }
 
@@ -276,6 +281,7 @@ final class TransportViewModel: ObservableObject {
             let futureCached = cached.filter { $0.departureTime > Date() }
             if !futureCached.isEmpty {
                 lastFetchedRouteKey = routeKey
+                resetPaginationState()
                 setConnections(futureCached)
                 evaluateReminderReliability(with: futureCached)
                 isShowingCachedData = true
@@ -295,6 +301,7 @@ final class TransportViewModel: ObservableObject {
                 return
             }
             lastFetchedRouteKey = routeKey
+            resetPaginationState()
             setConnections(futureConnections)
             evaluateReminderReliability(with: futureConnections)
             isShowingCachedData = true
@@ -314,12 +321,15 @@ final class TransportViewModel: ObservableObject {
         do {
             let fetchCount = FetchLimits.connectionBatchSize
             let timeout = isUserInitiated ? 8.0 : 15.0
-            let result = try await fetchConnectionsWithTimeout(
+            let requestSeedDateTime = Date()
+            let page = try await fetchConnectionsPageWithTimeout(
                 from: start,
                 to: end,
-                count: fetchCount,
+                seedDateTime: requestSeedDateTime,
+                pageSize: fetchCount,
                 timeoutSeconds: timeout
             )
+            let result = page.connections
             guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
             await connectionCache.save(result, for: transportType, from: start, to: end)
 
@@ -338,6 +348,9 @@ final class TransportViewModel: ObservableObject {
 
             lastFetchedRouteKey = routeKey
             setConnections(merged)
+            paginationRouteKey = routeKey
+            paginationSeedDateTime = requestSeedDateTime
+            forwardPaginationCursor = page.forwardCursor
             evaluateReminderReliability(with: merged)
             lastUpdated = Date()
             isShowingCachedData = false
@@ -365,6 +378,7 @@ final class TransportViewModel: ObservableObject {
                     return
                 }
                 lastFetchedRouteKey = routeKey
+                resetPaginationState()
                 setConnections(futureConnections)
                 evaluateReminderReliability(with: futureConnections)
                 isShowingCachedData = true
@@ -511,39 +525,83 @@ final class TransportViewModel: ObservableObject {
         let maxPaginationHops = 3
 
         do {
-            let currentIds = Set(current.map(\.id))
-            var cursor = last.departureTime.addingTimeInterval(1)
+            let now = Date()
+            let routeKey = "\(start.id)-\(end.id)"
+            var seenIds = Set(current.map(\.id))
             var appendedConnections: [TrainConnection] = []
+            var nextCursor: String? =
+                paginationRouteKey == routeKey
+                    ? forwardPaginationCursor : nil
+            let seedDateTime = paginationSeedDateTime ?? Date()
+            var canUseCursorPagination = nextCursor != nil
 
-            for _ in 0 ..< maxPaginationHops {
-                let more = try await transportService.fetchConnections(
-                    from: start, to: end, transportType: transportType, departureTime: cursor, count: pageSize
-                )
-                guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
-                guard !more.isEmpty else { break }
+            if canUseCursorPagination {
+                for _ in 0 ..< maxPaginationHops {
+                    guard let cursorToken = nextCursor else { break }
+                    let page = try await transportService.fetchConnectionsPage(
+                        from: start,
+                        to: end,
+                        transportType: transportType,
+                        seedDateTime: seedDateTime,
+                        pageSize: pageSize,
+                        cursor: cursorToken
+                    )
+                    guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
+                    let more = page.connections
 
-                let now = Date()
-                let unseen = more.filter { new in
-                    new.departureTime > now && !currentIds.contains(new.id) && !appendedConnections.contains {
-                        $0.id == new.id
+                    for connection in more where connection.departureTime > now {
+                        if seenIds.insert(connection.id).inserted {
+                            appendedConnections.append(connection)
+                        }
                     }
-                }
-                if !unseen.isEmpty {
-                    appendedConnections.append(contentsOf: unseen)
-                    break
-                }
 
-                // Advance the cursor to avoid getting stuck on duplicate pages.
-                if let furthestDeparture = more.map(\.departureTime).max(), furthestDeparture > cursor {
-                    cursor = furthestDeparture.addingTimeInterval(1)
-                } else {
-                    break
-                }
+                    let upcomingCursor = page.forwardCursor
+                    guard let upcomingCursor, upcomingCursor != cursorToken else {
+                        nextCursor = nil
+                        break
+                    }
 
-                // If backend returns fewer than requested, we've likely reached the end.
-                if more.count < pageSize { break }
+                    nextCursor = upcomingCursor
+                    if appendedConnections.count >= pageSize || more.count < pageSize { break }
+                }
             }
 
+            if appendedConnections.isEmpty {
+                canUseCursorPagination = false
+            }
+
+            if !canUseCursorPagination {
+                var departureCursor = last.departureTime.addingTimeInterval(1)
+                for _ in 0 ..< maxPaginationHops {
+                    let more = try await transportService.fetchConnections(
+                        from: start,
+                        to: end,
+                        transportType: transportType,
+                        departureTime: departureCursor,
+                        count: pageSize
+                    )
+                    guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
+                    guard !more.isEmpty else { break }
+
+                    for connection in more where connection.departureTime > now {
+                        if seenIds.insert(connection.id).inserted {
+                            appendedConnections.append(connection)
+                        }
+                    }
+
+                    if let furthestDeparture = more.map(\.departureTime).max(), furthestDeparture > departureCursor {
+                        departureCursor = furthestDeparture.addingTimeInterval(1)
+                    } else {
+                        break
+                    }
+
+                    if !appendedConnections.isEmpty || more.count < pageSize { break }
+                }
+            }
+
+            if paginationRouteKey == routeKey {
+                forwardPaginationCursor = nextCursor
+            }
             guard !appendedConnections.isEmpty else { return }
             setConnections(current + appendedConnections)
         } catch { if !(error is CancellationError) { toastManager.show("Failed to load more", type: .error) } }
@@ -578,6 +636,7 @@ final class TransportViewModel: ObservableObject {
         connections = hasValidRoute ? .loading : .idle
         displayConnections = []
         availableTrainTypes = []
+        resetPaginationState()
         isShowingCachedData = false
         connectionRecovery = nil
         if !hasValidRoute {
@@ -1054,10 +1113,15 @@ final class TransportViewModel: ObservableObject {
 
         var mergedConnections = sourceConnections.filter { $0.departureTime > referenceDate }
         var seenIds = Set(mergedConnections.map(\.id))
-        var cursor =
+        let routeKey = "\(fromStation.id)-\(toStation.id)"
+        let cursorSeedDateTime = paginationSeedDateTime ?? referenceDate
+        var cursorToken =
+            paginationRouteKey == routeKey
+                ? forwardPaginationCursor : nil
+        var departureCursor =
             (mergedConnections.map(\.departureTime).max() ?? referenceDate)
                 .addingTimeInterval(1)
-        if cursor < referenceDate { cursor = referenceDate }
+        if departureCursor < referenceDate { departureCursor = referenceDate }
 
         let targetConnectionFloor = WidgetSnapshotBuilder.targetConnectionFloor(
             referenceDate: referenceDate,
@@ -1072,7 +1136,10 @@ final class TransportViewModel: ObservableObject {
             let coverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: referenceDate)
             let hasEnoughCoverage = coverage.end >= targetEnd
                 && candidates.count >= targetConnectionFloor
-            if hasEnoughCoverage || candidates.count >= widgetStoredConnectionLimit || cursor > targetEnd {
+            if hasEnoughCoverage
+                || candidates.count >= widgetStoredConnectionLimit
+                || (cursorToken == nil && departureCursor > targetEnd)
+            {
                 WidgetSyncDiagnostics.coverageDecision(
                     reason: "topup_complete",
                     referenceDate: referenceDate,
@@ -1084,17 +1151,36 @@ final class TransportViewModel: ObservableObject {
             }
 
             do {
-                let page = try await transportService.fetchConnections(
-                    from: fromStation,
-                    to: toStation,
-                    transportType: transportType,
-                    departureTime: cursor,
-                    count: widgetTopUpBatchSize
-                )
-                guard !page.isEmpty else { break }
+                let pageConnections: [TrainConnection]
+                if let token = cursorToken {
+                    let page = try await transportService.fetchConnectionsPage(
+                        from: fromStation,
+                        to: toStation,
+                        transportType: transportType,
+                        seedDateTime: cursorSeedDateTime,
+                        pageSize: widgetTopUpBatchSize,
+                        cursor: token
+                    )
+                    pageConnections = page.connections
+                    if let nextToken = page.forwardCursor, nextToken != token {
+                        cursorToken = nextToken
+                    } else {
+                        cursorToken = nil
+                    }
+                } else {
+                    pageConnections = try await transportService.fetchConnections(
+                        from: fromStation,
+                        to: toStation,
+                        transportType: transportType,
+                        departureTime: departureCursor,
+                        count: widgetTopUpBatchSize
+                    )
+                }
 
-                var furthestDeparture = cursor
-                for connection in page {
+                guard !pageConnections.isEmpty else { break }
+
+                var furthestDeparture = departureCursor
+                for connection in pageConnections {
                     if connection.departureTime > referenceDate, seenIds.insert(connection.id).inserted {
                         mergedConnections.append(connection)
                     }
@@ -1103,9 +1189,13 @@ final class TransportViewModel: ObservableObject {
                     }
                 }
 
-                guard furthestDeparture > cursor else { break }
-                cursor = furthestDeparture.addingTimeInterval(1)
-                if page.count < widgetTopUpBatchSize { break }
+                if furthestDeparture > departureCursor {
+                    departureCursor = furthestDeparture.addingTimeInterval(1)
+                } else if cursorToken == nil {
+                    break
+                }
+
+                if pageConnections.count < widgetTopUpBatchSize, cursorToken == nil { break }
             } catch {
                 WidgetSyncDiagnostics.coverageDecision(
                     reason: "topup_fetch_failed",
@@ -1118,6 +1208,9 @@ final class TransportViewModel: ObservableObject {
             }
         }
 
+        if paginationRouteKey == routeKey {
+            forwardPaginationCursor = cursorToken
+        }
         updateWidgetIfNeeded(with: mergedConnections, scheduleCoverageTopUp: false)
     }
 
@@ -1126,6 +1219,12 @@ final class TransportViewModel: ObservableObject {
         widgetCoverageTopUpTask = nil
         lastWidgetCoverageTopUpAttemptAt = nil
         lastWidgetSnapshotSignature = nil
+    }
+
+    private func resetPaginationState() {
+        paginationRouteKey = nil
+        paginationSeedDateTime = nil
+        forwardPaginationCursor = nil
     }
 
     // MARK: - Reminder Reliability
@@ -1470,12 +1569,13 @@ final class TransportViewModel: ObservableObject {
         toastManager.show(mapped.userFacingTitle, type: .error)
     }
 
-    private func fetchConnectionsWithTimeout(
+    private func fetchConnectionsPageWithTimeout(
         from start: Station,
         to end: Station,
-        count: Int = FetchLimits.connectionBatchSize,
+        seedDateTime: Date,
+        pageSize: Int = FetchLimits.connectionBatchSize,
         timeoutSeconds: TimeInterval = 15
-    ) async throws -> [TrainConnection] {
+    ) async throws -> ConnectionPage {
         let service = transportService
         let type = transportType
         final class CompletionState {
@@ -1483,8 +1583,8 @@ final class TransportViewModel: ObservableObject {
             private var didComplete = false
 
             func resumeOnce(
-                _ result: Result<[TrainConnection], Error>,
-                continuation: CheckedContinuation<[TrainConnection], Error>
+                _ result: Result<ConnectionPage, Error>,
+                continuation: CheckedContinuation<ConnectionPage, Error>
             ) {
                 lock.lock()
                 defer { lock.unlock() }
@@ -1499,8 +1599,13 @@ final class TransportViewModel: ObservableObject {
 
             let fetchTask = Task {
                 do {
-                    let value = try await service.fetchConnections(
-                        from: start, to: end, transportType: type, departureTime: Date(), count: count
+                    let value = try await service.fetchConnectionsPage(
+                        from: start,
+                        to: end,
+                        transportType: type,
+                        seedDateTime: seedDateTime,
+                        pageSize: pageSize,
+                        cursor: nil
                     )
                     completion.resumeOnce(.success(value), continuation: continuation)
                 } catch {

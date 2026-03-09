@@ -38,7 +38,8 @@ struct ConnectionCard: View {
     private var timeRemaining: TimeInterval { displayConnection.timeRemaining }
     private var urgencyColor: Color { displayConnection.urgencyColor }
     private var progress: Double { displayConnection.progress }
-    private var isMissed: Bool { displayConnection.isMissed }
+    private var isLeaveWindowPassed: Bool { displayConnection.isLeaveWindowPassed }
+    private var hasDeparted: Bool { displayConnection.hasDeparted }
     private var isSelected: Bool { displayConnection.isSelected }
     private var isPinned: Bool { displayConnection.isPinned }
     private var scheduledDepartureTime: Date? {
@@ -58,13 +59,13 @@ struct ConnectionCard: View {
             .shadow(color: shadowColor, radius: 8, y: 4)
             .contentShape(Rectangle())
             .onTapGesture {
-                if isMissed { withAnimation(.spring(response: 0.3)) { isExpanded.toggle() } } else { onTap() }
+                if isLeaveWindowPassed { withAnimation(.spring(response: 0.3)) { isExpanded.toggle() } } else { onTap() }
             }
     }
 
     private var cardContent: some View {
         VStack(spacing: 0) {
-            if isMissed, !isExpanded {
+            if isLeaveWindowPassed, !isExpanded {
                 compactMissedView
             } else {
                 headerSection
@@ -80,7 +81,7 @@ struct ConnectionCard: View {
     }
 
     private var cardCornerRadius: CGFloat {
-        isMissed && !isExpanded ? 12 : 16
+        isLeaveWindowPassed && !isExpanded ? 12 : 16
     }
 
     private var dividerColor: Color {
@@ -319,7 +320,7 @@ struct ConnectionCard: View {
                     .foregroundStyle(isPinned ? .white : .secondary).frame(width: 36, height: 36).background(
                         isPinned ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle()
                     )
-            }.disabled(timeRemaining < 0 && !isPinned).accessibilityLabel(
+            }.disabled(hasDeparted && !isPinned).accessibilityLabel(
                 isPinned ? "Unpin journey" : "Pin as My Journey").debugLayoutBox(showLayoutDebug, color: .red)
 
             // Reminder button

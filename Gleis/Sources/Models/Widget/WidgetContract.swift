@@ -142,10 +142,8 @@ struct WidgetData: Codable {
     private var scheduledConnections: [(connection: WidgetConnection, leaveTime: Date)] {
         let paired = Array(zip(connections, leaveTimes))
         return paired.sorted { lhs, rhs in
+            if lhs.0.departureTime != rhs.0.departureTime { return lhs.0.departureTime < rhs.0.departureTime }
             if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
-            if lhs.0.departureTime != rhs.0.departureTime {
-                return lhs.0.departureTime < rhs.0.departureTime
-            }
             return lhs.0.id < rhs.0.id
         }
     }
@@ -154,7 +152,7 @@ struct WidgetData: Codable {
         let scheduled = scheduledConnections
         guard !scheduled.isEmpty else { return nil }
 
-        for item in scheduled where item.leaveTime > date {
+        for item in scheduled where item.connection.departureTime > date {
             return item
         }
         return nil
@@ -170,7 +168,7 @@ struct WidgetData: Codable {
     var isFallback: Bool { state == .fallback }
 
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        scheduledConnections.filter { $0.leaveTime > date }
+        scheduledConnections.filter { $0.connection.departureTime > date }
     }
 
     func hasCoverage(at date: Date) -> Bool {

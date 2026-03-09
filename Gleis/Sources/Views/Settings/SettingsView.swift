@@ -25,13 +25,8 @@ struct SettingsView: View {
 
             ScrollViewReader { proxy in
                 List {
-                    Color.clear
-                        .frame(height: 1)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .id(listTopAnchorId)
-
                     notificationSection
+                        .id(listTopAnchorId)
                     remindersSection
                     #if DEBUG
                     widgetDebugSection

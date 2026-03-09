@@ -10,9 +10,11 @@ struct DisplayConnection: Identifiable {
 
     // Time-based properties (updated by centralized timer)
     var timeRemaining: TimeInterval
+    var isLeaveWindowPassed: Bool
+    var hasDeparted: Bool
     var urgencyColor: Color
     var progress: Double
-    var isMissed: Bool { timeRemaining <= 0 }
+    var isMissed: Bool { isLeaveWindowPassed }
 
     var id: String { connection.id }
 
@@ -22,6 +24,13 @@ struct DisplayConnection: Identifiable {
         self.isSelected = isSelected
         self.isPinned = isPinned
         timeRemaining = leaveTime.timeIntervalSince(currentTime)
+        let phase = Self.connectionPhase(
+            leaveTime: leaveTime,
+            departureTime: connection.departureTime,
+            currentTime: currentTime
+        )
+        isLeaveWindowPassed = phase.isLeaveWindowPassed
+        hasDeparted = phase.hasDeparted
         urgencyColor = Self.calculateUrgencyColor(timeRemaining: timeRemaining)
         progress = Self.calculateProgress(timeRemaining: timeRemaining)
     }
@@ -40,6 +49,13 @@ struct DisplayConnection: Identifiable {
         }
 
         timeRemaining = newRemaining
+        let phase = Self.connectionPhase(
+            leaveTime: leaveTime,
+            departureTime: connection.departureTime,
+            currentTime: currentTime
+        )
+        isLeaveWindowPassed = phase.isLeaveWindowPassed
+        hasDeparted = phase.hasDeparted
         urgencyColor = Self.calculateUrgencyColor(timeRemaining: newRemaining)
         progress = Self.calculateProgress(timeRemaining: newRemaining)
     }
@@ -55,5 +71,15 @@ struct DisplayConnection: Identifiable {
 
     private static func calculateProgress(timeRemaining: TimeInterval) -> Double {
         max(0, min(1, timeRemaining / 1800))
+    }
+
+    private static func connectionPhase(
+        leaveTime: Date,
+        departureTime: Date,
+        currentTime: Date
+    ) -> (isLeaveWindowPassed: Bool, hasDeparted: Bool) {
+        let hasDeparted = currentTime >= departureTime
+        let isLeaveWindowPassed = currentTime >= leaveTime && !hasDeparted
+        return (isLeaveWindowPassed, hasDeparted)
     }
 }

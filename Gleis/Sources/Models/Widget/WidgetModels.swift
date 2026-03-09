@@ -186,8 +186,8 @@ enum WidgetSnapshotBuilder {
     ) -> [WidgetSnapshotCandidate] {
         candidates
             .filter { candidate in
-                // Widget should only surface departures still actionable in the future.
-                guard candidate.connection.departureTime > referenceDate, candidate.leaveTime > referenceDate else {
+                // Keep departures visible until train departure, even when the leave window is already missed.
+                guard candidate.connection.departureTime > referenceDate else {
                     return false
                 }
                 if excludingPinned {

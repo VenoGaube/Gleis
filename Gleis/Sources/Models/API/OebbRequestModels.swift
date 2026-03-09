@@ -145,10 +145,21 @@ struct OebbGateTripSearchRequest: Encodable {
         let getTariff: Bool
         let getPolyline: Bool
         let numF: Int
+        let ctxScr: String?
+        let pt: OebbNullValue?
     }
 
     struct LocationRef: Encodable {
         let lid: String
         let name: String
+    }
+}
+
+enum OebbNullValue: Encodable {
+    case null
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encodeNil()
     }
 }

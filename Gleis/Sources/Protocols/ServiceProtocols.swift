@@ -3,10 +3,19 @@ import Foundation
 // MARK: - FetchLimits
 
 enum FetchLimits {
-    static let connectionBatchSize = 6
+    static let connectionBatchSize = 5
     static let stationSearchCount = 25
     static let stationResolveCandidateCount = 5
     static let commuteSuggestionConnectionCount = 5
+}
+
+struct ConnectionPage: Sendable {
+    let connections: [TrainConnection]
+    let forwardCursor: String?
+    let backwardCursor: String?
+    let requestDate: String
+    let requestTime: String
+    let pageSize: Int
 }
 
 // MARK: - TransportServiceProtocol
@@ -16,6 +25,14 @@ protocol TransportServiceProtocol: Sendable {
     func fetchConnections(
         from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
     ) async throws -> [TrainConnection]
+    func fetchConnectionsPage(
+        from: Station,
+        to: Station,
+        transportType: TransportType,
+        seedDateTime: Date,
+        pageSize: Int,
+        cursor: String?
+    ) async throws -> ConnectionPage
     func fetchConnectionsFromMidnight(
         from: Station, to: Station, transportType: TransportType
     ) async throws -> [TrainConnection]
