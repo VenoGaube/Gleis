@@ -18,92 +18,102 @@ struct TransportView: View {
     @State private var hasAppearedOnce = false
 
     let highlightConnectionId: String?
+    let scrollToTopTrigger: Int
 
-    init(transportType: TransportType, highlightConnectionId: String? = nil) {
+    init(transportType: TransportType, highlightConnectionId: String? = nil, scrollToTopTrigger: Int = 0) {
         _viewModel = StateObject(wrappedValue: TransportViewModel(transportType: transportType))
         self.highlightConnectionId = highlightConnectionId
+        self.scrollToTopTrigger = scrollToTopTrigger
     }
 
+    private let topAnchorId = "transport-top-anchor"
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                HStack(alignment: .center) {
-                    Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
-                    Spacer()
-                    if viewModel.connections.isLoaded {
-                        DataFreshnessBadge(
-                            isStale: viewModel.isShowingCachedData || viewModel.isServiceDegraded
-                        )
-                    }
-                    QuickTicketButton().font(.title2).padding(.trailing, 4)
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 20) {
+                    Color.clear.frame(height: 0).id(topAnchorId)
 
-                if !networkMonitor.isConnected {
-                    OfflineBanner()
-                }
-
-                if let recovery = viewModel.connectionRecovery {
-                    ReminderRecoveryBanner(
-                        recovery: recovery,
-                        onApply: {
-                            viewModel.acceptConnectionRecovery()
-                        },
-                        onDismiss: {
-                            viewModel.dismissConnectionRecovery()
+                    HStack(alignment: .center) {
+                        Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
+                        Spacer()
+                        if viewModel.connections.isLoaded {
+                            DataFreshnessBadge(
+                                isStale: viewModel.isShowingCachedData || viewModel.isServiceDegraded
+                            )
                         }
-                    )
-                }
+                        QuickTicketButton().font(.title2).padding(.trailing, 4)
+                    }
 
-                RouteHeader(
-                    transportType: viewModel.transportType, startStation: startStation, endStation: endStation,
-                    travelTimeToStart: viewModel.config.travelTime(for: startStation?.id),
-                    travelTimeToEnd: viewModel.config.travelTime(for: endStation?.id),
-                    suggestedTravelTimeToStart: nil,
-                    suggestedTravelTimeToEnd: nil,
-                    bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
-                    bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
-                    onStartTap: { showStartPicker = true }, onEndTap: { showEndPicker = true },
-                    onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
-                )
+                    if !networkMonitor.isConnected {
+                        OfflineBanner()
+                    }
 
-                // Train type filter chips
-                if viewModel.connections.isLoaded, !viewModel.availableTrainTypes.isEmpty {
-                    TrainTypeFilterBar(
-                        availableTypes: viewModel.availableTrainTypes,
-                        excludedTypes: Binding(
-                            get: { viewModel.config.excludedTrainTypes },
-                            set: { newValue in
-                                var c = viewModel.config
-                                c.excludedTrainTypes = newValue
-                                settingsManager.updateConfig(c)
+                    if let recovery = viewModel.connectionRecovery {
+                        ReminderRecoveryBanner(
+                            recovery: recovery,
+                            onApply: {
+                                viewModel.acceptConnectionRecovery()
+                            },
+                            onDismiss: {
+                                viewModel.dismissConnectionRecovery()
                             }
                         )
-                    )
-                }
+                    }
 
-                // My Journey section - shown separately when pinned
-                if let pinnedJourney = settingsManager.pinnedJourney, !pinnedJourney.shouldAutoUnpin() {
-                    let travel = viewModel.config.travelTime(for: pinnedJourney.departureStation.id)
-                        ?? viewModel.config.walkingTimeMinutes
-                    let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
-                        ?? viewModel.config.bufferTimeMinutes
-                    let effectiveDeparture = viewModel.config.effectiveDepartureTime(
-                        baseDepartureTime: pinnedJourney.departureTime,
-                        delayMinutes: pinnedJourney.delay,
-                        realtimeDepartureHint: pinnedJourney.legs.first(where: { !$0.isWalking })?.departureTime
+                    RouteHeader(
+                        transportType: viewModel.transportType, startStation: startStation, endStation: endStation,
+                        travelTimeToStart: viewModel.config.travelTime(for: startStation?.id),
+                        travelTimeToEnd: viewModel.config.travelTime(for: endStation?.id),
+                        suggestedTravelTimeToStart: nil,
+                        suggestedTravelTimeToEnd: nil,
+                        bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
+                        bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
+                        onStartTap: { showStartPicker = true }, onEndTap: { showEndPicker = true },
+                        onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
                     )
-                    let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
-                    MyJourneyCard(
-                        journey: pinnedJourney,
-                        onUnpin: {
-                            viewModel.unpinJourney()
-                        },
-                        leaveTime: pinnedLeaveTime
-                    )
-                }
 
-                connectionsSection
-            }.padding()
+                    // Train type filter chips
+                    if viewModel.connections.isLoaded, !viewModel.availableTrainTypes.isEmpty {
+                        TrainTypeFilterBar(
+                            availableTypes: viewModel.availableTrainTypes,
+                            excludedTypes: Binding(
+                                get: { viewModel.config.excludedTrainTypes },
+                                set: { newValue in
+                                    var c = viewModel.config
+                                    c.excludedTrainTypes = newValue
+                                    settingsManager.updateConfig(c)
+                                }
+                            )
+                        )
+                    }
+
+                    // My Journey section - shown separately when pinned
+                    if let pinnedJourney = settingsManager.pinnedJourney, !pinnedJourney.shouldAutoUnpin() {
+                        let travel = viewModel.config.travelTime(for: pinnedJourney.departureStation.id)
+                            ?? viewModel.config.walkingTimeMinutes
+                        let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
+                            ?? viewModel.config.bufferTimeMinutes
+                        let effectiveDeparture = viewModel.config.effectiveDepartureTime(
+                            baseDepartureTime: pinnedJourney.departureTime,
+                            delayMinutes: pinnedJourney.delay,
+                            realtimeDepartureHint: pinnedJourney.legs.first(where: { !$0.isWalking })?.departureTime
+                        )
+                        let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
+                        MyJourneyCard(
+                            journey: pinnedJourney,
+                            onUnpin: {
+                                viewModel.unpinJourney()
+                            },
+                            leaveTime: pinnedLeaveTime
+                        )
+                    }
+
+                    connectionsSection
+                }.padding()
+            }.onChange(of: scrollToTopTrigger) { _, _ in
+                withAnimation(.easeInOut) { proxy.scrollTo(topAnchorId, anchor: .top) }
+            }
         }.background {
             (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
                 edges: .all)

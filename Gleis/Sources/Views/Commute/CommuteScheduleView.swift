@@ -23,6 +23,9 @@ struct CommuteScheduleView: View {
     @State private var weekendActivationPromptDirection: CommuteDirection?
     @State private var weekendPromptShownDirections: Set<CommuteDirection> = []
     @Environment(\.colorScheme) var colorScheme
+    let scrollToTopTrigger: Int
+
+    private let listTopAnchorId = "commute-list-top-anchor"
 
     private var directionLabel: String {
         viewModel.selectedDirection == .toWork ? "From → To" : "To → From"
@@ -76,12 +79,14 @@ struct CommuteScheduleView: View {
         }
     }
 
-    init(transportType: TransportType = .trainCommute) {
+    init(transportType: TransportType = .trainCommute, scrollToTopTrigger: Int = 0) {
         _viewModel = StateObject(wrappedValue: CommuteScheduleViewModel(transportType: transportType))
+        self.scrollToTopTrigger = scrollToTopTrigger
     }
 
-    init(viewModel: CommuteScheduleViewModel) {
+    init(viewModel: CommuteScheduleViewModel, scrollToTopTrigger: Int = 0) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.scrollToTopTrigger = scrollToTopTrigger
     }
 
     var body: some View {
@@ -166,16 +171,26 @@ struct CommuteScheduleView: View {
             }
             .padding()
 
-            List {
-                scheduleSection
-                Section {
-                    Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
-                        "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
-                    ) {
-                        Button("Reset All Settings", role: .destructive) { viewModel.resetToDefaults() }
-                    } message: {
-                        Text("This will clear all stations, schedules, and reset timing to defaults.")
+            ScrollViewReader { proxy in
+                List {
+                    Color.clear
+                        .frame(height: 1)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .id(listTopAnchorId)
+
+                    scheduleSection
+                    Section {
+                        Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
+                            "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
+                        ) {
+                            Button("Reset All Settings", role: .destructive) { viewModel.resetToDefaults() }
+                        } message: {
+                            Text("This will clear all stations, schedules, and reset timing to defaults.")
+                        }
                     }
+                }.onChange(of: scrollToTopTrigger) { _, _ in
+                    withAnimation(.easeInOut) { proxy.scrollTo(listTopAnchorId, anchor: .top) }
                 }
             }
         }.background {

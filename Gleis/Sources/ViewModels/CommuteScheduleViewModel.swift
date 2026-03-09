@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -7,6 +8,7 @@ final class CommuteScheduleViewModel: ObservableObject {
     @Published var route: SavedCommuteRoute = .init()
     @Published var stations: [Station] = []
     @Published var selectedDirection: CommuteDirection = .toWork
+    @Published private(set) var config: RouteConfiguration
 
     let toastManager = ToastManager()
 
@@ -17,12 +19,12 @@ final class CommuteScheduleViewModel: ObservableObject {
     private let notificationService: NotificationServiceProtocol
     private let settingsManager: SettingsManager
     private let searchService: StationSearchService
+    private var cancellables = Set<AnyCancellable>()
     private var hasLoadedStations = false
     private var isLoadingStations = false
 
     // MARK: - Computed
 
-    var config: RouteConfiguration { settingsManager.config(for: transportType) }
     var currentFromStation: Station? { selectedDirection == .toWork ? route.homeStation : route.workStation }
     var currentToStation: Station? { selectedDirection == .toWork ? route.workStation : route.homeStation }
     var hasSchedules: Bool { !route.toWorkSchedules.isEmpty || !route.toHomeSchedules.isEmpty }
@@ -41,7 +43,9 @@ final class CommuteScheduleViewModel: ObservableObject {
         self.transportService = transportService
         self.notificationService = notificationService
         self.settingsManager = settingsManager ?? SettingsManager.shared
+        config = self.settingsManager.config(for: transportType)
         searchService = StationSearchService(transportService: transportService)
+        observeConfigChanges()
     }
 
     // MARK: - Lifecycle
@@ -79,10 +83,12 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     func saveTravelTime(_ minutes: Int?, for station: Station) {
         settingsManager.saveTravelTime(minutes, for: station.id, transportType: transportType)
+        rescheduleAllNotifications()
     }
 
     func saveBufferTime(_ minutes: Int?, for station: Station) {
         settingsManager.saveBufferTime(minutes, for: station.id, transportType: transportType)
+        rescheduleAllNotifications()
     }
 
     // MARK: - Station Changes
@@ -225,6 +231,15 @@ final class CommuteScheduleViewModel: ObservableObject {
     }
 
     // MARK: - Private
+
+    private func observeConfigChanges() {
+        settingsManager.$trainCommuteConfig
+            .dropFirst()
+            .sink { [weak self] config in
+                self?.config = config
+            }
+            .store(in: &cancellables)
+    }
 
     private func suggestionSearchStart(for day: Weekday, template: DaySchedule) -> Date? {
         var components = DateComponents()

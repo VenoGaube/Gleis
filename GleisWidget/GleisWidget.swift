@@ -551,10 +551,13 @@ struct CircularWidgetView: View {
                             .multilineTextAlignment(.center)
                             .scalableText(minimumScale: 0.6)
                     } else {
-                        Text("\(minutesRemaining(remaining)) m")
-                            .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                        Text("\(minutesRemaining(remaining))")
+                            .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
                             .multilineTextAlignment(.center)
                             .scalableText(minimumScale: 0.6)
+                        Text("min")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -620,7 +623,7 @@ struct RectangularWidgetView: View {
                             .scalableText(minimumScale: 0.8)
                         Text("to go").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text("\(minutesRemaining(remaining)) m")
+                        Text("\(minutesRemaining(remaining))m")
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .widgetAccentable()
                             .scalableText(minimumScale: 0.8)
@@ -741,7 +744,7 @@ struct CountdownDisplay: View {
                     .font(size.labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             } else {
-                Text("\(minutesRemaining(remaining)) m")
+                Text("\(minutesRemaining(remaining))m")
                     .font(size.mainFont.monospacedDigit())
                     .foregroundStyle(urgencyColor(remaining))
                     .multilineTextAlignment(.center)

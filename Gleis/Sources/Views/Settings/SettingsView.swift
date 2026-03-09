@@ -8,6 +8,13 @@ struct SettingsView: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var repeatScheduleToRemove: (day: Weekday, direction: CommuteDirection)?
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    let scrollToTopTrigger: Int
+
+    private let listTopAnchorId = "settings-list-top-anchor"
+
+    init(scrollToTopTrigger: Int = 0) {
+        self.scrollToTopTrigger = scrollToTopTrigger
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,13 +23,23 @@ struct SettingsView: View {
                 Spacer()
             }.padding(.horizontal).padding(.top, 13).padding(.bottom, 12)
 
-            List {
-                notificationSection
-                remindersSection
-                #if DEBUG
-                widgetDebugSection
-                #endif
-                aboutSection
+            ScrollViewReader { proxy in
+                List {
+                    Color.clear
+                        .frame(height: 1)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .id(listTopAnchorId)
+
+                    notificationSection
+                    remindersSection
+                    #if DEBUG
+                    widgetDebugSection
+                    #endif
+                    aboutSection
+                }.onChange(of: scrollToTopTrigger) { _, _ in
+                    withAnimation(.easeInOut) { proxy.scrollTo(listTopAnchorId, anchor: .top) }
+                }
             }
         }.background {
             (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
