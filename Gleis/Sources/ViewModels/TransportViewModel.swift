@@ -120,10 +120,10 @@ final class TransportViewModel: ObservableObject {
     private let widgetTopUpMinimumInterval: TimeInterval = 10 * 60
     /// Wall-clock ceiling for one background coverage top-up run.
     private static let widgetTopUpBudget: TimeInterval = 60
-    /// A jumped search starts this far before the chosen time, like the day train picker.
+    /// A jumped search starts this far before the chosen time, so trains just before it still show.
     private static let anchoredSearchLeadTime: TimeInterval = 10 * 60
     private static let anchoredInitialConnectionTarget = 12
-    /// An anchor this far in the past no longer answers anything, so the list goes back to now.
+    /// A jumped time this far in the past is dropped, and the list goes back to now.
     private static let anchorExpiryInterval: TimeInterval = 60 * 60
     /// A background stay longer than this drops a jumped search on return.
     private static let backgroundResetInterval: TimeInterval = 30 * 60
@@ -886,12 +886,12 @@ final class TransportViewModel: ObservableObject {
             Self.logger.error(
                 "Jumped search from \(seedDateTime.formatted(.iso8601), privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
             )
-            guard let lastShown = anchoredTrainConnections.last else {
+            guard let lastShownConnection = anchoredTrainConnections.last else {
                 anchoredConnections = .error(GleisError.from(error))
                 return
             }
             // Keep the pages that arrived; load-more then starts a fresh search after the last one.
-            anchoredSeedDateTime = lastShown.departureTime.addingTimeInterval(1)
+            anchoredSeedDateTime = lastShownConnection.departureTime.addingTimeInterval(1)
             anchoredForwardCursor = nil
         }
     }

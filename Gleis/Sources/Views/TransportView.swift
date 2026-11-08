@@ -737,7 +737,7 @@ private struct DataFreshnessBadge: View {
 
 // MARK: - RefreshErrorBanner
 
-/// One line for a failed refresh while older trains stay on screen.
+/// Names a failed refresh while older trains stay on screen.
 private struct RefreshErrorBanner: View {
     let title: String
     let onRetry: () -> Void

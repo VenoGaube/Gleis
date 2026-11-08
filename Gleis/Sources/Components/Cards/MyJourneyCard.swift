@@ -568,13 +568,13 @@ private struct JourneyStopRow: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 12) {
                     lineBadge
-                    stopInfo
+                    stopNameAndTime
                     Spacer(minLength: 8)
                     platformLabel
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     lineBadge
-                    stopInfo
+                    stopNameAndTime
                     platformLabel
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -624,7 +624,7 @@ private struct JourneyStopRow: View {
         return Text("\(Text(name).fontWeight(weight)) \(transferGlyph)")
     }
 
-    private var stopInfo: some View {
+    private var stopNameAndTime: some View {
         VStack(alignment: .leading, spacing: 1) {
             stationName
                 .font(.caption)

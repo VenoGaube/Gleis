@@ -1042,7 +1042,7 @@ struct EmptyWidgetView: View {
 
 // MARK: - ScalableText
 
-/// ViewModifier for one-line text that shrinks to fit available space
+/// Keeps text on one line and shrinks it to fit the space.
 struct ScalableText: ViewModifier {
     let minimumScaleFactor: CGFloat
 

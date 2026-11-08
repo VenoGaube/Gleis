@@ -50,7 +50,7 @@ struct DisplayConnection: Identifiable {
             departureTime: connection.departureTime,
             currentTime: currentTime
         )
-        let current = Phase(
+        let current = ConnectionPhase(
             isLeaveWindowPassed: isLeaveWindowPassed,
             hasDeparted: hasDeparted,
             isWithinLeaveCountdownWindow: isWithinLeaveCountdownWindow
@@ -98,7 +98,7 @@ struct DisplayConnection: Identifiable {
     private static let warningHapticLeadTime: TimeInterval = 300
     private static let finalHapticLeadTime: TimeInterval = 120
 
-    private struct Phase: Equatable {
+    private struct ConnectionPhase: Equatable {
         let isLeaveWindowPassed: Bool
         let hasDeparted: Bool
         let isWithinLeaveCountdownWindow: Bool
@@ -108,9 +108,9 @@ struct DisplayConnection: Identifiable {
         leaveTime: Date,
         departureTime: Date,
         currentTime: Date
-    ) -> Phase {
+    ) -> ConnectionPhase {
         let hasDeparted = currentTime >= departureTime
-        return Phase(
+        return ConnectionPhase(
             isLeaveWindowPassed: currentTime >= leaveTime && !hasDeparted,
             hasDeparted: hasDeparted,
             isWithinLeaveCountdownWindow: leaveTime.timeIntervalSince(currentTime) <= leaveCountdownWindow

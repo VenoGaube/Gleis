@@ -1353,12 +1353,12 @@ struct NotificationStepView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 10) {
-                            notificationSource(fireDate: preview.fireDate)
+                            notificationAppHeader(fireDate: preview.fireDate)
                             Spacer()
                             interruptionTag(for: preview.interruptionLevel)
                         }
                         VStack(alignment: .leading, spacing: 6) {
-                            notificationSource(fireDate: preview.fireDate)
+                            notificationAppHeader(fireDate: preview.fireDate)
                             interruptionTag(for: preview.interruptionLevel)
                         }
                     }
@@ -1378,7 +1378,7 @@ struct NotificationStepView: View {
         }
     }
 
-    private func notificationSource(fireDate: Date) -> some View {
+    private func notificationAppHeader(fireDate: Date) -> some View {
         HStack(spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
