@@ -402,10 +402,17 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     /// The same trip in the shop timetable, which is the only source of the id the offer endpoints accept.
     private func findShopConnection(for connection: TrainConnection) async throws -> OebbConnection {
-        async let resolvedFromTask = resolveStation(connection.departureStation)
-        async let resolvedToTask = resolveStation(connection.arrivalStation)
+        // Search from the stations the trains use: a trip from a combined stop such as "Wien Hbf (U)" starts
+        // with a walk, and ÖBB returns no seat offers for it.
+        let trainLegs = connection.legs.filter { !$0.isWalking }
+        async let resolvedFromTask = resolveStation(trainLegs.first?.from ?? connection.departureStation)
+        async let resolvedToTask = resolveStation(trainLegs.last?.to ?? connection.arrivalStation)
         let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
-        let scheduledDeparture = connection.departureTime.addingTimeInterval(-TimeInterval(connection.delay * 60))
+        Self.seatLogger.debug(
+            "Seat lookup searches the shop from \(resolvedFrom.station.name, privacy: .public) (\(resolvedFrom.station.id, privacy: .public)) to \(resolvedTo.station.name, privacy: .public)"
+        )
+        let trainDeparture = trainLegs.first?.departureTime ?? connection.departureTime
+        let scheduledDeparture = trainDeparture.addingTimeInterval(-TimeInterval(connection.delay * 60))
         let page = try await apiClient.fetchTimetableViaShop(
             from: resolvedFrom.ref,
             to: resolvedTo.ref,
@@ -424,7 +431,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                   let departure = departureText.flatMap(Self.shopDateFormatter.date)
             else { return false }
             return abs(departure.timeIntervalSince(scheduledDeparture)) <= Self.seatMapDepartureTolerance
-                || abs(departure.timeIntervalSince(connection.departureTime)) <= Self.seatMapDepartureTolerance
+                || abs(departure.timeIntervalSince(trainDeparture)) <= Self.seatMapDepartureTolerance
         }
         guard let match else {
             let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
