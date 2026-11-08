@@ -37,13 +37,13 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           xcrun simctl install "$udid" "$app"
-          mkdir -p screenshots
+          mkdir -p ci-screenshots
           for appearance in light dark; do
             xcrun simctl ui "$udid" appearance "$appearance"
             xcrun simctl terminate "$udid" "$bundle_id" || true
             xcrun simctl launch "$udid" "$bundle_id"
             sleep 15
-            xcrun simctl io "$udid" screenshot "screenshots/launch-$appearance.png"
+            xcrun simctl io "$udid" screenshot "ci-screenshots/launch-$appearance.png"
           done
 
       - uses: actions/upload-artifact@v4
@@ -52,4 +52,4 @@ jobs:
           name: build-${{ github.sha }}
           path: |
             xcodebuild.log
-            screenshots/
+            ci-screenshots/
