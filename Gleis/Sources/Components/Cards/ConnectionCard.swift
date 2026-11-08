@@ -10,7 +10,13 @@ struct ConnectionCard: View {
     let onUnpin: () -> Void
     let onTap: () -> Void
 
+    /// Leave times further away than this show a static time instead of the live countdown ring.
+    private static let countdownWindow: TimeInterval = 60 * 60
+
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption) private var ringDiameter: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var actionButtonDiameter: CGFloat = 44
     @State private var isExpanded = false
 
     // Convenience accessors
@@ -18,8 +24,10 @@ struct ConnectionCard: View {
     private var leaveTime: Date { displayConnection.leaveTime }
     private var isLeaveWindowPassed: Bool { displayConnection.isLeaveWindowPassed }
     private var hasDeparted: Bool { displayConnection.hasDeparted }
+    private var isLeaveTimePast: Bool { isLeaveWindowPassed || hasDeparted }
     private var isSelected: Bool { displayConnection.isSelected }
     private var isPinned: Bool { displayConnection.isPinned }
+    private var isShowingMissedSummary: Bool { isLeaveWindowPassed && !isExpanded }
     private var scheduledDepartureTime: Date? {
         scheduledTimeIfDelayed(from: connection.departureTime, delayMinutes: connection.delay)
     }
@@ -28,20 +36,57 @@ struct ConnectionCard: View {
     }
 
     var body: some View {
-        cardContent
-            .background(cardBackgroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-            .overlay(cardBorder)
-            .shadow(color: shadowColor, radius: 8, y: 4)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if isLeaveWindowPassed { withAnimation(.spring(response: 0.3)) { isExpanded.toggle() } } else { onTap() }
+        Button(action: handleCardTap) {
+            cardContent
+                .foregroundStyle(.primary)
+                .background(cardBackgroundColor)
+                .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+                .overlay(cardBorder)
+                .shadow(color: shadowColor, radius: 8, y: 4)
+                .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+        }
+        .buttonStyle(ConnectionCardPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cardSpokenSummary)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(cardAccessibilityHint)
+        .accessibilityAction(.default) { handleCardTap() }
+        .accessibilityActions {
+            if isLeaveWindowPassed {
+                Button("Connection details") { onTap() }
             }
+            if !isLeaveTimePast || isSelected {
+                Button(isSelected ? "Cancel reminder" : "Remind me") { isSelected ? onCancel() : onSchedule() }
+            }
+            if !hasDeparted || isPinned {
+                Button(isPinned ? "Unpin" : "Pin") { isPinned ? onUnpin() : onPin() }
+            }
+        }
+    }
+
+    private func handleCardTap() {
+        guard isLeaveWindowPassed else { return onTap() }
+        withAnimation(reduceMotion ? nil : .gleisToggle) { isExpanded.toggle() }
+    }
+
+    private var cardAccessibilityHint: String {
+        guard isLeaveWindowPassed else { return "Opens connection details" }
+        return isExpanded ? "Collapses the card" : "Shows the full connection"
+    }
+
+    private var cardSpokenSummary: String {
+        var parts = displayConnection.spokenTimetable
+        parts.append(connection.transferSummary)
+        parts.append(tripFactsLine)
+        if isLeaveTimePast { parts.append("leave time passed") }
+        if isSelected { parts.append("reminder set") }
+        if isPinned { parts.append("pinned as my journey") }
+        return parts.joined(separator: ", ")
     }
 
     private var cardContent: some View {
         VStack(spacing: 0) {
-            if isLeaveWindowPassed, !isExpanded {
+            if isShowingMissedSummary {
                 compactMissedView
             } else {
                 headerSection
@@ -57,7 +102,7 @@ struct ConnectionCard: View {
     }
 
     private var cardCornerRadius: CGFloat {
-        isLeaveWindowPassed && !isExpanded ? 12 : 16
+        isShowingMissedSummary ? 12 : 16
     }
 
     private var dividerColor: Color {
@@ -76,274 +121,476 @@ struct ConnectionCard: View {
         colorScheme == .dark ? .clear : .black.opacity(0.05)
     }
 
+    // MARK: Missed summary
+
     private var compactMissedView: some View {
-        HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(connection.arrivalStation.name).font(.subheadline.weight(.medium)).scalableText(minimumScale: 0.8)
-                Text(connection.departureTime, style: .time).font(.caption).foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+                missedDetails
+                Spacer(minLength: 8)
+                missedExpandHint
             }
-            Spacer()
-            Text("GO!").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            Image(systemName: "chevron.down").font(.caption).foregroundStyle(.tertiary)
-        }.padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6)
+            VStack(alignment: .leading, spacing: 8) {
+                LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+                missedDetails
+                missedExpandHint
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6)
     }
 
+    private var missedDetails: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(connection.departureTime, style: .time).font(.subheadline.weight(.medium).monospacedDigit())
+            Text(connection.transferSummary).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var missedExpandHint: some View {
+        HStack(spacing: 6) {
+            Text("GO!").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            Image(systemName: "chevron.down").font(.caption).foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: Header
+
     private var headerSection: some View {
-        HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(connection.departureStation.name).font(.subheadline.weight(.medium)).scalableText(
-                        minimumScale: 0.8)
-                    if isPinned { PinBadge() }
-                }
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.right").font(.caption2)
-                    Text(connection.arrivalStation.name).font(.caption).scalableText(minimumScale: 0.8)
-                }.foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+                routeSummary
+                Spacer(minLength: 8)
+                ConnectionStatusBadges(connection: connection, alignment: .trailing)
             }
-            Spacer()
-            headerStatusBadges
-        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+                    Spacer(minLength: 8)
+                    ConnectionStatusBadges(connection: connection, alignment: .trailing)
+                }
+                routeSummary
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+                ConnectionStatusBadges(connection: connection, alignment: .leading)
+                routeSummary
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
+    }
+
+    private var routeSummary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(connection.transferSummary).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+            if isPinned { PinBadge() }
+        }
+    }
+
+    // MARK: Times, trip facts and platform
+
+    private var timeInfoSection: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                timeColumn("DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
+                tripFactsColumn.frame(maxWidth: .infinity)
+                timeColumn("ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
+                Divider().frame(height: 40).padding(2)
+                platformColumn(alignment: .center)
+                infoButton
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    timeColumn("DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
+                    tripFactsColumn.frame(maxWidth: .infinity)
+                    timeColumn("ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
+                }
+                HStack(spacing: 8) {
+                    platformColumn(alignment: .leading)
+                    Spacer(minLength: 8)
+                    infoButton
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                timeColumn(
+                    "DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime,
+                    alignment: .leading)
+                timeColumn(
+                    "ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime, alignment: .leading)
+                Text(tripFactsLine).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    platformColumn(alignment: .leading)
+                    Spacer(minLength: 8)
+                    infoButton
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private func timeColumn(
+        _ title: String, time: Date, scheduledTime: Date?, alignment: HorizontalAlignment = .center
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            if let scheduledTime {
+                Text(scheduledTime, style: .time)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .strikethrough()
+            }
+            Text(time, style: .time)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(scheduledTime == nil ? Color.primary : Color.orange)
+        }
+        .multilineTextAlignment(alignment == .leading ? .leading : .center)
+    }
+
+    private var tripFactsColumn: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+            Text(formattedTripDuration).font(.caption2).foregroundStyle(.secondary)
+            if let stopsText {
+                Text(stopsText).font(.caption2.weight(.semibold)).foregroundStyle(.blue)
+            }
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    private var formattedTripDuration: String {
+        Duration.seconds(Int64(connection.duration))
+            .formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
+    }
+
+    private var stopsText: String? {
+        guard let stops = connection.totalStopCount, stops > 0 else { return nil }
+        return stops == 1 ? "1 stop" : "\(stops) stops"
+    }
+
+    private var tripFactsLine: String {
+        [formattedTripDuration, stopsText].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func platformColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("Platform").font(.caption2).foregroundStyle(.secondary)
+            Text(connection.platform ?? "—")
+                .font(connection.platform != nil ? .headline.weight(.semibold).monospacedDigit() : .caption2)
+                .foregroundStyle(connection.platform != nil ? .primary : .tertiary)
+        }
+        .multilineTextAlignment(alignment == .leading ? .leading : .center)
+    }
+
+    // The onTap closure owns the haptic, so the button does not add a second one.
+    private var infoButton: some View {
+        Button(action: onTap) {
+            Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                .padding(2).background(Color.accentColor.opacity(0.12), in: Circle())
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Connection details")
+    }
+
+    // MARK: Leave time
+
+    // A minute tick decides between the static time and the countdown; only the countdown ticks every second.
+    private var leaveTimeSection: some View {
+        TimelineView(.everyMinute) { minuteContext in
+            if displayConnection.timeRemaining(at: minuteContext.date) > Self.countdownWindow {
+                leaveTimeContent(now: minuteContext.date, showsCountdown: false)
+            } else {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    leaveTimeContent(now: context.date, showsCountdown: true)
+                }
+            }
+        }
+    }
+
+    private func leaveTimeContent(now: Date, showsCountdown: Bool) -> some View {
+        let urgencyColor = displayConnection.urgencyColor(at: now)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                leaveTimeSummary(now: now, showsCountdown: showsCountdown, urgencyColor: urgencyColor)
+                Spacer(minLength: 8)
+                actionButtons
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                leaveTimeSummary(now: now, showsCountdown: showsCountdown, urgencyColor: urgencyColor)
+                actionButtons
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
     }
 
     @ViewBuilder
-    private var headerStatusBadges: some View {
+    private func leaveTimeSummary(now: Date, showsCountdown: Bool, urgencyColor: Color) -> some View {
+        if showsCountdown {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    countdownRing(now: now, urgencyColor: urgencyColor)
+                    leaveAtLabel(urgencyColor: urgencyColor)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    countdownRing(now: now, urgencyColor: urgencyColor)
+                    leaveAtLabel(urgencyColor: urgencyColor)
+                }
+            }
+        } else {
+            leaveAtLabel(urgencyColor: urgencyColor)
+        }
+    }
+
+    private func leaveAtLabel(urgencyColor: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Leave at").font(.subheadline).foregroundStyle(.secondary)
+            Text(leaveTime, style: .time)
+                .font(.title.weight(.bold).monospacedDigit())
+                .foregroundStyle(urgencyColor)
+        }
+    }
+
+    private func countdownRing(now: Date, urgencyColor: Color) -> some View {
+        let timeRemaining = displayConnection.timeRemaining(at: now)
+        // Rounded up so the ring never shows less time than the user has.
+        let minutesLeft = Int(ceil(max(0, timeRemaining) / 60))
+        return ZStack {
+            Circle().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2), lineWidth: 4)
+            Circle().trim(from: 0, to: displayConnection.progress(at: now)).stroke(
+                urgencyColor, style: StrokeStyle(lineWidth: 4, lineCap: .round)
+            ).rotationEffect(.degrees(-90))
+            VStack(spacing: 0) {
+                if timeRemaining <= 0 {
+                    Text("GO!").font(.system(.caption, design: .monospaced).weight(.bold))
+                } else if timeRemaining <= 60 {
+                    Text(leaveTime, style: .timer).font(.system(.caption, design: .monospaced).weight(.bold))
+                    Text("to go").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text("\(minutesLeft)")
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(reduceMotion ? nil : .default, value: minutesLeft)
+                    Text("min").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(6)
+        }
+        .frame(width: ringDiameter, height: ringDiameter)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 12) {
+            Button {
+                Haptics.impact(.light)
+                isPinned ? onUnpin() : onPin()
+            } label: {
+                Image(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(reduceMotion ? nil : .default, value: isPinned)
+                    .foregroundStyle(isPinned ? .white : .secondary)
+                    .frame(width: actionButtonDiameter, height: actionButtonDiameter)
+                    .background(isPinned ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(hasDeparted && !isPinned)
+
+            Button {
+                Haptics.impact(.medium)
+                isSelected ? onCancel() : onSchedule()
+            } label: {
+                Image(systemName: isSelected ? "bell.slash.fill" : "bell.fill")
+                    .font(.body.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(reduceMotion ? nil : .default, value: isSelected)
+                    .foregroundStyle(.white)
+                    .frame(width: actionButtonDiameter, height: actionButtonDiameter)
+                    .background(
+                        isSelected
+                            ? Color.urgencyRedFallback(colorScheme)
+                            : (isLeaveTimePast ? .secondary : Color.accentColor), in: Circle()
+                    )
+            }
+            .buttonStyle(.borderless)
+            .disabled(isLeaveTimePast && !isSelected)
+        }
+    }
+}
+
+// MARK: - CompactConnectionRow
+
+/// One-line summary of a later train; the presenter swaps it for a full ConnectionCard on tap.
+struct CompactConnectionRow: View {
+    let displayConnection: DisplayConnection
+    let isReminderSet: Bool
+    let onTap: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var connection: TrainConnection { displayConnection.connection }
+
+    var body: some View {
+        Button(action: onTap) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    lineBadge
+                    VStack(alignment: .leading, spacing: 2) {
+                        departureArrivalText
+                        leavePlatformText
+                    }
+                    Spacer(minLength: 8)
+                    statusMarks
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        lineBadge
+                        Spacer(minLength: 8)
+                        statusMarks
+                    }
+                    departureArrivalText
+                    leavePlatformText
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    lineBadge
+                    ConnectionStatusBadges(connection: connection, alignment: .leading)
+                    reminderMark
+                    departureArrivalText
+                    leavePlatformText
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.cardSurface(colorScheme), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(ConnectionCardPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenSummary)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows the full connection")
+        .accessibilityAction(.default) { onTap() }
+    }
+
+    private var spokenSummary: String {
+        var parts = displayConnection.spokenTimetable
+        if isReminderSet { parts.append("reminder set") }
+        return parts.joined(separator: ", ")
+    }
+
+    private var lineBadge: some View {
+        LineBadge(line: connection.lineNumber, colors: connection.lineColors)
+    }
+
+    private var departureArrivalText: some View {
+        (Text(connection.departureTime, style: .time) + Text(" → ") + Text(connection.arrivalTime, style: .time))
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+    }
+
+    private var leavePlatformText: some View {
+        var text = Text("leave ") + Text(displayConnection.leaveTime, style: .time)
+        if let platform = connection.platform { text = text + Text(" · Platform \(platform)") }
+        return text.font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+    }
+
+    private var statusMarks: some View {
+        HStack(spacing: 6) {
+            ConnectionStatusBadges(connection: connection, alignment: .trailing)
+            reminderMark
+        }
+    }
+
+    @ViewBuilder
+    private var reminderMark: some View {
+        if isReminderSet {
+            Image(systemName: "bell.fill").font(.caption).foregroundStyle(Color.accentColor)
+        }
+    }
+}
+
+// MARK: - ConnectionCardPressStyle
+
+/// Shrinks the card while the finger is down, or dims it under Reduce Motion.
+struct ConnectionCardPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .opacity(configuration.isPressed && reduceMotion ? 0.85 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 1), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Connection descriptions
+
+private extension TrainConnection {
+    /// "Direct", or the first change station with its change time, such as "via Linz Hbf (5 min change)".
+    var transferSummary: String {
+        guard transfers > 0 else { return "Direct" }
+        let rideLegs = legs.filter { !$0.isWalking }
+        guard rideLegs.count >= 2 else { return transfers == 1 ? "1 change" : "\(transfers) changes" }
+        var summary = "via \(rideLegs[0].to.name)"
+        if let arrival = rideLegs[0].arrivalTime, let departure = rideLegs[1].departureTime {
+            summary += " (\(max(0, Int(departure.timeIntervalSince(arrival) / 60))) min change)"
+        }
+        let laterChanges = rideLegs.count - 2
+        if laterChanges > 0 { summary += laterChanges == 1 ? " +1 more change" : " +\(laterChanges) more changes" }
+        return summary
+    }
+}
+
+private extension DisplayConnection {
+    /// Spoken parts shared by the card and the compact row: line, status, leave, departure, arrival, platform.
+    var spokenTimetable: [String] {
+        func spoken(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+        var parts = [connection.lineNumber]
+        if connection.isCancelled { parts.append("cancelled") }
+        parts.append("leave at \(spoken(leaveTime))")
+        var departs = "departs \(spoken(connection.departureTime))"
+        if let scheduled = scheduledTimeIfDelayed(from: connection.departureTime, delayMinutes: connection.delay) {
+            let lateness = connection.delay == 1 ? "1 minute late" : "\(connection.delay) minutes late"
+            departs += ", \(lateness), scheduled \(spoken(scheduled))"
+        }
+        parts.append(departs)
+        parts.append("arrives \(spoken(connection.arrivalTime))")
+        if let platform = connection.platform { parts.append("platform \(platform)") }
+        if connection.hasServiceAlerts { parts.append("service alert") }
+        return parts
+    }
+}
+
+// MARK: - ConnectionStatusBadges
+
+/// Cancelled wins over everything; otherwise the alert and delay badges, stacked when both apply.
+struct ConnectionStatusBadges: View {
+    let connection: TrainConnection
+    let alignment: HorizontalAlignment
+
+    var body: some View {
         if connection.isCancelled {
-            // A cancelled service overrides every other status: the delay and alert
-            // badges describe a train that is not running.
             CancelledBadge()
-                .frame(minHeight: 40, alignment: .center)
         } else if connection.hasServiceAlerts, connection.isDelayed {
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: alignment, spacing: 6) {
                 ServiceAlertBadge()
                 DelayBadge(minutes: connection.delay)
             }
         } else if connection.hasServiceAlerts {
             ServiceAlertBadge()
-                .frame(minHeight: 40, alignment: .center)
         } else if connection.isDelayed {
             DelayBadge(minutes: connection.delay)
-                .frame(minHeight: 40, alignment: .center)
         }
-    }
-
-    private var timeInfoSection: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                VStack(spacing: 6) {
-                    Text("DEPARTS")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if let scheduledDepartureTime {
-                        VStack(spacing: 2) {
-                            Text(scheduledDepartureTime, style: .time)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .strikethrough()
-                            Text(connection.departureTime, style: .time)
-                                .font(.headline.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(.orange)
-                        }
-                    } else {
-                        Text(connection.departureTime, style: .time)
-                            .font(.headline.weight(.semibold).monospacedDigit())
-                            .multilineTextAlignment(.center)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
-                }
-                .frame(minWidth: 66, alignment: .center)
-                .layoutPriority(2)
-
-                VStack(spacing: 6) {
-                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
-                    Text("\(Int(connection.duration / 60)) min").font(.caption2).foregroundStyle(.secondary)
-                    if let stops = connection.totalStopCount, stops > 0 {
-                        Text("\(stops) \(stops == 1 ? "stop" : "stops")")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .multilineTextAlignment(.center)
-                    }
-                    if connection.transfers == 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Direct")
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.12), in: Capsule())
-                        .accessibilityLabel("Direct connection with no transfers")
-                    } else {
-                        HStack(spacing: 3) {
-                            Text("\(connection.transfers)")
-                            Image(systemName: "arrow.triangle.branch")
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(connection.transfers >= 2 ? .red : .orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            (connection.transfers >= 2 ? Color.red : Color.orange).opacity(0.15),
-                            in: Capsule()
-                        )
-                        .accessibilityLabel(
-                            connection.transfers == 1
-                                ? "1 transfer"
-                                : "\(connection.transfers) transfers"
-                        )
-                    }
-                }
-                .frame(minWidth: 64, maxWidth: .infinity)
-
-                VStack(spacing: 6) {
-                    Text("ARRIVES")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if let scheduledArrivalTime {
-                        VStack(spacing: 2) {
-                            Text(scheduledArrivalTime, style: .time)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .strikethrough()
-                            Text(connection.arrivalTime, style: .time)
-                                .font(.headline.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(.orange)
-                        }
-                    } else {
-                        Text(connection.arrivalTime, style: .time)
-                            .font(.headline.weight(.semibold).monospacedDigit())
-                            .multilineTextAlignment(.center)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
-                }
-                .frame(minWidth: 66, alignment: .center)
-                .layoutPriority(2)
-            }.frame(maxWidth: .infinity)
-            Divider().frame(height: 40).padding(2)
-            VStack(spacing: 2) {
-                Text("Platform").font(.caption2).foregroundStyle(.secondary)
-                Text(connection.platform ?? "—").font(
-                    connection.platform != nil ? .headline.weight(.semibold).monospacedDigit() : .caption2
-                ).foregroundStyle(connection.platform != nil ? .primary : .tertiary)
-            }.frame(width: 58)
-            Button {
-                Haptics.selection()
-                onTap()
-            } label: {
-                Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
-                    .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).contentShape(
-                        Rectangle())
-            }.buttonStyle(.borderless)
-        }.padding(.horizontal, 16).padding(.vertical, 12)
-    }
-
-    // Only this section reads the clock, so the per-second tick redraws it and not the whole list.
-    private var leaveTimeSection: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            leaveTimeContent(now: context.date)
-        }
-    }
-
-    private func leaveTimeContent(now: Date) -> some View {
-        let timeRemaining = displayConnection.timeRemaining(at: now)
-        let urgencyColor = displayConnection.urgencyColor(at: now)
-        let progress = displayConnection.progress(at: now)
-        return HStack(spacing: 16) {
-            ZStack {
-                Circle().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2), lineWidth: 4)
-                Circle().trim(from: 0, to: progress).stroke(
-                    urgencyColor, style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                ).rotationEffect(.degrees(-90))
-                VStack(spacing: 0) {
-                    if timeRemaining <= 0 {
-                        Text("GO!").font(.system(.caption, design: .monospaced).weight(.bold))
-                    } else if timeRemaining <= 60 {
-                        // Under 1 minute: live countdown with seconds
-                        Text(leaveTime, style: .timer).font(.system(.caption, design: .monospaced).weight(.bold))
-                            .multilineTextAlignment(.center)
-                    } else {
-                        Text(formatCountdown(timeRemaining)).font(.system(.caption, design: .monospaced).weight(.bold))
-                    }
-                    if timeRemaining > 0, timeRemaining <= 60 {
-                        Text("to go").font(.system(size: 8)).foregroundStyle(.secondary)
-                    } else if timeRemaining > 60 {
-                        Text("to leave").font(.system(size: 8)).foregroundStyle(.secondary)
-                    }
-                }
-            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel(timeRemaining))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Leave at").font(.caption).foregroundStyle(.secondary)
-                Text(leaveTime, style: .time).font(.headline.monospacedDigit()).foregroundStyle(urgencyColor)
-            }
-            Spacer()
-
-            // Pin button
-            Button {
-                Haptics.impact(.light)
-                isPinned ? onUnpin() : onPin()
-            } label: {
-                Image(systemName: isPinned ? "pin.slash.fill" : "pin.fill").font(.caption.weight(.semibold))
-                    .foregroundStyle(isPinned ? .white : .secondary).frame(width: 36, height: 36).background(
-                        isPinned ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle()
-                    )
-            }.disabled(hasDeparted && !isPinned).accessibilityLabel(
-                isPinned ? "Unpin journey" : "Pin as My Journey")
-
-            // Reminder button
-            Button {
-                Haptics.impact(.medium)
-                isSelected ? onCancel() : onSchedule()
-            } label: {
-                Image(systemName: isSelected ? "bell.slash.fill" : "bell.fill").font(.body.weight(.semibold))
-                    .foregroundStyle(.white).frame(width: 44, height: 44).background(
-                        isSelected
-                            ? Color.urgencyRedFallback(colorScheme)
-                            : (timeRemaining < 0 ? .secondary : Color.accentColor), in: Circle()
-                    )
-            }.disabled(timeRemaining < 0 && !isSelected).accessibilityLabel(
-                isSelected ? "Cancel reminder" : "Set reminder"
-            ).accessibilityHint(
-                isSelected ? "Removes the departure notification" : "Notifies you when it's time to leave")
-        }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
-    }
-
-    private func countdownAccessibilityLabel(_ timeRemaining: TimeInterval) -> String {
-        if timeRemaining <= 0 { return "Time to leave now" }
-        let minutes = Int(timeRemaining) / 60
-        let seconds = Int(timeRemaining) % 60
-        if minutes >= 60 { return "\(minutes / 60) hours and \(minutes % 60) minutes to leave" }
-        if minutes == 0 { return "\(seconds) seconds to leave" }
-        return "\(minutes) minutes to leave"
-    }
-
-    private func formatCountdown(_ seconds: TimeInterval) -> String {
-        // Round up to show remaining time (ceiling ensures user has enough time)
-        let totalMinutes = Int(ceil(max(0, seconds) / 60))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-
-        if hours > 0 {
-            if minutes == 0 { return "\(hours)h" }
-            return "\(hours)h\(minutes)m"
-        }
-        return "\(minutes)m"
     }
 }
 
@@ -363,7 +610,8 @@ struct LineBadge: View {
         return Text(line.uppercased())
             .font(.headline.weight(.bold))
             .foregroundStyle(style.foreground)
-            .scalableText(minimumScale: 0.7)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(style.background, in: RoundedRectangle(cornerRadius: 8))
@@ -375,13 +623,18 @@ struct LineBadge: View {
 struct DelayBadge: View {
     let minutes: Int
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock.badge.exclamationmark")
             Text("+\(minutes)'")
+                .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : .default, value: minutes)
         }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 6).padding(.vertical, 4)
             .background(Color.orange.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(minutes == 1 ? "1 minute late" : "\(minutes) minutes late")
     }
 }
 
@@ -423,8 +676,8 @@ struct ServiceAlertBadge: View {
 struct PinBadge: View {
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "pin.fill").font(.system(size: 10))
-            Text("MY JOURNEY").font(.system(size: 9, weight: .bold))
+            Image(systemName: "pin.fill").font(.caption2)
+            Text("MY JOURNEY").font(.caption2.weight(.bold))
         }.foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 3).background(
             Color.accentColor, in: Capsule()
         )
@@ -500,14 +753,17 @@ struct PinBadge: View {
     )
 
     ScrollView {
-        ConnectionCard(
-            displayConnection: displayConnection,
-            onSchedule: {},
-            onCancel: {},
-            onPin: {},
-            onUnpin: {},
-            onTap: {}
-        )
+        VStack(spacing: 12) {
+            ConnectionCard(
+                displayConnection: displayConnection,
+                onSchedule: {},
+                onCancel: {},
+                onPin: {},
+                onUnpin: {},
+                onTap: {}
+            )
+            CompactConnectionRow(displayConnection: displayConnection, isReminderSet: true, onTap: {})
+        }
         .padding()
     }
     .background(Color(.systemGroupedBackground))

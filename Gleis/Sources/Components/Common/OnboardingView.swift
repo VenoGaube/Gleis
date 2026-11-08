@@ -17,6 +17,7 @@ struct OnboardingView: View {
     @State private var isRequestingNotificationPermission = false
 
     private let steps = OnboardingStep.allCases
+    private let stepBottomPadding: CGFloat = 4
 
     private var isLastStep: Bool { currentStepIndex == steps.count - 1 }
     private var hasPersistedRouteConfiguration: Bool {
@@ -54,10 +55,16 @@ struct OnboardingView: View {
 
                 TabView(selection: $currentStepIndex) {
                     ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                        stepView(step)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 4)
-                            .tag(index)
+                        GeometryReader { page in
+                            ScrollView(.vertical, showsIndicators: false) {
+                                stepView(step)
+                                    .environment(\.onboardingPanelMinHeight, max(0, page.size.height - stepBottomPadding))
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, stepBottomPadding)
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                        }
+                        .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -86,35 +93,55 @@ struct OnboardingView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            if currentStepIndex > 0 {
-                Button {
-                    withAnimation { currentStepIndex -= 1 }
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(OnboardingSecondaryButtonStyle())
-            } else {
-                Color.clear.frame(width: 88, height: 36)
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                backButton
+                Spacer()
+                stepCounter
+                Spacer()
+                skipButton
             }
-
-            Spacer()
-
-            Text("\(currentStepIndex + 1) / \(steps.count)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(.systemBackground), in: Capsule())
-
-            Spacer()
-
-            Button("Skip") { completeOnboarding() }
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(OnboardingSecondaryButtonStyle())
+            VStack(spacing: 8) {
+                HStack {
+                    backButton
+                    Spacer(minLength: 8)
+                    skipButton
+                }
+                stepCounter
+            }
         }
         .padding(.horizontal, 20)
+    }
+
+    @ViewBuilder private var backButton: some View {
+        if currentStepIndex > 0 {
+            Button {
+                withAnimation { currentStepIndex -= 1 }
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(OnboardingSecondaryButtonStyle())
+        } else {
+            // Holds the Back button's place so the counter stays centred on the first step.
+            Color.clear.frame(width: 88, height: 36)
+        }
+    }
+
+    private var stepCounter: some View {
+        Text("\(currentStepIndex + 1) / \(steps.count)")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.systemBackground), in: Capsule())
+            .accessibilityLabel("Step \(currentStepIndex + 1) of \(steps.count)")
+    }
+
+    private var skipButton: some View {
+        Button("Skip") { completeOnboarding() }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(OnboardingSecondaryButtonStyle())
     }
 
     private var footer: some View {
@@ -135,9 +162,13 @@ struct OnboardingView: View {
                     withAnimation { currentStepIndex += 1 }
                 }
             } label: {
-                HStack(spacing: 8) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        Text(isLastStep ? "Start Commuting" : "Continue")
+                        Image(systemName: isLastStep ? "checkmark.circle.fill" : "arrow.right")
+                    }
                     Text(isLastStep ? "Start Commuting" : "Continue")
-                    Image(systemName: isLastStep ? "checkmark.circle.fill" : "arrow.right")
+                        .multilineTextAlignment(.center)
                 }
                 .font(.headline.weight(.semibold))
                 .frame(maxWidth: .infinity)
@@ -342,6 +373,7 @@ struct TimingSetupStepView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 16)
@@ -381,29 +413,26 @@ struct OnboardingTimingStepper: View {
 
     private let quickPicks = [0, 5, 10, 15]
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .headline) private var iconTileSize: CGFloat = 32
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.headline)
-                    .foregroundStyle(tint)
-                    .frame(width: 32, height: 32)
-                    .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline.weight(.semibold))
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+            // Stacked at accessibility sizes so the station name in the subtitle keeps a full line.
+            if dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 12) {
+                    iconTile
+                    Spacer(minLength: 8)
+                    minutesText
                 }
-
-                Spacer(minLength: 8)
-
-                Text("\(minutes) min")
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(tint)
+                titles
+            } else {
+                HStack(spacing: 12) {
+                    iconTile
+                    titles
+                    Spacer(minLength: 8)
+                    minutesText
+                }
             }
 
             Stepper(
@@ -440,6 +469,30 @@ struct OnboardingTimingStepper: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.primary.opacity(0.05))
         )
+    }
+
+    private var iconTile: some View {
+        Image(systemName: systemImage)
+            .font(.headline)
+            .foregroundStyle(tint)
+            .frame(width: iconTileSize, height: iconTileSize)
+            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private var titles: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var minutesText: some View {
+        Text("\(minutes) min")
+            .font(.headline.monospacedDigit())
+            .foregroundStyle(tint)
     }
 }
 
@@ -489,14 +542,17 @@ struct ExactTrainViewPreviewCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("Exact Train Tab Cards", systemImage: "rectangle.stack.fill")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color(red: 0.11, green: 0.29, blue: 0.53))
-                Spacer()
-                Text("Live preview")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    previewTitle
+                    Spacer()
+                    previewTag
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    previewTitle
+                    previewTag
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -506,7 +562,7 @@ struct ExactTrainViewPreviewCard: View {
                 let previewPinnedJourney = reusablePinnedJourney ?? samplePinnedJourney
                 let displayConnections = makeSampleDisplayConnections(referenceDate: referenceDate)
 
-                ScrollView(.vertical, showsIndicators: false) {
+                OnboardingCardListScroll(height: 360, showsIndicators: false) {
                     VStack(spacing: 10) {
                         MyJourneyCard(journey: previewPinnedJourney) {}
                             .allowsHitTesting(false)
@@ -526,7 +582,6 @@ struct ExactTrainViewPreviewCard: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
                 }
-                .frame(height: 360)
             }
         }
         .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -534,6 +589,18 @@ struct ExactTrainViewPreviewCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.8), lineWidth: 1)
         )
+    }
+
+    private var previewTitle: some View {
+        Label("Exact Train Tab Cards", systemImage: "rectangle.stack.fill")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(red: 0.11, green: 0.29, blue: 0.53))
+    }
+
+    private var previewTag: some View {
+        Text("Live preview")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
     }
 
     private func makeSamplePinnedJourney(referenceDate: Date) -> PinnedJourney {
@@ -660,35 +727,53 @@ struct OnboardingCheckRow: View {
     let actionTitle: String?
     let action: (() -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(isComplete ? .green : .secondary)
                 .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 8)
-
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.trainBlue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.trainBlue.opacity(0.1), in: Capsule())
+            // The action button moves under the text at accessibility sizes so neither squeezes the other.
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    titles
+                    actionButton
+                }
+                Spacer(minLength: 0)
+            } else {
+                titles
+                Spacer(minLength: 8)
+                actionButton
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var titles: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var actionButton: some View {
+        if let actionTitle, let action {
+            Button(actionTitle, action: action)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.trainBlue)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.trainBlue.opacity(0.1), in: Capsule())
+        }
     }
 }
 
@@ -797,14 +882,14 @@ struct JourneySetupStepView: View {
                     color: pinnedJourney == nil ? .secondary : .green
                 )
 
-                ScrollView {
+                OnboardingCardListScroll(height: 270, showsIndicators: true) {
                     VStack(spacing: 10) {
                         if let selectedJourney = pinnedJourney {
                             MyJourneyCard(journey: PinnedJourney(from: selectedJourney)) {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                     pinnedJourney = nil
                                 }
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                Haptics.impact(.light)
                             }
                         }
 
@@ -828,25 +913,24 @@ struct JourneySetupStepView: View {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                         pinnedJourney = connection
                                     }
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    Haptics.impact(.light)
                                 },
                                 onUnpin: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                         pinnedJourney = nil
                                     }
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    Haptics.impact(.light)
                                 },
                                 onTap: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                         pinnedJourney = connection
                                     }
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    Haptics.impact(.light)
                                 }
                             )
                         }
                     }
                 }
-                .frame(maxHeight: 270)
             }
         }
     }
@@ -871,7 +955,8 @@ struct JourneySetupStepView: View {
             Text(text)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 
@@ -1017,6 +1102,9 @@ struct WidgetStepView: View {
     let step: OnboardingStep
     let pinnedJourney: TrainConnection?
 
+    private let widgetPreviewSide: CGFloat = 164
+    @ScaledMetric(relativeTo: .caption) private var stepNumberDiameter: CGFloat = 20
+
     private let instructionRows: [(String, String)] = [
         ("1", "Long press your home screen"),
         ("2", "Tap the + button in the top corner"),
@@ -1034,15 +1122,18 @@ struct WidgetStepView: View {
                     VStack(spacing: 10) {
                         OnboardingWidgetPreviewSurface(title: "Small Widget") {
                             OnboardingSmallWidgetView(entry: entry)
-                                .frame(width: 164, height: 164)
+                                .frame(width: widgetPreviewSide)
+                                .frame(minHeight: widgetPreviewSide, idealHeight: widgetPreviewSide)
                         }
 
                         OnboardingWidgetPreviewSurface(title: "Medium Widget") {
+                            // The ideal height fills the box; wrapped text that needs more makes it taller instead of cut.
                             OnboardingMediumWidgetView(entry: entry)
-                                .frame(height: 164)
+                                .frame(minHeight: widgetPreviewSide, idealHeight: widgetPreviewSide)
                                 .frame(maxWidth: .infinity)
                         }
                     }
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 }
 
                 VStack(spacing: 8) {
@@ -1051,14 +1142,15 @@ struct WidgetStepView: View {
                             Text(item.0)
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(.white)
-                                .frame(width: 20, height: 20)
+                                .frame(width: stepNumberDiameter, height: stepNumberDiameter)
                                 .background(Color(red: 0.11, green: 0.29, blue: 0.53), in: Circle())
 
                             Text(item.1)
                                 .font(.callout.weight(.medium))
                                 .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                            Spacer()
+                            Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -1130,6 +1222,7 @@ struct NotificationStepView: View {
     let onRequestPermission: () -> Void
 
     @StateObject private var settingsManager = SettingsManager.shared
+    @ScaledMetric(relativeTo: .subheadline) private var appIconSize: CGFloat = 28
 
     private struct PreviewNotification: Identifiable {
         let type: NotificationType
@@ -1217,6 +1310,7 @@ struct NotificationStepView: View {
                     if notificationStatus == .authorized || notificationStatus == .provisional || notificationStatus == .ephemeral {
                         Label("Notifications Enabled", systemImage: "checkmark.circle.fill")
                             .font(.callout.weight(.semibold))
+                            .multilineTextAlignment(.center)
                             .foregroundStyle(.green)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -1257,42 +1351,21 @@ struct NotificationStepView: View {
         VStack(spacing: 8) {
             ForEach(previewNotifications) { preview in
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color(red: 0.11, green: 0.29, blue: 0.53), Color(red: 0.18, green: 0.43, blue: 0.63)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                            Image(systemName: "tram.fill")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.white)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            notificationSource(fireDate: preview.fireDate)
+                            Spacer()
+                            interruptionTag(for: preview.interruptionLevel)
                         }
-                        .frame(width: 28, height: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Gleis")
-                                .font(.subheadline.weight(.semibold))
-                            Text(preview.fireDate, style: .time)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            notificationSource(fireDate: preview.fireDate)
+                            interruptionTag(for: preview.interruptionLevel)
                         }
-
-                        Spacer()
-
-                        Text(preview.interruptionLevel == .timeSensitive ? "Time Sensitive" : "Active")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.12), in: Capsule())
                     }
 
                     Text(preview.title)
                         .font(.headline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(preview.body)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1304,6 +1377,42 @@ struct NotificationStepView: View {
             }
         }
     }
+
+    private func notificationSource(fireDate: Date) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.11, green: 0.29, blue: 0.53), Color(red: 0.18, green: 0.43, blue: 0.63)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Image(systemName: "tram.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: appIconSize, height: appIconSize)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Gleis")
+                    .font(.subheadline.weight(.semibold))
+                Text(fireDate, style: .time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func interruptionTag(for level: UNNotificationInterruptionLevel) -> some View {
+        Text(level == .timeSensitive ? "Time Sensitive" : "Active")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.gray.opacity(0.12), in: Capsule())
+    }
 }
 
 // MARK: - Shared Onboarding UI
@@ -1311,6 +1420,9 @@ struct NotificationStepView: View {
 struct OnboardingPanel<Content: View>: View {
     let step: OnboardingStep
     @ViewBuilder var content: Content
+
+    @Environment(\.onboardingPanelMinHeight) private var minimumHeight
+    @ScaledMetric(relativeTo: .title) private var titleSize: CGFloat = 30
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1321,18 +1433,19 @@ struct OnboardingPanel<Content: View>: View {
                     .tracking(1.2)
 
                 Text(step.title)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: titleSize, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
 
                 Text(step.subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             content
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(20)
+        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 30, style: .continuous)
                 .fill(Color(.systemBackground))
@@ -1342,6 +1455,36 @@ struct OnboardingPanel<Content: View>: View {
                 .stroke(Color.gray.opacity(0.15), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.06), radius: 12, y: 6)
+    }
+}
+
+/// The page height a step's panel fills when its content is shorter, so the card still reaches the footer.
+private struct OnboardingPanelMinHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var onboardingPanelMinHeight: CGFloat {
+        get { self[OnboardingPanelMinHeightKey.self] }
+        set { self[OnboardingPanelMinHeightKey.self] = newValue }
+    }
+}
+
+/// A fixed-height card list with its own scroll; at accessibility sizes the cards grow into the page scroll instead.
+private struct OnboardingCardListScroll<Content: View>: View {
+    let height: CGFloat
+    let showsIndicators: Bool
+    @ViewBuilder let content: Content
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            content
+        } else {
+            ScrollView(.vertical, showsIndicators: showsIndicators) { content }
+                .frame(height: height)
+        }
     }
 }
 
@@ -1408,10 +1551,8 @@ struct OnboardingSmallWidgetView: View {
                 Text(data.routeText)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.62)
-                    .allowsTightening(true)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
 
@@ -1461,71 +1602,43 @@ struct OnboardingMediumWidgetView: View {
                         Text("Leave at \(current.leaveTime, style: .time)")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
-                            .scalableText(minimumScale: 0.8)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(width: 95)
+                .frame(minWidth: 95)
                 .frame(maxHeight: .infinity)
+                .layoutPriority(1)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(data.routeText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .minimumScaleFactor(0.7)
-                        .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
-                        OnboardingWidgetLineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(conn.destination)
-                                .font(.subheadline.weight(.semibold))
-                                .scalableText(minimumScale: 0.8)
-
-                            if conn.isPinned {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "pin.fill").font(.system(size: 7))
-                                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
-                                }
-                                .foregroundStyle(.secondary)
-                            }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            OnboardingWidgetLineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
+                            destinationLabel(for: conn)
+                            Spacer(minLength: 0)
                         }
-                        Spacer()
+                        VStack(alignment: .leading, spacing: 4) {
+                            OnboardingWidgetLineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .medium)
+                            destinationLabel(for: conn)
+                        }
                     }
 
                     Spacer(minLength: 0)
 
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                if conn.isDelayed {
-                                    Text(onboardingScheduledTime(conn.departureTime, delay: conn.delay))
-                                        .font(.title3.weight(.medium).monospacedDigit())
-                                        .strikethrough()
-                                        .foregroundStyle(.secondary)
-                                        .scalableText(minimumScale: 0.7)
-                                    Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
-                                        .font(.title2.weight(.bold).monospacedDigit())
-                                        .foregroundStyle(.orange)
-                                        .scalableText(minimumScale: 0.7)
-                                } else {
-                                    Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
-                                        .font(.title2.weight(.bold).monospacedDigit())
-                                        .scalableText(minimumScale: 0.7)
-                                }
-                            }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top) {
+                            departureColumn(for: conn)
+                            Spacer(minLength: 8)
+                            platformColumn(for: conn, alignment: .trailing)
                         }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                            Text(conn.platform ?? "–")
-                                .font(.title2.weight(.bold).monospacedDigit())
-                                .scalableText(minimumScale: 0.7)
+                        VStack(alignment: .leading, spacing: 6) {
+                            departureColumn(for: conn)
+                            platformColumn(for: conn, alignment: .leading)
                         }
                     }
 
@@ -1550,6 +1663,60 @@ struct OnboardingMediumWidgetView: View {
             .background(onboardingWidgetGradient(remaining: remaining))
         } else {
             OnboardingWidgetEmptyState(size: .medium, data: entry.data)
+        }
+    }
+
+    private func destinationLabel(for conn: WidgetConnection) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(conn.destination)
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if conn.isPinned {
+                HStack(spacing: 2) {
+                    Image(systemName: "pin.fill").font(.system(size: 7))
+                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func departureColumn(for conn: WidgetConnection) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+            if conn.isDelayed {
+                // The struck timetable time moves above the live one when both do not fit on a line.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) { delayedTimes(for: conn) }
+                    VStack(alignment: .leading, spacing: 0) { delayedTimes(for: conn) }
+                }
+            } else {
+                Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
+                    .font(.title2.weight(.bold).monospacedDigit())
+                    .scalableText(minimumScale: 0.8)
+            }
+        }
+    }
+
+    @ViewBuilder private func delayedTimes(for conn: WidgetConnection) -> some View {
+        Text(onboardingScheduledTime(conn.departureTime, delay: conn.delay))
+            .font(.title3.weight(.medium).monospacedDigit())
+            .strikethrough()
+            .foregroundStyle(.secondary)
+            .scalableText(minimumScale: 0.8)
+        Text(onboardingWidgetTimeFormatter.string(from: conn.departureTime))
+            .font(.title2.weight(.bold).monospacedDigit())
+            .foregroundStyle(.orange)
+            .scalableText(minimumScale: 0.8)
+    }
+
+    private func platformColumn(for conn: WidgetConnection, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+            Text(conn.platform ?? "–")
+                .font(.title2.weight(.bold).monospacedDigit())
+                .scalableText(minimumScale: 0.8)
         }
     }
 }
@@ -1581,7 +1748,8 @@ struct OnboardingWidgetLineBadge: View {
         return Text(line)
             .font(size.font)
             .foregroundStyle(style.foreground)
-            .scalableText(minimumScale: 0.7)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, size.verticalPadding)
             .padding(.horizontal, size.horizontalPadding)
             .background(style.background, in: Capsule())
@@ -1601,13 +1769,13 @@ struct OnboardingWidgetCountdownDisplay: View {
                 Text("GO!")
                     .font(mainFont)
                     .foregroundStyle(.secondary)
-                    .scalableText(minimumScale: 0.6)
+                    .scalableText(minimumScale: 0.8)
             } else if remaining <= 60 {
                 Text(leaveTime, style: .timer)
                     .font(mainFont.monospacedDigit())
                     .foregroundStyle(Color.urgency(for: remaining))
                     .multilineTextAlignment(.center)
-                    .scalableText(minimumScale: 0.6)
+                    .scalableText(minimumScale: 0.8)
                 Text("leave now")
                     .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -1615,7 +1783,7 @@ struct OnboardingWidgetCountdownDisplay: View {
                 Text(onboardingFormatCountdown(remaining))
                     .font(mainFont.monospacedDigit())
                     .foregroundStyle(Color.urgency(for: remaining))
-                    .scalableText(minimumScale: 0.6)
+                    .scalableText(minimumScale: 0.8)
                 Text("to leave")
                     .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -1640,7 +1808,7 @@ struct OnboardingWidgetDepartureInfo: View {
                         Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
                             .font(valueFont)
                             .foregroundStyle(.orange)
-                            .scalableText(minimumScale: 0.7)
+                            .scalableText(minimumScale: 0.8)
                         Text("+\(connection.delay)'")
                             .font(delayFont)
                             .foregroundStyle(.orange)
@@ -1648,7 +1816,7 @@ struct OnboardingWidgetDepartureInfo: View {
                 } else {
                     Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
                         .font(valueFont)
-                        .scalableText(minimumScale: 0.7)
+                        .scalableText(minimumScale: 0.8)
                 }
             }
 
@@ -1656,7 +1824,7 @@ struct OnboardingWidgetDepartureInfo: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text("PL").font(labelFont).foregroundStyle(.secondary)
-                Text(connection.platform ?? "–").font(valueFont).scalableText(minimumScale: 0.7)
+                Text(connection.platform ?? "–").font(valueFont).scalableText(minimumScale: 0.8)
             }
         }
     }
@@ -1700,7 +1868,8 @@ struct OnboardingWidgetEmptyState: View {
                     Text(title).font(.headline)
                     Text(WidgetData.emptyHintText(for: data)).font(.subheadline).foregroundStyle(.secondary)
                 }
-                Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
         }
     }

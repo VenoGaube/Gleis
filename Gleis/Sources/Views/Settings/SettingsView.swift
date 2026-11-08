@@ -6,6 +6,7 @@ import UserNotifications
 struct SettingsView: View {
     @EnvironmentObject private var settingsManager: SettingsManager
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var repeatScheduleToRemove: (day: Weekday, direction: CommuteDirection)?
     @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
     let scrollToTopTrigger: Int
@@ -89,12 +90,13 @@ struct SettingsView: View {
             Button {
                 handleNotificationToggle()
             } label: {
-                HStack {
-                    SettingsRow(icon: "bell.fill", title: "Notification Permission", color: .orange)
-                    Spacer()
-                    Text(isNotificationEnabled ? "Allowed" : "Denied").font(.caption).foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                settingsValueRow(icon: "bell.fill", title: "Notification Permission", color: .orange) {
+                    HStack(spacing: 4) {
+                        Text(isNotificationEnabled ? "Allowed" : "Denied").font(.caption).foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
                 }
+                .contentShape(Rectangle())
             }.buttonStyle(.plain)
             Toggle(isOn: Binding(
                 get: { settingsManager.trainCommuteConfig.notificationSettings.soundEnabled },
@@ -113,15 +115,12 @@ struct SettingsView: View {
                 ReminderMessageEditor()
                     .environmentObject(settingsManager)
             } label: {
-                HStack {
+                // The message sits under the title so it can wrap in full instead of being cut to one line.
+                VStack(alignment: .leading, spacing: 4) {
                     SettingsRow(icon: "text.bubble.fill", title: "Reminder Message", color: .teal)
-                    Spacer()
                     Text(settingsManager.trainCommuteConfig.notificationSettings.customMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 140, alignment: .trailing)
                 }
             }
         } header: {
@@ -152,17 +151,15 @@ struct SettingsView: View {
 
     private var aboutSection: some View {
         Section {
-            HStack {
-                SettingsRow(icon: "info.circle", title: "Version", color: .gray)
-                Spacer()
+            settingsValueRow(icon: "info.circle", title: "Version", color: .gray) {
                 Text("1.0.0").foregroundStyle(.secondary)
             }
             Link(destination: URL(string: "https://shop.oebbtickets.at/")!) {
-                HStack {
-                    SettingsRow(icon: "globe", title: "Data Provider", color: .cyan)
-                    Spacer()
-                    Text("OEBB").foregroundStyle(.secondary)
-                    Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
+                settingsValueRow(icon: "globe", title: "Data Provider", color: .cyan) {
+                    HStack(spacing: 4) {
+                        Text("OEBB").foregroundStyle(.secondary)
+                        Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
+                    }
                 }
             }.tint(.primary)
         } header: {
@@ -193,13 +190,22 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private func widgetDebugRow(title: String, value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(title).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).multilineTextAlignment(.trailing)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).foregroundStyle(.secondary)
+                Text(value)
+            }
+            .font(.caption)
+        } else {
+            HStack(alignment: .top) {
+                Text(title).foregroundStyle(.secondary)
+                Spacer()
+                Text(value).multilineTextAlignment(.trailing)
+            }
+            .font(.caption)
         }
-        .font(.caption)
     }
 
     private static let debugDateFormatter: DateFormatter = {
@@ -222,44 +228,43 @@ struct SettingsView: View {
                 if !repeatSchedules.isEmpty {
                     Text("Repeat").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(Array(repeatSchedules.enumerated()), id: \.offset) { _, item in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    Text(item.schedule.lineNumber).font(.subheadline.weight(.semibold))
-                                    Text(item.schedule.departureTimeString).font(.caption).foregroundStyle(.secondary)
-                                }
-                                HStack(spacing: 4) {
-                                    Image(systemName: "repeat").font(.caption2)
-                                    Text(
-                                        "\(item.day.shortName) • \(item.direction == .toWork ? "From→To" : "To→From")"
-                                    ).font(
-                                        .caption)
-                                }.foregroundStyle(.orange)
+                        let stations = stationNames(for: item.direction)
+                        reminderRow(
+                            spokenSummary: "\(item.day.fullName), \(item.schedule.lineNumber) at \(item.schedule.departureTimeString), \(stations.from) to \(stations.to)",
+                            removeAccessibilityLabel: "Remove repeat journey for \(item.day.fullName)",
+                            onRemove: { repeatScheduleToRemove = (item.day, item.direction) }
+                        ) {
+                            HStack(spacing: 6) {
+                                Text(item.schedule.lineNumber).font(.subheadline.weight(.semibold))
+                                Text(item.schedule.departureTimeString).font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Button(role: .destructive) {
-                                repeatScheduleToRemove = (item.day, item.direction)
-                            } label: {
-                                Image(systemName: "bell.slash.fill").foregroundStyle(.red)
-                            }.buttonStyle(.plain)
-                        }.padding(.vertical, 4)
+                            Label {
+                                Text("\(item.day.shortName) · \(stations.from) → \(stations.to)")
+                            } icon: {
+                                Image(systemName: "repeat")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        }
                     }
                 }
                 if !upcoming.isEmpty {
                     Text("One-time").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(upcoming) { reminder in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                        let weekday = Weekday(rawValue: Calendar.current.component(.weekday, from: reminder.departureTime))
+                        let departure = reminder.departureTime.formatted(date: .omitted, time: .shortened)
+                        reminderRow(
+                            spokenSummary: "\(weekday?.fullName ?? ""), \(reminder.lineNumber) at \(departure) to \(reminder.destination)",
+                            removeAccessibilityLabel: "Remove reminder for \(reminder.lineNumber) at \(departure)",
+                            onRemove: { cancelReminder(reminder) }
+                        ) {
+                            HStack(spacing: 6) {
                                 Text(reminder.lineNumber).font(.subheadline.weight(.semibold))
-                                Text(reminder.destination).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(departure).font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Button(role: .destructive) {
-                                cancelReminder(reminder)
-                            } label: {
-                                Image(systemName: "bell.slash.fill").foregroundStyle(.red)
-                            }.buttonStyle(.plain)
-                        }.padding(.vertical, 4)
+                            Text("\(weekday?.shortName ?? "") · to \(reminder.destination)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -277,6 +282,68 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will permanently remove this scheduled train from your repeat journeys.")
+        }
+    }
+
+    /// Station names for a saved direction, with the generic labels when a station is not picked yet.
+    private func stationNames(for direction: CommuteDirection) -> (from: String, to: String) {
+        let route = settingsManager.savedCommuteRoute
+        let fallbackFrom = direction == .toWork ? "From" : "To"
+        let fallbackTo = direction == .toWork ? "To" : "From"
+        return (route.fromStation(for: direction)?.name ?? fallbackFrom, route.toStation(for: direction)?.name ?? fallbackTo)
+    }
+
+    /// One reminder row, with the remove button moved under the text at accessibility sizes so the text keeps the full width.
+    @ViewBuilder
+    private func reminderRow<Details: View>(
+        spokenSummary: String,
+        removeAccessibilityLabel: String,
+        onRemove: @escaping () -> Void,
+        @ViewBuilder details: () -> Details
+    ) -> some View {
+        let detailsColumn = VStack(alignment: .leading, spacing: 4, content: details)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenSummary)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                detailsColumn
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove", systemImage: "bell.slash.fill").foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(removeAccessibilityLabel)
+            }
+            .padding(.vertical, 4)
+        } else {
+            HStack {
+                detailsColumn
+                Spacer(minLength: 8)
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "bell.slash.fill").foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(removeAccessibilityLabel)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// A settings row with a trailing value, stacked under the title at accessibility sizes.
+    @ViewBuilder
+    private func settingsValueRow<Value: View>(
+        icon: String, title: String, color: Color, @ViewBuilder value: () -> Value
+    ) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                SettingsRow(icon: icon, title: title, color: color)
+                value()
+            }
+        } else {
+            HStack {
+                SettingsRow(icon: icon, title: title, color: color)
+                Spacer(minLength: 8)
+                value()
+            }
         }
     }
 
@@ -321,7 +388,7 @@ struct ReminderMessageEditor: View {
         Form {
             Section {
                 TextField("Time to catch your train!", text: $draft, axis: .vertical)
-                    .lineLimit(1 ... 3)
+                    .lineLimit(1...)
                     .onChange(of: draft) { _, newValue in
                         if newValue.count > Self.maximumLength {
                             draft = String(newValue.prefix(Self.maximumLength))
@@ -361,12 +428,19 @@ struct SettingsRow: View {
     let icon: String
     let title: String
     let color: Color
+    @ScaledMetric(relativeTo: .body) private var iconTileSize: CGFloat = 28
+
+    init(icon: String, title: String, color: Color) {
+        self.icon = icon
+        self.title = title
+        self.color = color
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).font(.body).foregroundStyle(.white).frame(width: 28, height: 28).background(
-                color, in: RoundedRectangle(cornerRadius: 6)
-            )
+            Image(systemName: icon).font(.body).foregroundStyle(.white).frame(width: iconTileSize, height: iconTileSize)
+                .background(color, in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityHidden(true)
             Text(title)
         }
     }

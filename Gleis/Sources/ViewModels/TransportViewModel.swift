@@ -1,5 +1,7 @@
 import Combine
 import Foundation
+import OSLog
+import UIKit
 import WidgetKit
 
 struct ConnectionRecoveryState: Identifiable {
@@ -18,6 +20,9 @@ struct ConnectionRecoveryState: Identifiable {
 
 @MainActor
 final class TransportViewModel: ObservableObject {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "TransportViewModel"
+    )
     private static let widgetRetryTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -52,9 +57,18 @@ final class TransportViewModel: ObservableObject {
     @Published var isServiceDegraded = false
     @Published var serviceRetryAt: Date?
     @Published var lastUpdated: Date?
+    /// The last refresh failure while a list stayed on screen; an empty list shows its error inline instead.
+    @Published private(set) var lastRefreshError: GleisError?
     @Published var isLoadingMore = false
     @Published var availableTrainTypes: [TrainType] = []
     @Published var connectionRecovery: ConnectionRecoveryState?
+
+    @Published private(set) var departureAnchor: Date?
+    @Published private(set) var anchoredConnections: LoadingState<[DisplayConnection]> = .idle {
+        didSet { schedulePhaseUpdate() }
+    }
+    @Published private(set) var isLoadingMoreAnchored = false
+    @Published private(set) var anchoredReachedEnd = false
 
     let toastManager = ToastManager()
 
@@ -69,7 +83,6 @@ final class TransportViewModel: ObservableObject {
     private var lastPhaseUpdateAt = Date()
     private var isAutoRefreshRunning = false
     private var inFlightRefresh: InFlightRefresh?
-    private var inFlightRefreshShowsFeedback = false
     private var inFlightRefreshIsUserInitiated = false
     private var lastFetchedRouteKey: String?
     private var lastInitializedFilterRouteKey: String?
@@ -81,6 +94,14 @@ final class TransportViewModel: ObservableObject {
     private var paginationSeedDateTime: Date?
     private var forwardPaginationCursor: String?
     private var dismissedRecoverySignatures = Set<String>()
+    private var anchoredTrainConnections: [TrainConnection] = []
+    private var anchoredRouteKey: String?
+    private var anchoredSeedDateTime: Date?
+    private var anchoredForwardCursor: String?
+    private var anchoredJumpTask: Task<Void, Never>?
+    /// Bumped by every jump and return to now, so a late page from an older search is dropped.
+    private var anchoredRequestGeneration = 0
+    private var enteredBackgroundAt: Date?
     private var reminderResyncSignatures = Set<String>()
     private let minimumLiveRefreshInterval: TimeInterval = 45
     private static let nearDepartureRefreshInterval: TimeInterval = 60
@@ -99,6 +120,13 @@ final class TransportViewModel: ObservableObject {
     private let widgetTopUpMinimumInterval: TimeInterval = 10 * 60
     /// Wall-clock ceiling for one background coverage top-up run.
     private static let widgetTopUpBudget: TimeInterval = 60
+    /// A jumped search starts this far before the chosen time, like the day train picker.
+    private static let anchoredSearchLeadTime: TimeInterval = 10 * 60
+    private static let anchoredInitialConnectionTarget = 12
+    /// An anchor this far in the past no longer answers anything, so the list goes back to now.
+    private static let anchorExpiryInterval: TimeInterval = 60 * 60
+    /// A background stay longer than this drops a jumped search on return.
+    private static let backgroundResetInterval: TimeInterval = 30 * 60
 
     var config: RouteConfiguration { settingsManager.trainCommuteConfig }
 
@@ -129,6 +157,29 @@ final class TransportViewModel: ObservableObject {
             await reconcileCommuteNotificationsIfNeeded(force: true)
         }
         observeConfigChanges()
+        observeAppLifecycle()
+    }
+
+    private func observeAppLifecycle() {
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.enteredBackgroundAt = Date() }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.returnToNowAfterLongBackground() }
+            .store(in: &cancellables)
+    }
+
+    private func returnToNowAfterLongBackground() {
+        let now = Date()
+        defer { enteredBackgroundAt = nil }
+        if let enteredBackgroundAt, now.timeIntervalSince(enteredBackgroundAt) > Self.backgroundResetInterval {
+            returnToNow()
+            return
+        }
+        returnToNowIfAnchorExpired(now: now)
     }
 
     private func observeConfigChanges() {
@@ -145,6 +196,7 @@ final class TransportViewModel: ObservableObject {
                 resetWidgetSyncStateForRouteChange()
                 updateWidget(with: [])
                 Task { await self.refreshConnections(isUserInitiated: false) }
+                if departureAnchor != nil { Task { await self.rerunJump() } }
             }
             .store(in: &cancellables)
 
@@ -197,7 +249,10 @@ final class TransportViewModel: ObservableObject {
         do {
             stations = try await transportService.fetchStations()
         } catch {
-            if !(error is CancellationError) { handleError(error) }
+            // Station search works without the browse pool, so a failed load is logged and not shown.
+            if !(error is CancellationError) {
+                Self.logger.error("Station pool load failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -207,12 +262,11 @@ final class TransportViewModel: ObservableObject {
 
     /// Runs one refresh per route at a time: a trigger for the same route awaits the one in flight,
     /// and a trigger for another route cancels it and waits for it to unwind before starting.
-    func refreshConnections(showFeedback: Bool = false, isUserInitiated: Bool = false) async {
+    func refreshConnections(isUserInitiated: Bool = false) async {
         await reconcileCommuteNotificationsIfNeeded()
 
         while let inFlight = inFlightRefresh {
             if inFlight.routeKey == configuredRouteKey, !inFlight.task.isCancelled {
-                if showFeedback { inFlightRefreshShowsFeedback = true }
                 if isUserInitiated { inFlightRefreshIsUserInitiated = true }
                 await inFlight.task.value
                 return
@@ -221,7 +275,6 @@ final class TransportViewModel: ObservableObject {
             await inFlight.task.value
         }
 
-        inFlightRefreshShowsFeedback = showFeedback
         inFlightRefreshIsUserInitiated = isUserInitiated
         let task = Task { @MainActor [weak self] in
             await self?.performRefresh()
@@ -229,6 +282,11 @@ final class TransportViewModel: ObservableObject {
         }
         inFlightRefresh = InFlightRefresh(routeKey: configuredRouteKey, task: task)
         await task.value
+    }
+
+    @available(*, deprecated, message: "Pull-to-refresh no longer shows a toast; call refreshConnections(isUserInitiated:)")
+    func refreshConnections(showFeedback _: Bool, isUserInitiated: Bool = false) async {
+        await refreshConnections(isUserInitiated: isUserInitiated)
     }
 
     /// Reads the in-flight flags at each decision, so a user trigger that joins mid-run still gets user semantics.
@@ -240,6 +298,7 @@ final class TransportViewModel: ObservableObject {
         guard let start = currentConfig.startStation, let end = currentConfig.endStation, start.id != end.id else {
             connections = .idle
             isShowingCachedData = false
+            lastRefreshError = nil
             clearServiceDegradedState()
             resetPaginationState()
             availableTrainTypes = []
@@ -260,6 +319,7 @@ final class TransportViewModel: ObservableObject {
         }
         if isRouteChange {
             serviceAlertStabilizer.reset()
+            lastRefreshError = nil
             clearServiceDegradedState()
             resetPaginationState()
             resetWidgetSyncStateForRouteChange()
@@ -389,7 +449,8 @@ final class TransportViewModel: ObservableObject {
             let futureResult = result.filter { $0.departureTime > now }
 
             let merged: [TrainConnection]
-            if let existing = existingConnections, !isRouteChange, !inFlightRefreshIsUserInitiated {
+            // Read the list as it is now, so trains a load-more appended during this fetch survive the merge.
+            if let existing = connections.value ?? existingConnections, !isRouteChange, !inFlightRefreshIsUserInitiated {
                 let stillValid = existing.filter { $0.departureTime > now }
                 let newIds = Set(futureResult.map(\.id))
                 let kept = stillValid.filter { !newIds.contains($0.id) }
@@ -406,7 +467,7 @@ final class TransportViewModel: ObservableObject {
             evaluateReminderReliability(with: merged)
             lastUpdated = Date()
             isShowingCachedData = false
-            if inFlightRefreshShowsFeedback { toastManager.show("Updated", type: .success) }
+            lastRefreshError = nil
             updateWidgetIfNeeded(with: merged)
             consecutiveAutomaticFetchFailures = 0
             automaticRefreshBackoffUntil = nil
@@ -418,10 +479,9 @@ final class TransportViewModel: ObservableObject {
             if Task.isCancelled { return }
             guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
             scheduleAutomaticRefreshBackoffIfNeeded(for: error, isUserInitiated: inFlightRefreshIsUserInitiated)
+            let mappedError = GleisError.from(error)
             if let existing = existingConnections, !existing.isEmpty {
-                if !(error is CancellationError) {
-                    toastManager.show("Update failed, showing previous data", type: .info)
-                }
+                if !(error is CancellationError) { lastRefreshError = mappedError }
                 isShowingCachedData = true
                 updateWidgetIfNeeded(with: existing)
                 return
@@ -429,8 +489,7 @@ final class TransportViewModel: ObservableObject {
             if let cached = await connectionCache.load(from: start, to: end) {
                 let futureConnections = cached.filter { $0.departureTime > Date() }
                 guard !futureConnections.isEmpty else {
-                    connections = .error(.noConnectionsAvailable)
-                    handleError(error)
+                    connections = .error(mappedError)
                     return
                 }
                 lastFetchedRouteKey = routeKey
@@ -438,12 +497,12 @@ final class TransportViewModel: ObservableObject {
                 setConnections(futureConnections)
                 evaluateReminderReliability(with: futureConnections)
                 isShowingCachedData = true
+                lastRefreshError = mappedError
                 lastUpdated = await connectionCache.lastUpdateTime(from: start, to: end)
                 updateWidgetIfNeeded(with: futureConnections)
             } else {
-                connections = .error(GleisError.from(error))
+                connections = .error(mappedError)
                 connectionRecovery = nil
-                handleError(error)
             }
         }
     }
@@ -502,9 +561,7 @@ final class TransportViewModel: ObservableObject {
                     if granted {
                         await scheduleNotification(for: connection, replacingReminderId: replacingReminderId)
                     } else {
-                        toastManager.show("Notifications permission required", type: .error)
-                        errorMessage = "Enable notifications in Settings to receive reminders"
-                        showError = true
+                        handleError(GleisError.notificationPermissionDenied)
                     }
                 } catch { handleError(error) }
             } else {
@@ -603,10 +660,13 @@ final class TransportViewModel: ObservableObject {
         settingsManager.addRecentStation(station)
     }
 
+    /// Runs beside any refresh, and drops its batch if a refresh replaced the train it paged on from.
     func loadMoreConnections() async {
         guard case let .loaded(current) = connections, let last = current.last else { return }
-        guard !isLoadingMore, inFlightRefresh == nil else { return }
-        guard let start = config.startStation, let end = config.endStation else { return }
+        guard !isLoadingMore else { return }
+        guard let start = config.startStation, let end = config.endStation,
+              lastFetchedRouteKey == "\(start.id)-\(end.id)"
+        else { return }
 
         isLoadingMore = true
         defer { isLoadingMore = false }
@@ -626,7 +686,8 @@ final class TransportViewModel: ObservableObject {
             var nextCursor: String? =
                 paginationRouteKey == routeKey
                     ? forwardPaginationCursor : nil
-            let seedDateTime = paginationSeedDateTime ?? Date()
+            let seedAtStart = paginationSeedDateTime
+            let seedDateTime = seedAtStart ?? Date()
             var canUseCursorPagination = nextCursor != nil
 
             if canUseCursorPagination {
@@ -694,12 +755,182 @@ final class TransportViewModel: ObservableObject {
                 }
             }
 
-            if paginationRouteKey == routeKey {
+            // A refresh that landed meanwhile started a new search, and its cursor wins.
+            if paginationRouteKey == routeKey, paginationSeedDateTime == seedAtStart {
                 forwardPaginationCursor = nextCursor
             }
-            guard !appendedConnections.isEmpty else { return }
-            setConnections(current + appendedConnections)
+            // A user refresh replaces the list, so a batch paged from the old tail would leave a gap.
+            guard connections.value?.contains(where: { $0.id == last.id }) == true else { return }
+            appendConnectionsToLoadedList(appendedConnections, routeKey: routeKey, referenceDate: Date())
         } catch { if !(error is CancellationError) { toastManager.show("Failed to load more", type: .error) } }
+    }
+
+    // MARK: - Jumped Departure Time
+
+    /// The first live train there is still time to leave for, for the banner above a jumped list.
+    var nextLiveConnection: DisplayConnection? {
+        let now = Date()
+        return displayConnections
+            .filter { $0.leaveTime > now }
+            .min { $0.connection.departureTime < $1.connection.departureTime }
+    }
+
+    /// Searches from `anchor` into a list of its own; the live list, widget and reminder checks stay on now.
+    func jump(to anchor: Date) async {
+        guard let start = config.startStation, let end = config.endStation, start.id != end.id else {
+            returnToNow()
+            return
+        }
+        clearAnchoredResults(showing: .loading)
+        departureAnchor = anchor
+        anchoredRouteKey = "\(start.id)-\(end.id)"
+        let generation = anchoredRequestGeneration
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            await self?.fetchAnchoredConnections(from: start, to: end, anchor: anchor, generation: generation)
+        }
+        anchoredJumpTask = task
+        await task.value
+    }
+
+    func returnToNow() {
+        departureAnchor = nil
+        clearAnchoredResults(showing: .idle)
+    }
+
+    /// Repeats the jump at the same time, or refreshes the live list if the anchor has expired.
+    func rerunJump() async {
+        returnToNowIfAnchorExpired(now: Date())
+        guard let anchor = departureAnchor else {
+            await refreshConnections(isUserInitiated: true)
+            return
+        }
+        await jump(to: anchor)
+    }
+
+    func loadMoreAnchored() async {
+        guard departureAnchor != nil, anchoredConnections.isLoaded, !isLoadingMoreAnchored, !anchoredReachedEnd,
+              let start = config.startStation, let end = config.endStation,
+              let seedDateTime = anchoredSeedDateTime
+        else { return }
+        let generation = anchoredRequestGeneration
+        guard isCurrentAnchoredRequest(generation) else { return }
+        isLoadingMoreAnchored = true
+        defer { if generation == anchoredRequestGeneration { isLoadingMoreAnchored = false } }
+
+        do {
+            guard let run = try await fetchNextAnchoredPages(
+                from: start, to: end, seedDateTime: seedDateTime, generation: generation
+            ) else { return }
+            anchoredForwardCursor = run.forwardCursor
+            if run.forwardCursor == nil { anchoredReachedEnd = true }
+            appendAnchoredPage(run.additions, generation: generation)
+        } catch {
+            guard isCurrentAnchoredRequest(generation), !(error is CancellationError) else { return }
+            toastManager.show("Failed to load more", type: .error)
+        }
+    }
+
+    private struct AnchoredPageRun {
+        let additions: [TrainConnection]
+        let forwardCursor: String?
+    }
+
+    /// Pages forward until a new train arrives or the provider runs out; nil when a newer jump superseded it.
+    private func fetchNextAnchoredPages(
+        from start: Station,
+        to end: Station,
+        seedDateTime: Date,
+        generation: Int
+    ) async throws -> AnchoredPageRun? {
+        var cursor = anchoredForwardCursor
+        var seenIds = Set(anchoredTrainConnections.map(\.id))
+        var additions: [TrainConnection] = []
+        for _ in 0 ..< FetchLimits.maxCoveragePages {
+            let page = try await transportService.fetchConnectionsPage(
+                from: start,
+                to: end,
+                seedDateTime: seedDateTime,
+                pageSize: FetchLimits.connectionBatchSize,
+                cursor: cursor
+            )
+            guard isCurrentAnchoredRequest(generation) else { return nil }
+            additions += page.connections.filter { seenIds.insert($0.id).inserted }
+            guard let nextCursor = page.forwardCursor, nextCursor != cursor else {
+                return AnchoredPageRun(additions: additions, forwardCursor: nil)
+            }
+            cursor = nextCursor
+            if !additions.isEmpty { break }
+        }
+        return AnchoredPageRun(additions: additions, forwardCursor: cursor)
+    }
+
+    private func fetchAnchoredConnections(from start: Station, to end: Station, anchor: Date, generation: Int) async {
+        let seedDateTime = anchor.addingTimeInterval(-Self.anchoredSearchLeadTime)
+        do {
+            let result = try await transportService.fetchConnectionsCovering(
+                from: start,
+                to: end,
+                seedDateTime: seedDateTime,
+                coverage: ConnectionCoverage(minimumCount: Self.anchoredInitialConnectionTarget, notBefore: seedDateTime),
+                onPage: { [weak self] page in
+                    await self?.appendAnchoredPage(page, generation: generation)
+                }
+            )
+            guard isCurrentAnchoredRequest(generation) else { return }
+            anchoredSeedDateTime = result.seedDateTime
+            anchoredForwardCursor = result.forwardCursor
+            if result.forwardCursor == nil { anchoredReachedEnd = true }
+            appendAnchoredPage(result.connections, generation: generation)
+        } catch {
+            guard isCurrentAnchoredRequest(generation), !(error is CancellationError) else { return }
+            Self.logger.error(
+                "Jumped search from \(seedDateTime.formatted(.iso8601), privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
+            )
+            guard let lastShown = anchoredTrainConnections.last else {
+                anchoredConnections = .error(GleisError.from(error))
+                return
+            }
+            // Keep the pages that arrived; load-more then starts a fresh search after the last one.
+            anchoredSeedDateTime = lastShown.departureTime.addingTimeInterval(1)
+            anchoredForwardCursor = nil
+        }
+    }
+
+    private func appendAnchoredPage(_ page: [TrainConnection], generation: Int) {
+        guard isCurrentAnchoredRequest(generation) else { return }
+        let now = Date()
+        let knownIds = Set(anchoredTrainConnections.map(\.id))
+        let additions = page.filter { $0.departureTime > now && !knownIds.contains($0.id) }
+        anchoredTrainConnections = (anchoredTrainConnections + additions).sorted { $0.departureTime < $1.departureTime }
+        if anchoredTrainConnections.count >= config.displayMaxConnections { anchoredReachedEnd = true }
+        anchoredConnections = .loaded(makeDisplayConnections(from: anchoredTrainConnections, at: now))
+    }
+
+    private func rebuildAnchoredDisplayConnections() {
+        guard anchoredConnections.isLoaded else { return }
+        anchoredConnections = .loaded(makeDisplayConnections(from: anchoredTrainConnections, at: Date()))
+    }
+
+    private func isCurrentAnchoredRequest(_ generation: Int) -> Bool {
+        generation == anchoredRequestGeneration && anchoredRouteKey == configuredRouteKey
+    }
+
+    private func clearAnchoredResults(showing state: LoadingState<[DisplayConnection]>) {
+        anchoredJumpTask?.cancel()
+        anchoredJumpTask = nil
+        anchoredRequestGeneration += 1
+        anchoredTrainConnections = []
+        anchoredRouteKey = nil
+        anchoredSeedDateTime = nil
+        anchoredForwardCursor = nil
+        isLoadingMoreAnchored = false
+        anchoredReachedEnd = false
+        anchoredConnections = state
+    }
+
+    private func returnToNowIfAnchorExpired(now: Date) {
+        guard let anchor = departureAnchor, now.timeIntervalSince(anchor) > Self.anchorExpiryInterval else { return }
+        returnToNow()
     }
 
     func startAutoRefresh() {
@@ -729,6 +960,7 @@ final class TransportViewModel: ObservableObject {
 
     private func runAutoRefresh() async {
         settingsManager.checkAndClearExpiredPin()
+        returnToNowIfAnchorExpired(now: Date())
         await refreshConnections()
         guard isAutoRefreshRunning else { return }
         scheduleNextAutoRefresh()
@@ -750,7 +982,12 @@ final class TransportViewModel: ObservableObject {
         availableTrainTypes = []
         resetPaginationState()
         isShowingCachedData = false
+        lastRefreshError = nil
         connectionRecovery = nil
+        if departureAnchor != nil {
+            // The config observer re-runs the jump for the new route once the change settles.
+            if hasValidRoute { clearAnchoredResults(showing: .loading) } else { returnToNow() }
+        }
         if !hasValidRoute {
             clearServiceDegradedState()
             resetWidgetSyncStateForRouteChange()
@@ -763,6 +1000,7 @@ final class TransportViewModel: ObservableObject {
         phaseUpdateTimer?.invalidate()
         inFlightRefresh?.task.cancel()
         widgetCoverageTopUpTask?.cancel()
+        anchoredJumpTask?.cancel()
     }
 
     // MARK: - Display Connection Management
@@ -773,7 +1011,8 @@ final class TransportViewModel: ObservableObject {
         phaseUpdateTimer = nil
         guard isAutoRefreshRunning else { return }
         let now = Date()
-        guard let nextBoundary = displayConnections.compactMap({ $0.nextPhaseBoundary(after: now) }).min() else { return }
+        let rows = displayConnections + (anchoredConnections.value ?? [])
+        guard let nextBoundary = rows.compactMap({ $0.nextPhaseBoundary(after: now) }).min() else { return }
         let timer = Timer(fire: nextBoundary, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in self?.updateDisplayConnectionPhases() }
         }
@@ -790,14 +1029,25 @@ final class TransportViewModel: ObservableObject {
             if updated[i].updatePhase(at: now) { didChangePhase = true }
         }
         lastPhaseUpdateAt = now
+
+        // Haptics come from the live list alone, so a train shown in both lists buzzes once.
+        var didChangeAnchoredPhase = false
+        if case var .loaded(anchoredRows) = anchoredConnections {
+            for i in anchoredRows.indices {
+                if anchoredRows[i].updatePhase(at: now) { didChangeAnchoredPhase = true }
+            }
+            if didChangeAnchoredPhase { anchoredConnections = .loaded(anchoredRows) }
+        }
+
         if didChangePhase {
             displayConnections = updated
-        } else {
+        } else if !didChangeAnchoredPhase {
             schedulePhaseUpdate()
         }
     }
 
     private func rebuildDisplayConnections() {
+        rebuildAnchoredDisplayConnections()
         guard let connections = connections.value else {
             displayConnections = []
             availableTrainTypes = []
@@ -820,22 +1070,23 @@ final class TransportViewModel: ObservableObject {
             pruneFiltersForRouteIfNeeded(for: "\(start.id)-\(end.id)", available: availableTrainTypes)
         }
 
+        let currentTime = Date()
+        lastPhaseUpdateAt = currentTime
+        displayConnections = makeDisplayConnections(from: connections, at: currentTime)
+    }
+
+    /// Applies the train-type filter and reminder and pin state shared by the live and jumped lists.
+    private func makeDisplayConnections(from connections: [TrainConnection], at currentTime: Date) -> [DisplayConnection] {
         let excluded = config.excludedTrainTypes
         let filtered = excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
         let route = settingsManager.savedCommuteRoute
-
-        let currentTime = Date()
-        lastPhaseUpdateAt = currentTime
-        displayConnections = filtered.compactMap { connection in
-            let leaveTime = calculateLeaveTime(for: connection)
+        return filtered.map { connection in
             let isSelected =
                 settingsManager.isReminderSet(for: connection.id)
                 || route.hasActiveReminder(for: connection)
-            let isPinned = settingsManager.isPinned(connection.id)
-
             return DisplayConnection(
-                connection: connection, leaveTime: leaveTime, isSelected: isSelected, isPinned: isPinned,
-                currentTime: currentTime
+                connection: connection, leaveTime: calculateLeaveTime(for: connection), isSelected: isSelected,
+                isPinned: settingsManager.isPinned(connection.id), currentTime: currentTime
             )
         }
     }
@@ -1184,22 +1435,22 @@ final class TransportViewModel: ObservableObject {
         // The pages this top-up just paid for are exactly what the list is short of:
         // a gate response caps at six or seven trips, so the first fetch alone leaves
         // the list showing minutes of timetable on a dense route. Publish them.
-        publishTopUpConnectionsToList(mergedConnections, routeKey: routeKey, referenceDate: referenceDate)
+        appendConnectionsToLoadedList(mergedConnections, routeKey: routeKey, referenceDate: referenceDate)
     }
 
-    /// Merges top-up pages into the rendered list, keeping what is already shown.
-    private func publishTopUpConnectionsToList(
-        _ topUpConnections: [TrainConnection],
+    /// Merges fetched pages into the rendered live list, keeping what is already shown.
+    private func appendConnectionsToLoadedList(
+        _ fetchedConnections: [TrainConnection],
         routeKey: String,
         referenceDate: Date
     ) {
         guard let start = config.startStation, let end = config.endStation,
-              "\(start.id)-\(end.id)" == routeKey,
+              "\(start.id)-\(end.id)" == routeKey, lastFetchedRouteKey == routeKey,
               case let .loaded(current) = connections
         else { return }
 
         let currentIds = Set(current.map(\.id))
-        let additions = topUpConnections.filter {
+        let additions = fetchedConnections.filter {
             !currentIds.contains($0.id) && $0.departureTime > referenceDate
         }
         guard !additions.isEmpty else { return }
@@ -1240,6 +1491,7 @@ final class TransportViewModel: ObservableObject {
         }
 
         let liveConnectionsById = Dictionary(uniqueKeysWithValues: liveConnections.map { ($0.id, $0) })
+        let lastLoadedDeparture = liveConnections.map(config.effectiveDepartureTime(for:)).max()
 
         for reminder in relevantReminders {
             if let liveConnection = liveConnectionsById[reminder.id] {
@@ -1263,6 +1515,8 @@ final class TransportViewModel: ObservableObject {
             }
 
             guard reminder.departureTime > now else { continue }
+            // Past the end of the loaded list a train is unloaded, not missing.
+            guard let lastLoadedDeparture, reminder.departureTime <= lastLoadedDeparture else { continue }
             let replacement = bestReplacementConnection(for: reminder, in: liveConnections, now: now)
             let signature = recoverySignature(reminder: reminder, suggestedConnectionId: replacement?.id)
             if dismissedRecoverySignatures.contains(signature) { continue }
@@ -1473,12 +1727,12 @@ final class TransportViewModel: ObservableObject {
         missingRouteDetails(connection) || connection.serviceAlerts == nil
     }
 
+    /// Shows the alert for a failed user action; refresh failures go to `connections` or `lastRefreshError` instead.
     private func handleError(_ error: Error) {
         let mapped = GleisError.from(error)
         errorTitle = mapped.userFacingTitle
         errorMessage = mapped.userFacingMessage
         showError = true
-        toastManager.show(mapped.userFacingTitle, type: .error)
     }
 
     /// Awaits a launch-prewarmed page under the same budget as a normal fetch.

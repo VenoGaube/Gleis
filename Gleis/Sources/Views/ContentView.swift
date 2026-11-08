@@ -7,6 +7,7 @@ struct ContentView: View {
     @StateObject private var commuteViewModel = CommuteScheduleViewModel()
     @State private var showOnboarding = false
     @State private var didPrewarmRepeatTab = false
+    @State private var didApplyLaunchTab = false
     @State private var trainPath = NavigationPath()
     @State private var repeatPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
@@ -73,7 +74,13 @@ struct ContentView: View {
             didPrewarmRepeatTab = true
             commuteViewModel.onAppear()
             await commuteViewModel.loadStationsIfNeeded()
-        }.onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }
+        }.onAppear {
+            if !didApplyLaunchTab, let launchTab = DebugLaunchOptions.initialTab {
+                didApplyLaunchTab = true
+                selectedTab = launchTab
+            }
+            if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true }
+        }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
                 .environmentObject(settingsManager)
@@ -85,13 +92,15 @@ struct ContentView: View {
         }
     }
 
-    // When a pushed screen is popped, wait for the pop before scrolling.
+    // The scroll waits for the pop transaction to finish so the two animations do not fight.
     private func popToRootThenScrollToTop(_ path: Binding<NavigationPath>, _ trigger: Binding<Int>) {
-        let hadNavigationDepth = !path.wrappedValue.isEmpty
-        path.wrappedValue = NavigationPath()
-        if hadNavigationDepth {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { trigger.wrappedValue += 1 }
-        } else {
+        guard !path.wrappedValue.isEmpty else {
+            trigger.wrappedValue += 1
+            return
+        }
+        withAnimation {
+            path.wrappedValue = NavigationPath()
+        } completion: {
             trigger.wrappedValue += 1
         }
     }

@@ -23,7 +23,7 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
         walkingTimeMinutes = 0
         bufferTimeMinutes = 0
         useDelayInLeaveTime = false
-        maxConnections = 25
+        maxConnections = nil
         notificationSettings = NotificationSettings()
         activeDays = Set(Weekday.allCases)
         recentStations = []
@@ -59,7 +59,11 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
         }
     }
 
-    var displayMaxConnections: Int { maxConnections ?? 25 }
+    /// Enough upcoming trains to scroll a dense route into the evening as compact rows.
+    static let defaultMaxConnections = 150
+
+    // Stored 25s came from the old default, which no screen ever let anyone change.
+    var displayMaxConnections: Int { max(maxConnections ?? 0, Self.defaultMaxConnections) }
     var usesDelayInLeaveTime: Bool { useDelayInLeaveTime ?? false }
 
     func effectiveDepartureTime(for connection: TrainConnection) -> Date {

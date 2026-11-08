@@ -21,9 +21,13 @@ struct CommuteScheduleView: View {
     @State private var weekendPromptShownDirections: Set<CommuteDirection> = []
     private static let maxConcurrentSuggestionLookups = 3
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var dayChipWidth: CGFloat = 32
+    @ScaledMetric(relativeTo: .caption) private var dayChipHeight: CGFloat = 28
     let scrollToTopTrigger: Int
 
     private let listTopAnchorId = "commute-list-top-anchor"
+    private let headerAnchorId = "commute-header-anchor"
 
     private var directionLabel: String {
         viewModel.selectedDirection == .toWork ? "From → To" : "To → From"
@@ -77,83 +81,22 @@ struct CommuteScheduleView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 20) {
-                HStack(alignment: .center) {
-                    Text("Repeat Journeys").font(.largeTitle.bold())
-                    Spacer()
-                    Menu {
-                        Button {
-                            excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
-                            showExcludedDatesSheet = true
-                        } label: {
-                            Label("Holidays / OOO", systemImage: "calendar.badge.minus")
-                        }
-
-                        if !viewModel.excludedDates.isEmpty {
-                            Button(role: .destructive) {
-                                excludedDateSelection = []
-                                viewModel.updateExcludedDates(dates(from: excludedDateSelection))
-                            } label: {
-                                Label("Clear Excluded Dates", systemImage: "trash")
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title2)
-                            if !viewModel.excludedDates.isEmpty {
-                                Text("\(viewModel.excludedDates.count)")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.trailing, 4)
-                    .accessibilityLabel("Commute options")
-                }
-
-                RouteHeader(
-                    startStation: viewModel.currentFromStation,
-                    endStation: viewModel.currentToStation,
-                    travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
-                    bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
-                    onSwap: {
-                        viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
-                    },
-                    onStartTap: { showFromStationPicker = true },
-                    onEndTap: { showToStationPicker = true },
-                    onSetTravelTime: { station in
-                        activeTimingSheet = .travel(station)
-                    },
-                    onSetBufferTime: { station in
-                        activeTimingSheet = .buffer(station)
-                    },
-                    swapIcon: directionIcon,
-                    swapAccessibilityLabel: "Switch direction",
-                    swapAccessibilityValue: directionLabel
-                )
-
-                commuteDaysControls
-
-                if viewModel.hasSchedules {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                        Text("Changing stations archives current schedules")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
-                }
+            if !dynamicTypeSize.isAccessibilitySize {
+                headerContent
             }
-            .padding()
 
             ScrollViewReader { proxy in
                 List {
+                    // At accessibility sizes the header alone can be taller than an SE screen, so it scrolls with the list.
+                    if dynamicTypeSize.isAccessibilitySize {
+                        Section {
+                            headerContent
+                                .listRowInsets(EdgeInsets())
+                                .listRowBackground(Color.clear)
+                                .buttonStyle(.borderless)
+                        }
+                        .id(headerAnchorId)
+                    }
                     scheduleSection
                         .id(listTopAnchorId)
                     Section {
@@ -166,7 +109,8 @@ struct CommuteScheduleView: View {
                         }
                     }
                 }.onChange(of: scrollToTopTrigger) { _, _ in
-                    withAnimation(.easeInOut) { proxy.scrollTo(listTopAnchorId, anchor: .top) }
+                    let topId = dynamicTypeSize.isAccessibilitySize ? headerAnchorId : listTopAnchorId
+                    withAnimation(.easeInOut) { proxy.scrollTo(topId, anchor: .top) }
                 }
             }
         }.background {
@@ -272,6 +216,83 @@ struct CommuteScheduleView: View {
             .toastOverlay(viewModel.toastManager)
     }
 
+    private var headerContent: some View {
+        VStack(spacing: 20) {
+            HStack(alignment: .center) {
+                Text("Repeat Journeys").font(.largeTitle.bold())
+                Spacer()
+                Menu {
+                    Button {
+                        excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
+                        showExcludedDatesSheet = true
+                    } label: {
+                        Label("Holidays / OOO", systemImage: "calendar.badge.minus")
+                    }
+
+                    if !viewModel.excludedDates.isEmpty {
+                        Button(role: .destructive) {
+                            excludedDateSelection = []
+                            viewModel.updateExcludedDates(dates(from: excludedDateSelection))
+                        } label: {
+                            Label("Clear Excluded Dates", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title2)
+                        if !viewModel.excludedDates.isEmpty {
+                            Text("\(viewModel.excludedDates.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.trailing, 4)
+                .accessibilityLabel("Commute options")
+            }
+
+            RouteHeader(
+                startStation: viewModel.currentFromStation,
+                endStation: viewModel.currentToStation,
+                travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
+                bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
+                onSwap: {
+                    viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
+                },
+                onStartTap: { showFromStationPicker = true },
+                onEndTap: { showToStationPicker = true },
+                onSetTravelTime: { station in
+                    activeTimingSheet = .travel(station)
+                },
+                onSetBufferTime: { station in
+                    activeTimingSheet = .buffer(station)
+                },
+                swapIcon: directionIcon,
+                swapAccessibilityLabel: "Switch direction",
+                swapAccessibilityValue: directionLabel
+            )
+
+            commuteDaysControls
+
+            if viewModel.hasSchedules {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                    Text("Changing stations archives current schedules")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+            }
+        }
+        .padding()
+    }
+
     private func stationPicker(title: String, selection: Binding<Station?>) -> some View {
         StationPickerSheet(
             title: title, stations: viewModel.stations, recentStations: viewModel.recentStations,
@@ -285,10 +306,10 @@ struct CommuteScheduleView: View {
 
     private var commuteDaysControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStackFallingBackToVStack(spacing: 8) {
                 Label("Commute Days", systemImage: "calendar")
                     .font(.subheadline.weight(.semibold))
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Menu {
                     Button {
                         applyPreset(.workweek, for: viewModel.selectedDirection)
@@ -318,7 +339,8 @@ struct CommuteScheduleView: View {
                 }
             }
 
-            HStack(spacing: 8) {
+            // An adaptive grid wraps the seven chips onto more rows once the text grows past one row's width.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dayChipWidth), spacing: 8)], alignment: .leading, spacing: 8) {
                 ForEach(Weekday.mondayFirst) { day in
                     let isActive = selectedDirectionActiveDays.contains(day)
                     Button {
@@ -327,7 +349,7 @@ struct CommuteScheduleView: View {
                         Text(day.shortName)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(isActive ? .white : .secondary)
-                            .frame(width: 32, height: 28)
+                            .frame(maxWidth: .infinity, minHeight: dayChipHeight)
                             .background(
                                 Capsule().fill(
                                     isActive
@@ -607,22 +629,22 @@ private struct ExcludedDatesSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Exclude holidays or OOO days so commute suggestions can ignore them.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Exclude holidays or OOO days so commute suggestions can ignore them.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
 
-                MultiDatePicker(
-                    "Excluded dates",
-                    selection: $selection,
-                    in: Date()...
-                )
-                .padding(.horizontal, 12)
-
-                Spacer()
+                    MultiDatePicker(
+                        "Excluded dates",
+                        selection: $selection,
+                        in: Date()...
+                    )
+                    .padding(.horizontal, 12)
+                }
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
             .navigationTitle("Excluded Dates")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -657,8 +679,10 @@ struct DayScheduleRow: View {
     let onUseSuggestion: () -> Void
     let onChooseDifferentSuggestion: () -> Void
     let onDismissSuggestion: () -> Void
-    @State private var animateSuggestionLoading = false
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var dayBadgeSize: CGFloat = 36
+    private let badgeToContentSpacing: CGFloat = 14
 
     init(
         day: Weekday,
@@ -720,8 +744,11 @@ struct DayScheduleRow: View {
     // MARK: - Subviews
 
     private var mainButton: some View {
-        Button(action: onTap) {
-            HStack(spacing: 14) {
+        let badgeAndContentLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: badgeToContentSpacing))
+        return Button(action: onTap) {
+            badgeAndContentLayout {
                 dayBadge
                 scheduleContent
             }
@@ -741,7 +768,7 @@ struct DayScheduleRow: View {
 
         return Text(day.shortName)
             .font(.subheadline.weight(.bold))
-            .frame(width: 36, height: 36)
+            .frame(width: dayBadgeSize, height: dayBadgeSize)
             .foregroundStyle(isActive ? .white : .secondary)
             .background(Circle().fill(bgColor))
             .overlay(Circle().stroke(strokeColor, lineWidth: 2).padding(-2))
@@ -759,7 +786,7 @@ struct DayScheduleRow: View {
             suggestionLoadingView
         } else {
             Text("Not set - Tap to add").font(.subheadline).foregroundStyle(.secondary)
-            Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -771,19 +798,10 @@ struct DayScheduleRow: View {
             Spacer()
         }
         .skeletonShimmer()
-        .scaleEffect(animateSuggestionLoading ? 1.0 : 0.985)
-        .opacity(animateSuggestionLoading ? 1.0 : 0.78)
-        .offset(y: animateSuggestionLoading ? 0 : 1)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
-                animateSuggestionLoading = true
-            }
-        }
-        .onDisappear { animateSuggestionLoading = false }
     }
 
     private var inactiveDayView: some View {
-        HStack(spacing: 8) {
+        HStackFallingBackToVStack(spacing: 8) {
             Text("Inactive day")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -805,39 +823,35 @@ struct DayScheduleRow: View {
             Text("Tap to set manually")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func suggestionPreviewView(_ s: DaySchedule) -> some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                ScheduleLineBadge(schedule: s, horizontalPadding: 8, verticalPadding: 4)
+        HStackFallingBackToVStack(spacing: 8) {
+            ScheduleLineBadge(schedule: s, horizontalPadding: 8, verticalPadding: 4)
 
-                Text(s.departureTimeString)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
+            Text(s.departureTimeString)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
 
-                Text("Suggested")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.repeatSuggestionText)
-            }
-            Spacer()
+            Text("Suggested")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.repeatSuggestionText)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func scheduleDetailsView(_ s: DaySchedule) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                trainLineRow(s)
-                leaveTimeRow
-            }
-            Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            trainLineRow(s)
+            leaveTimeRow
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func trainLineRow(_ s: DaySchedule) -> some View {
-        HStack(spacing: 8) {
+        HStackFallingBackToVStack(spacing: 8) {
             ScheduleLineBadge(schedule: s, horizontalPadding: 8, verticalPadding: 4)
 
             Text(s.departureTimeString)
@@ -856,7 +870,7 @@ struct DayScheduleRow: View {
     }
 
     private var leaveTimeRow: some View {
-        HStack(spacing: 8) {
+        HStackFallingBackToVStack(spacing: 8) {
             if let leave = leaveTime {
                 HStack(spacing: 4) {
                     Image(systemName: "figure.walk").font(.caption2)
@@ -911,46 +925,42 @@ struct DayScheduleRow: View {
     }
 
     private var suggestionActionRow: some View {
-        HStack {
-            HStack(spacing: 18) {
-                suggestionButton(
-                    systemImage: "checkmark.circle.fill", font: .title3.weight(.semibold), style: .green,
-                    accessibilityLabel: "Accept suggested train", action: onUseSuggestion
-                )
-                suggestionButton(
-                    systemImage: "xmark.circle.fill", font: .title3.weight(.semibold), style: .orange,
-                    accessibilityLabel: "Deny suggestion and choose another train",
-                    action: onChooseDifferentSuggestion
-                )
-            }
-
-            Spacer()
-
+        HStackFallingBackToVStack(spacing: 8) {
             suggestionButton(
-                systemImage: "minus.circle.fill", font: .title3, style: .secondary,
-                accessibilityLabel: "Dismiss suggestion", action: onDismissSuggestion
+                title: "Use", systemImage: "checkmark.circle.fill", tint: .green,
+                accessibilityHint: "Saves the suggested train for \(day.fullName)", action: onUseSuggestion
+            )
+            suggestionButton(
+                title: "Pick another", systemImage: "list.bullet", tint: .orange,
+                accessibilityHint: "Opens the train list for \(day.fullName)", action: onChooseDifferentSuggestion
+            )
+            suggestionButton(
+                title: "Skip day", systemImage: "minus.circle.fill", tint: .secondary,
+                accessibilityHint: "Hides this suggestion for \(day.fullName)", action: onDismissSuggestion
             )
         }
-        .padding(.leading, 50)
-        .padding(.top, -6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, dynamicTypeSize.isAccessibilitySize ? 0 : dayBadgeSize + badgeToContentSpacing)
     }
 
-    private func suggestionButton<S: ShapeStyle>(
-        systemImage: String, font: Font, style: S, accessibilityLabel: String, action: @escaping () -> Void
+    private func suggestionButton(
+        title: String, systemImage: String, tint: Color, accessibilityHint: String, action: @escaping () -> Void
     ) -> some View {
         Button {
             Haptics.selection()
             action()
-        }
-        label: {
-            Image(systemName: systemImage)
-                .font(font)
-                .foregroundStyle(style)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
     }
 }
 
@@ -976,28 +986,31 @@ private struct ScheduleLineBadge: View {
 
 struct ScheduleEmptyState: View {
     @Environment(\.colorScheme) var colorScheme
+    @ScaledMetric(relativeTo: .title3) private var haloSize: CGFloat = 100
+    @ScaledMetric(relativeTo: .title3) private var tramIconSize: CGFloat = 40
     @State private var animate = false
 
     var body: some View {
         VStack(spacing: 20) {
             ZStack {
                 Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.1)).frame(
-                    width: 100, height: 100
+                    width: haloSize, height: haloSize
                 ).scaleEffect(animate ? 1.1 : 1.0)
 
-                Image(systemName: "tram.fill").font(.system(size: 40)).foregroundStyle(Color.accentColor).offset(
-                    x: animate ? 2 : -2)
+                Image(systemName: "tram.fill").font(.system(size: tramIconSize)).foregroundStyle(Color.accentColor)
+                    .offset(x: animate ? 2 : -2)
             }
+            .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 Text("Set up your daily commute").font(.title3.weight(.semibold))
 
                 Text("Select both stations above to get started with your repeat journey schedules").font(.subheadline)
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
             }
-        }.frame(maxWidth: .infinity).padding(.vertical, 40).padding(.horizontal, 32).onAppear {
-            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { animate = true }
-        }
+            .multilineTextAlignment(.center)
+        }.frame(maxWidth: .infinity).padding(.vertical, 40).padding(.horizontal, 32)
+            .modifier(RepeatingIdleMotion(isAnimating: $animate, animation: .easeInOut(duration: 2)))
     }
 }
 
@@ -1005,26 +1018,72 @@ struct ScheduleEmptyState: View {
 
 struct ReadyToScheduleHint: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        let iconAndTextLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        iconAndTextLayout {
             Image(systemName: "calendar.badge.plus").font(.title2).foregroundStyle(Color.accentColor).scaleEffect(
                 pulse ? 1.1 : 1.0)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Ready to set your schedule").font(.subheadline.weight(.semibold))
 
                 Text("Tap any day below to select your regular train").font(.caption).foregroundStyle(.secondary)
             }
-
-            Spacer()
-        }.padding(16).background(
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(16).background(
             RoundedRectangle(cornerRadius: 12).fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
         ).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor.opacity(0.2), lineWidth: 1)).padding(
             .horizontal, 16
-        ).padding(.bottom, 8).listRowInsets(EdgeInsets()).listRowBackground(Color.clear).onAppear {
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { pulse = true }
+        ).padding(.bottom, 8).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            .modifier(RepeatingIdleMotion(isAnimating: $pulse, animation: .easeInOut(duration: 1.5)))
+    }
+}
+
+// MARK: - RepeatingIdleMotion
+
+/// Runs an autoreversing idle animation while the view is on screen and holds it still under Reduce Motion.
+private struct RepeatingIdleMotion: ViewModifier {
+    @Binding var isAnimating: Bool
+    let animation: Animation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: start)
+            .onDisappear(perform: stop)
+            .onChange(of: reduceMotion) { _, _ in
+                stop()
+                start()
+            }
+    }
+
+    private func start() {
+        guard !reduceMotion else { return }
+        withAnimation(animation.repeatForever(autoreverses: true)) { isAnimating = true }
+    }
+
+    private func stop() {
+        withTransaction(Transaction(animation: nil)) { isAnimating = false }
+    }
+}
+
+// MARK: - HStackFallingBackToVStack
+
+/// Lays its children out in a row when they fit on one line, otherwise in a column, so no text has to break mid-word.
+struct HStackFallingBackToVStack<Content: View>: View {
+    var alignment: HorizontalAlignment = .leading
+    var spacing: CGFloat = 8
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing, content: content)
+            VStack(alignment: alignment, spacing: spacing, content: content)
         }
     }
 }
@@ -1057,6 +1116,7 @@ struct CopyScheduleSheet: View {
             VStack(spacing: 0) {
                 VStack(spacing: 12) {
                     Text("Copy \(sourceDay.fullName)'s Schedule").font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
 
                     if let schedule = sourceSchedule {
                         HStack(spacing: 8) {
@@ -1195,12 +1255,23 @@ struct DayTrainPicker: View {
             VStack(spacing: 0) {
                 VStack(spacing: 8) {
                     Text(day.fullName).font(.title2.weight(.semibold))
-                    HStack(spacing: 8) {
-                        Text(from.name).scalableText(minimumScale: 0.8)
-                        Image(systemName: "arrow.right").font(.caption)
-                        Text(to.name).scalableText(minimumScale: 0.8)
-                    }.font(.subheadline).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity).padding(.vertical, 16).background(Color(.systemGroupedBackground))
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            Text(from.name)
+                            Image(systemName: "arrow.right").font(.caption)
+                            Text(to.name)
+                        }
+                        VStack(spacing: 4) {
+                            Text(from.name)
+                            Image(systemName: "arrow.down").font(.caption)
+                            Text(to.name)
+                        }
+                    }
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(from.name) to \(to.name)")
+                }.frame(maxWidth: .infinity).padding(.vertical, 16).padding(.horizontal).background(
+                    Color(.systemGroupedBackground))
                 if isLoading {
                     List { ForEach(0 ..< 5, id: \.self) { _ in SkeletonTrainRow() } }.listStyle(.plain)
                 } else if connections.isEmpty {
@@ -1396,46 +1467,78 @@ struct TrainSelectionRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onDetail: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let style = Color.lineBadgeStyle(for: connection.lineNumber, apiColors: connection.lineColors)
-        HStack(spacing: 14) {
-            Button(action: onSelect) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle").font(.title).foregroundStyle(
-                    isSelected ? .blue : .secondary)
-            }.buttonStyle(.plain)
-            Text(connection.lineNumber)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(style.foreground)
-                .frame(minWidth: 50)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(style.background, in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(connection.departureTime, style: .time).font(.title3.weight(.medium))
-                    Text("→").foregroundStyle(.secondary)
-                    Text(connection.arrivalTime, style: .time).font(.body).foregroundStyle(.secondary)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        selectButton
+                        lineBadge
+                        Spacer(minLength: 8)
+                        detailButton
+                    }
+                    timesAndStats
                 }
-                HStack(spacing: 10) {
-                    Text("\(Int(connection.duration / 60)) min").font(.subheadline).foregroundStyle(.secondary)
-                    if let stops = connection.totalStopCount, stops > 0 {
-                        Text("\(stops) stops").font(.subheadline).foregroundStyle(.blue)
-                    }
-                    if connection.transfers > 0 {
-                        HStack(spacing: 3) {
-                            Text("\(connection.transfers)")
-                            Image(systemName: "arrow.triangle.branch")
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.orange)
-                    }
+            } else {
+                HStack(spacing: 14) {
+                    selectButton
+                    lineBadge
+                    timesAndStats
+                    Spacer(minLength: 8)
+                    detailButton
                 }
             }
-            Spacer()
-            Button(action: onDetail) { Image(systemName: "info.circle").font(.title3).foregroundStyle(.blue) }
-                .buttonStyle(.plain)
         }.padding(.vertical, 10).contentShape(Rectangle()).onTapGesture { onSelect() }
+    }
+
+    private var selectButton: some View {
+        Button(action: onSelect) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle").font(.title).foregroundStyle(
+                isSelected ? .blue : .secondary)
+        }.buttonStyle(.plain)
+    }
+
+    private var lineBadge: some View {
+        let style = Color.lineBadgeStyle(for: connection.lineNumber, apiColors: connection.lineColors)
+        return Text(connection.lineNumber)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(style.foreground)
+            .frame(minWidth: 50)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(style.background, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var detailButton: some View {
+        Button(action: onDetail) { Image(systemName: "info.circle").font(.title3).foregroundStyle(.blue) }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Train details")
+    }
+
+    private var timesAndStats: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStackFallingBackToVStack(spacing: 8) {
+                Text(connection.departureTime, style: .time).font(.title3.weight(.medium))
+                Text("→").foregroundStyle(.secondary).accessibilityLabel("to")
+                Text(connection.arrivalTime, style: .time).font(.body).foregroundStyle(.secondary)
+            }
+            HStackFallingBackToVStack(spacing: 10) {
+                Text("\(Int(connection.duration / 60)) min").font(.subheadline).foregroundStyle(.secondary)
+                if let stops = connection.totalStopCount, stops > 0 {
+                    Text("\(stops) stops").font(.subheadline).foregroundStyle(.blue)
+                }
+                if connection.transfers > 0 {
+                    HStack(spacing: 3) {
+                        Text("\(connection.transfers)")
+                        Image(systemName: "arrow.triangle.branch")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.orange)
+                }
+            }
+        }
     }
 }
 

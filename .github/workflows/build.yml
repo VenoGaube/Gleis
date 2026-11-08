@@ -30,21 +30,62 @@ jobs:
       - name: Launch in a simulator and take screenshots
         run: |
           set -euo pipefail
-          udid=$(xcrun simctl list devices available -j \
-            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))][0].udid')
+          # The 375 pt wide SE is where text runs out of room first, so prefer it.
+          devices=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))]')
+          udid=$(jq -r '(map(select(.name | startswith("iPhone SE"))) + .)[0].udid' <<<"$devices")
+          echo "Simulator: $(jq -r --arg udid "$udid" '.[] | select(.udid == $udid) | .name' <<<"$devices")"
           app=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
           bundle_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           xcrun simctl install "$udid" "$app"
+          xcrun simctl ui "$udid" appearance light
           mkdir -p ci-screenshots
-          for appearance in light dark; do
-            xcrun simctl ui "$udid" appearance "$appearance"
-            xcrun simctl terminate "$udid" "$bundle_id" || true
-            xcrun simctl launch "$udid" "$bundle_id"
-            sleep 15
-            xcrun simctl io "$udid" screenshot "ci-screenshots/launch-$appearance.png"
+
+          content_sizes=(large extra-extra-extra-large accessibility-extra-extra-extra-large)
+          route=(-GleisSkipOnboarding -GleisRoute "Wien Hbf|Graz Hbf")
+          # Live departures take up to 25 s to arrive from the provider.
+          live_data_wait=25
+          static_screen_wait=10
+
+          # shoot <file name> <seconds to wait> [launch arguments...]
+          shoot() {
+            local name=$1 wait=$2
+            shift 2
+            xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+            xcrun simctl launch "$udid" "$bundle_id" "$@"
+            sleep "$wait"
+            xcrun simctl io "$udid" screenshot "ci-screenshots/$name.png"
+          }
+
+          # Onboarding goes first for every size: nothing has marked it completed yet on this fresh install.
+          for size in "${content_sizes[@]}"; do
+            xcrun simctl ui "$udid" content_size "$size"
+            shoot "onboarding-$size" "$static_screen_wait"
           done
+
+          # Warm-up launch saves the route; TransportView reads saved stations only when it appears, so the first routed launch would show the empty state.
+          xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+          xcrun simctl launch "$udid" "$bundle_id" "${route[@]}"
+          sleep "$live_data_wait"
+
+          for size in "${content_sizes[@]}"; do
+            xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+            xcrun simctl ui "$udid" content_size "$size"
+            shoot "train-$size" "$live_data_wait" "${route[@]}"
+            shoot "train-jump-$size" "$live_data_wait" "${route[@]}" -GleisJumpHours 9
+            shoot "detail-$size" "$live_data_wait" "${route[@]}" -GleisOpenDetail
+            shoot "repeat-$size" "$static_screen_wait" "${route[@]}" -GleisTab 1
+            shoot "settings-$size" "$static_screen_wait" "${route[@]}" -GleisTab 2
+          done
+
+          xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+          xcrun simctl ui "$udid" content_size large
+          xcrun simctl ui "$udid" appearance dark
+          shoot "train-dark-large" "$live_data_wait" "${route[@]}"
+          xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+          ls -1 ci-screenshots
 
       - uses: actions/upload-artifact@v4
         if: always()

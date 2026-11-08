@@ -116,20 +116,23 @@ struct StationRow: View {
     let onTap: () -> Void
     var onFavorite: (() -> Void)? = nil
 
+    private var lineBadges: some View {
+        ForEach(station.lines.prefix(4), id: \.self) { line in
+            Text(line).font(.caption2.weight(.semibold)).foregroundStyle(.white).lineLimit(1).fixedSize()
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.lineColor(for: line), in: RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
     var body: some View {
         HStack {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(station.name).font(.body).scalableText(minimumScale: 0.8)
+                    Text(station.name).font(.body).fixedSize(horizontal: false, vertical: true)
                     if !station.lines.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(station.lines.prefix(4), id: \.self) { line in
-                                Text(line).font(.caption2.weight(.semibold)).foregroundStyle(.white).scalableText(
-                                    minimumScale: 0.7
-                                ).padding(.horizontal, 6).padding(.vertical, 2).background(
-                                    Color.lineColor(for: line), in: RoundedRectangle(cornerRadius: 4)
-                                )
-                            }
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 4) { lineBadges }
+                            VStack(alignment: .leading, spacing: 4) { lineBadges }
                         }
                     }
                 }

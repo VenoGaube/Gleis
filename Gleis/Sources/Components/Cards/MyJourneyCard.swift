@@ -8,29 +8,32 @@ struct MyJourneyCard: View {
     var leaveTime: Date? = nil
 
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isExpanded = true
 
-    private var journeyProgress: Double {
-        let now = Date()
+    private func isInProgress(at now: Date) -> Bool { now >= journey.departureTime && now < journey.arrivalTime }
+    private func hasDeparted(at now: Date) -> Bool { now >= journey.departureTime }
+
+    private func journeyProgress(at now: Date) -> Double {
         let total = journey.arrivalTime.timeIntervalSince(journey.departureTime)
-        let elapsed = now.timeIntervalSince(journey.departureTime)
-        return min(1, max(0, elapsed / total))
+        guard total > 0 else { return 1 }
+        return min(1, max(0, now.timeIntervalSince(journey.departureTime) / total))
     }
 
-    private var statusText: String {
-        if journey.isInProgress { "In Progress" } else if journey.hasDeparted { "Completed" } else { "Upcoming" }
+    private func statusText(at now: Date) -> String {
+        if isInProgress(at: now) { "In Progress" } else if hasDeparted(at: now) { "Completed" } else { "Upcoming" }
     }
 
-    private var statusColor: Color {
-        if journey.isInProgress { .green } else if journey.hasDeparted { .secondary } else { .blue }
+    private func statusColor(at now: Date) -> Color {
+        if isInProgress(at: now) { .green } else if hasDeparted(at: now) { .secondary } else { .blue }
     }
 
     private var displayLegs: [ConnectionLeg] {
         journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
     }
 
-    private var headerDisplayLeg: ConnectionLeg? {
-        let now = Date()
+    private func headerDisplayLeg(at now: Date) -> ConnectionLeg? {
         let legs = travelLegs
         guard !legs.isEmpty else { return nil }
 
@@ -52,8 +55,8 @@ struct MyJourneyCard: View {
         return legs.first
     }
 
-    private var displayLineNumber: String {
-        if let legLine = headerDisplayLeg?.lineNumber.trimmingCharacters(in: .whitespacesAndNewlines),
+    private func displayLineNumber(for headerLeg: ConnectionLeg?) -> String {
+        if let legLine = headerLeg?.lineNumber.trimmingCharacters(in: .whitespacesAndNewlines),
            !legLine.isEmpty
         {
             return legLine
@@ -63,18 +66,8 @@ struct MyJourneyCard: View {
         return "Train"
     }
 
-    private var displayLineColors: TrainLineColors? {
-        if let legColors = headerDisplayLeg?.lineColors { return legColors }
-        return journey.lineColors
-    }
-
-    private var leaveCountdownText: String? {
-        guard let leaveTime else { return nil }
-        let seconds = leaveTime.timeIntervalSinceNow
-        if seconds <= 0 { return "now" }
-        let minutes = Int(ceil(seconds / 60))
-        if minutes <= 1 { return "in <1 min" }
-        return "in \(minutes) min"
+    private func displayLineColors(for headerLeg: ConnectionLeg?) -> TrainLineColors? {
+        headerLeg?.lineColors ?? journey.lineColors
     }
 
     private var travelLegs: [ConnectionLeg] {
@@ -94,178 +87,243 @@ struct MyJourneyCard: View {
         lastTravelLeg?.arrivalPlatform.trimmedNonEmpty
     }
 
-    private var departureTimeValue: some View {
-        DelayedTimeText(time: journey.departureTime, delayMinutes: journey.delay)
-    }
-
-    private var arrivalTimeValue: some View {
-        DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold)
+    private var routeRevealTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
     }
 
     var body: some View {
+        // Stop, status and progress times are whole minutes, so the card redraws once a minute; only the leave countdown ticks every second.
+        TimelineView(.everyMinute) { context in
+            card(at: context.date)
+        }
+    }
+
+    private func card(at now: Date) -> some View {
         VStack(spacing: 0) {
-            headerSection
+            headerSection(at: now)
+                .background(Color.cardSurface(colorScheme))
+                .zIndex(1)
             if isExpanded {
                 VStack(spacing: 0) {
                     Divider().background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
                         .padding(.horizontal, 16)
-                    timelineSection
+                    timelineSection(at: now)
                 }
-                .clipped()
-                .transition(
-                    .asymmetric(insertion: .topDownReveal, removal: .opacity)
-                )
+                .transition(routeRevealTransition)
             }
-        }.background(Color.cardSurface(colorScheme)).clipShape(
-            RoundedRectangle(cornerRadius: 16)
-        ).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor.opacity(0.5), lineWidth: 2)).shadow(
-            color: colorScheme == .dark ? .clear : .black.opacity(0.08), radius: 12, y: 6
-        )
+        }
+        .background(Color.cardSurface(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor.opacity(0.5), lineWidth: 2))
+        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.08), radius: 12, y: 6)
     }
 
-    private var headerSection: some View {
+    private func headerSection(at now: Date) -> some View {
         VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                LineBadge(line: displayLineNumber, colors: displayLineColors)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .layoutPriority(2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text("MY JOURNEY")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.accentColor, in: Capsule())
-
-                        Text(statusText)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(statusColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)").font(
-                        .subheadline.weight(.medium)
-                    )
-                    .lineLimit(1)
-                    .scalableText(minimumScale: 0.8)
-                }.layoutPriority(1)
-
-                Spacer()
-
-                Button {
-                    Haptics.impact(.light)
-                    onUnpin()
-                } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
-                }
-            }
-
-            // Journey timing section
-            VStack(spacing: 8) {
-                if journey.isInProgress {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.2))
-                            RoundedRectangle(cornerRadius: 4).fill(Color.accentColor).frame(
-                                width: geo.size.width * journeyProgress)
-                        }
-                    }.frame(height: 6)
-                }
-
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Departs").font(.caption2).foregroundStyle(.secondary)
-                        departureTimeValue
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        if let departurePlatformLabel {
-                            Text("Platform \(departurePlatformLabel)")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Spacer(minLength: 16)
-
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Arrival").font(.caption2).foregroundStyle(.secondary)
-                        arrivalTimeValue
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        if let finalArrivalPlatformLabel {
-                            Text("Platform \(finalArrivalPlatformLabel)")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    if let leaveTime, !journey.hasDeparted {
-                        HStack(spacing: 4) {
-                            Image(systemName: "figure.walk")
-                            Text("Leave \(leaveTime, style: .time)")
-                            if let leaveCountdownText {
-                                Text(leaveCountdownText)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.blue)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(colorScheme == .dark ? 0.22 : 0.12), in: Capsule())
-                    }
-
-                    if journey.delay > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "clock.badge.exclamationmark")
-                            Text("+\(journey.delay) min delay")
-                        }
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.orange.opacity(colorScheme == .dark ? 0.22 : 0.12), in: Capsule())
-                    }
-
-                    Spacer(minLength: 0)
-                }
-            }
-
-            // Expand/collapse button
-            Button {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.88, blendDuration: 0.12)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down").font(.caption)
-                }.foregroundStyle(.secondary)
-            }
+            titleRow(at: now)
+            timingSection(at: now)
+            routeToggleButton
         }.padding(16)
     }
 
-    private var timelineSection: some View {
+    @ViewBuilder
+    private func titleRow(at now: Date) -> some View {
+        let headerLeg = headerDisplayLeg(at: now)
+        let badge = LineBadge(line: displayLineNumber(for: headerLeg), colors: displayLineColors(for: headerLeg))
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    badge
+                    Spacer(minLength: 8)
+                    unpinButton
+                }
+                titleText(at: now)
+            }
+        } else {
+            HStack(spacing: 12) {
+                badge
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
+                titleText(at: now).layoutPriority(1)
+                unpinButton
+            }
+        }
+    }
+
+    private func titleText(at now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    myJourneyPill
+                    statusLabel(at: now)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    myJourneyPill
+                    statusLabel(at: now)
+                }
+            }
+
+            Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)")
+                .font(.subheadline.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var myJourneyPill: some View {
+        Text("MY JOURNEY")
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.accentColor, in: Capsule())
+    }
+
+    private func statusLabel(at now: Date) -> some View {
+        Text(statusText(at: now))
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(statusColor(at: now))
+    }
+
+    private var unpinButton: some View {
+        Button {
+            Haptics.impact(.light)
+            onUnpin()
+        } label: {
+            Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Unpin journey")
+    }
+
+    private func timingSection(at now: Date) -> some View {
+        VStack(spacing: 8) {
+            if isInProgress(at: now) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.2))
+                        RoundedRectangle(cornerRadius: 4).fill(Color.accentColor).frame(
+                            width: geo.size.width * journeyProgress(at: now))
+                    }
+                }.frame(height: 6)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top) {
+                    departureColumn(alignment: .leading)
+                    Spacer(minLength: 16)
+                    arrivalColumn(alignment: .trailing)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    departureColumn(alignment: .leading)
+                    arrivalColumn(alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    statusPills(at: now)
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    statusPills(at: now)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func departureColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("Departs").font(.caption2).foregroundStyle(.secondary)
+            DelayedTimeText(time: journey.departureTime, delayMinutes: journey.delay)
+            if let departurePlatformLabel {
+                Text("Platform \(departurePlatformLabel)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func arrivalColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text("Arrival").font(.caption2).foregroundStyle(.secondary)
+            DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold)
+            if let finalArrivalPlatformLabel {
+                Text("Platform \(finalArrivalPlatformLabel)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statusPills(at now: Date) -> some View {
+        if let leaveTime, !hasDeparted(at: now) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    Image(systemName: "figure.walk")
+                    Text("Leave \(leaveTime, style: .time)")
+                    LeaveCountdownText(leaveTime: leaveTime)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "figure.walk")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Leave \(leaveTime, style: .time)")
+                        LeaveCountdownText(leaveTime: leaveTime)
+                    }
+                }
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.blue)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Color.blue.opacity(colorScheme == .dark ? 0.22 : 0.12),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
+
+        if journey.delay > 0 {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Image(systemName: "clock.badge.exclamationmark")
+                Text("+\(journey.delay) min delay")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Color.orange.opacity(colorScheme == .dark ? 0.22 : 0.12),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
+    }
+
+    private var routeToggleButton: some View {
+        Button {
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .gleisToggle) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down").font(.caption)
+            }.foregroundStyle(.secondary)
+        }
+    }
+
+    private func timelineSection(at now: Date) -> some View {
         VStack(spacing: 0) {
             let legs = displayLegs
 
             ForEach(Array(legs.enumerated()), id: \.element.id) { legIndex, leg in
-                // Show leg with its stops
                 JourneyLegSection(
                     leg: leg, isFirstLeg: legIndex == 0, isLastLeg: legIndex == legs.count - 1,
                     departureStation: leg.isWalking
                         ? nil : (legIndex == 0 ? journey.departureStation : leg.from),
                     arrivalStation: leg.isWalking
                         ? nil : (legIndex == legs.count - 1 ? journey.arrivalStation : leg.to),
-                    arrivalPlatformOverride: legIndex == legs.count - 1 ? finalArrivalPlatformLabel : nil
+                    arrivalPlatformOverride: legIndex == legs.count - 1 ? finalArrivalPlatformLabel : nil,
+                    now: now
                 )
 
                 // Show transfer indicator between legs
@@ -283,7 +341,7 @@ struct MyJourneyCard: View {
                             nextPlatform: transition.targetLeg.platform,
                             nextDepartureTime: transition.targetLeg.departureTime,
                             lineColor: transition.targetLeg.displayLineColor,
-                            isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
+                            isPassed: leg.arrivalTime.map { now >= $0 } ?? false,
                             involvesWalking: transition.involvesWalking,
                             nextLegIsWalking: transition.nextLegIsWalking,
                             hasUpcomingTransitLeg: transition.hasUpcomingTransitLeg
@@ -304,6 +362,39 @@ struct MyJourneyCard: View {
     }
 }
 
+// MARK: - LeaveCountdownText
+
+private struct LeaveCountdownText: View {
+    let leaveTime: Date
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static func minutesUntilLeave(_ leaveTime: Date, now: Date) -> Int {
+        let seconds = leaveTime.timeIntervalSince(now)
+        return seconds <= 0 ? 0 : Int(ceil(seconds / 60))
+    }
+
+    private static func countdownLabel(minutes: Int) -> String {
+        switch minutes {
+        case 0: "now"
+        case 1: "in <1 min"
+        default: "in \(minutes) min"
+        }
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let minutes = Self.minutesUntilLeave(leaveTime, now: context.date)
+            Text(Self.countdownLabel(minutes: minutes))
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
+                .animation(reduceMotion ? nil : .default, value: minutes)
+        }
+    }
+}
+
 // MARK: - JourneyLegSection
 
 private struct JourneyLegSection: View {
@@ -313,11 +404,13 @@ private struct JourneyLegSection: View {
     let departureStation: Station?
     let arrivalStation: Station?
     let arrivalPlatformOverride: String?
+    let now: Date
 
-    private var now: Date { Date() }
+    private static let maxVisibleUpcomingStops = 3
+
     private var legLineColor: Color { leg.displayLineColor }
+
     private func intermediateStopsLayout() -> (visible: [IntermediateStop], hiddenUpcomingCount: Int) {
-        let now = self.now
         if leg.arrivalTime.map({ now >= $0 }) ?? false { return ([], 0) }
         guard leg.departureTime.map({ now >= $0 }) ?? false else { return (leg.intermediateStops, 0) }
 
@@ -326,9 +419,12 @@ private struct JourneyLegSection: View {
         for stop in leg.intermediateStops {
             if stop.arrivalTime.map({ now >= $0 }) ?? false { passed.append(stop) } else { upcoming.append(stop) }
         }
-        let maxVisibleUpcomingStops = 3
-        let visible = passed + upcoming.prefix(maxVisibleUpcomingStops)
-        return (visible, max(0, upcoming.count - visible.count))
+        let shownUpcoming = upcoming.prefix(Self.maxVisibleUpcomingStops)
+        return (passed + shownUpcoming, upcoming.count - shownUpcoming.count)
+    }
+
+    private static func moreStopsText(count: Int) -> String {
+        count == 1 ? "1 more stop" : "\(count) more stops"
     }
 
     var body: some View {
@@ -371,7 +467,8 @@ private struct JourneyLegSection: View {
 
                 if stopsLayout.hiddenUpcomingCount > 0 {
                     JourneyCollapsedStopsRow(
-                        text: "\(stopsLayout.hiddenUpcomingCount) more stops", systemImage: "ellipsis.circle",
+                        text: Self.moreStopsText(count: stopsLayout.hiddenUpcomingCount),
+                        systemImage: "ellipsis.circle",
                         lineColor: legLineColor
                     )
                 }
@@ -396,6 +493,20 @@ private struct JourneyLegSection: View {
     }
 }
 
+// MARK: - TimelineConnector
+
+/// A rail segment that keeps its design height but stretches when wrapped text makes the row taller.
+private struct TimelineConnector: View {
+    let color: Color
+    let minimumHeight: CGFloat
+
+    var body: some View {
+        Rectangle().fill(color)
+            .frame(width: 2)
+            .frame(minHeight: minimumHeight, idealHeight: minimumHeight, maxHeight: .infinity)
+    }
+}
+
 // MARK: - JourneyCollapsedStopsRow
 
 private struct JourneyCollapsedStopsRow: View {
@@ -408,20 +519,22 @@ private struct JourneyCollapsedStopsRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(spacing: 0) {
-                Rectangle().fill(lineColor.opacity(0.25)).frame(width: 2, height: 8)
+                TimelineConnector(color: lineColor.opacity(0.25), minimumHeight: 8)
                 Circle().fill(
                     colorScheme == .dark ? lineColor.opacity(0.3) : lineColor.opacity(0.16)
                 ).frame(width: 6, height: 6)
-                Rectangle().fill(lineColor.opacity(0.25)).frame(width: 2, height: 8)
+                TimelineConnector(color: lineColor.opacity(0.25), minimumHeight: 8)
             }.frame(width: 20)
 
             Label(text, systemImage: systemImage)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
 
-            Spacer()
-        }.padding(.vertical, 1)
+            Spacer(minLength: 0)
+        }
+        // Lets the rail stretch to the wrapped label's height.
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 1)
     }
 }
 
@@ -442,100 +555,110 @@ private struct JourneyStopRow: View {
     var isTransferBoundary: Bool = false
 
     @Environment(\.colorScheme) var colorScheme
+    @ScaledMetric(relativeTo: .caption) private var minimumInlineStationNameWidth: CGFloat = 80
 
     private var endpointConnectorHeight: CGFloat { isTransferBoundary ? 6 : 8 }
     private var endpointNodeDiameter: CGFloat { isTransferBoundary ? 10 : 12 }
     private var endpointNodeStroke: CGFloat { isTransferBoundary ? 1.5 : 2 }
 
     var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            timelineIndicator
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    lineBadge
+                    stopInfo
+                    Spacer(minLength: 8)
+                    platformLabel
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    lineBadge
+                    stopInfo
+                    platformLabel
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        // Lets the rail stretch to the wrapped station name's height.
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, isEndpoint ? 4 : 1)
+    }
+
+    private var timelineIndicator: some View {
         let connectorColor = isPassed ? lineColor : lineColor.opacity(0.35)
         let nodeFillColor =
             isPassed ? lineColor : (colorScheme == .dark ? lineColor.opacity(0.38) : lineColor.opacity(0.22))
+        let connectorHeight: CGFloat = isEndpoint ? endpointConnectorHeight : 10
+        let nodeDiameter: CGFloat = isEndpoint ? endpointNodeDiameter : 6
 
-        HStack(alignment: .center, spacing: 12) {
-            // Timeline indicator
-            VStack(spacing: 0) {
-                Rectangle().fill(showTopConnector ? connectorColor : .clear).frame(
-                    width: 2, height: isEndpoint ? endpointConnectorHeight : 10
-                )
+        return VStack(spacing: 0) {
+            TimelineConnector(color: showTopConnector ? connectorColor : .clear, minimumHeight: connectorHeight)
+            Circle().fill(nodeFillColor)
+                .frame(width: nodeDiameter, height: nodeDiameter)
+                .overlay(Circle().stroke(lineColor, lineWidth: isEndpoint ? endpointNodeStroke : 1))
+            TimelineConnector(color: showBottomConnector ? connectorColor : .clear, minimumHeight: connectorHeight)
+        }.frame(width: 20)
+    }
 
-                Circle().fill(nodeFillColor).frame(
-                    width: isEndpoint ? endpointNodeDiameter : 6, height: isEndpoint ? endpointNodeDiameter : 6
-                ).overlay(
-                    Circle().stroke(lineColor, lineWidth: isEndpoint ? endpointNodeStroke : 1)
-                )
+    @ViewBuilder
+    private var lineBadge: some View {
+        if let lineNumber, isEndpoint {
+            let style = Color.lineBadgeStyle(for: lineNumber, apiColors: lineColors)
+            Text(lineNumber)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(style.foreground)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(style.background, in: RoundedRectangle(cornerRadius: 4))
+        }
+    }
 
-                Rectangle().fill(showBottomConnector ? connectorColor : .clear).frame(
-                    width: 2, height: isEndpoint ? endpointConnectorHeight : 10
-                )
-            }.frame(width: 20)
+    private var stationName: Text {
+        let weight: Font.Weight = isEndpoint ? .semibold : .regular
+        guard isTransferBoundary else { return Text(name).fontWeight(weight) }
+        let transferGlyph = Text(Image(systemName: "arrow.triangle.branch"))
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(.orange)
+        return Text("\(Text(name).fontWeight(weight)) \(transferGlyph)")
+    }
 
-            // Line badge for departure points
-            if let lineNumber, isEndpoint {
-                let style = Color.lineBadgeStyle(for: lineNumber, apiColors: lineColors)
-                Text(lineNumber)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(style.foreground)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(style.background, in: RoundedRectangle(cornerRadius: 4))
-            }
+    private var stopInfo: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            stationName
+                .font(.caption)
+                .foregroundStyle(isPassed ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                // Ideal width only, so a long name wraps inline instead of forcing the stacked row.
+                .frame(idealWidth: minimumInlineStationNameWidth, alignment: .leading)
 
-            // Stop info
-            VStack(alignment: .leading, spacing: 1) {
+            if let time {
                 HStack(spacing: 4) {
-                    Text(name)
-                        .font(.caption.weight(isEndpoint ? .semibold : .regular))
-                        .foregroundStyle(isPassed ? .secondary : .primary)
-                    if isTransferBoundary {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
+                    Text(time, style: .time).font(
+                        isEndpoint ? .caption.monospacedDigit().weight(.medium) : .caption2.monospacedDigit()
+                    ).foregroundStyle(isPassed ? .secondary : .primary)
+
+                    if let delay, delay > 0 {
+                        Text("+\(delay)'").font(.caption2.weight(.medium)).foregroundStyle(.orange)
                     }
                 }
-                .lineLimit(1)
-
-                if let time {
-                    HStack(spacing: 4) {
-                        Text(time, style: .time).font(
-                            isEndpoint ? .caption.monospacedDigit().weight(.medium) : .caption2.monospacedDigit()
-                        ).foregroundStyle(isPassed ? .secondary : .primary)
-
-                        if let delay, delay > 0 {
-                            Text("+\(delay)'").font(.caption2.weight(.medium)).foregroundStyle(.orange)
-                        }
-                    }
-                }
+                .fixedSize()
             }
-
-            Spacer()
-
-            if let platform, isEndpoint {
-                Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6).padding(
-                    .vertical, 2
-                ).background(Color.secondary.opacity(0.1), in: Capsule())
-            }
-        }.padding(.vertical, isEndpoint ? 4 : 1)
+        }
     }
-}
 
-private struct TopDownRevealModifier: ViewModifier {
-    let progress: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(x: 1, y: max(0.001, progress), anchor: .top)
-            .opacity(progress)
-            .clipped()
-    }
-}
-
-private extension AnyTransition {
-    static var topDownReveal: AnyTransition {
-        .modifier(
-            active: TopDownRevealModifier(progress: 0),
-            identity: TopDownRevealModifier(progress: 1)
-        )
+    @ViewBuilder
+    private var platformLabel: some View {
+        if let platform, isEndpoint {
+            Text("Platform \(platform)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.1), in: Capsule())
+        }
     }
 }
 

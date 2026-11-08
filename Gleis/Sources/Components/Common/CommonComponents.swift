@@ -19,6 +19,18 @@ extension View {
     }
 }
 
+// MARK: - Motion
+
+extension Animation {
+    /// The house spring for every expand, collapse and tab pill move. Critically damped, so it never overshoots.
+    static let gleisToggle: Animation = .spring(response: 0.35, dampingFraction: 1)
+    /// Insert, remove and reorder of list rows.
+    static let gleisList: Animation = .snappy(duration: 0.35)
+}
+
+/// The cross-fade used in place of a moving animation when Reduce Motion is on.
+private let reducedMotionFade: Animation = .easeInOut(duration: 0.2)
+
 // MARK: - Semantic Colors
 
 extension Color {
@@ -121,44 +133,80 @@ struct CustomTabBar: View {
     var onTabTap: ((Int) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var tabAnimation
 
     var body: some View {
-        HStack(spacing: 0) { ForEach(tabs) { tab in tabButton(for: tab) } }.padding(.horizontal, 16).padding(.top, 16)
-            .padding(.bottom, 16).background(
+        HStack(spacing: 0) {
+            ForEach(tabs) { tab in
+                CustomTabBarButton(
+                    tab: tab, isSelected: selectedTab == tab.id, accentColor: accentColor, pillNamespace: tabAnimation
+                ) {
+                    onTabTap?(tab.id)
+                    // The paged TabView only slides when the selection change itself is animated.
+                    withAnimation(tabAnimationCurve) { selectedTab = tab.id }
+                }
+            }
+        }.padding(.horizontal, 16).padding(.top, 16)
+            .padding(.bottom, 16)
+            // Keyed on the value rather than the tap, so a page swipe moves the pill too.
+            .animation(tabAnimationCurve, value: selectedTab)
+            // Like the system tab bar, text stops growing here and long-press shows the large content viewer.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .background(
                 Rectangle().fill(colorScheme == .dark ? Color(.systemBackground) : .white).shadow(
                     color: .black.opacity(0.08), radius: 12, y: -4
                 ).ignoresSafeArea(edges: .bottom))
     }
 
-    private func tabButton(for tab: TabItem) -> some View {
-        let isSelected = selectedTab == tab.id
+    private var tabAnimationCurve: Animation { reduceMotion ? reducedMotionFade : .gleisToggle }
+}
 
-        return Button {
-            Haptics.impact(.light)
-            onTabTap?(tab.id)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { selectedTab = tab.id }
-        } label: {
+/// One tab. Its own view so the scaled sizes read the tab bar's capped type size.
+private struct CustomTabBarButton: View {
+    let tab: TabItem
+    let isSelected: Bool
+    let accentColor: Color
+    let pillNamespace: Namespace.ID
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) private var pillWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var pillHeight: CGFloat = 32
+
+    var body: some View {
+        let iconName = isSelected ? tab.selectedIcon : tab.icon
+
+        Button(action: action) {
             VStack(spacing: 4) {
                 ZStack {
-                    // Background pill
-                    if isSelected {
-                        Capsule().fill(accentColor).frame(width: 56, height: 32).matchedGeometryEffect(
-                            id: "tabPill", in: tabAnimation
-                        ).shadow(color: accentColor.opacity(0.4), radius: 8, y: 2)
-                    }
+                    if isSelected { selectionPill }
 
-                    Image(systemName: isSelected ? tab.selectedIcon : tab.icon).font(
-                        .system(size: 18, weight: .semibold)
-                    ).foregroundStyle(isSelected ? .white : .secondary).scaleEffect(isSelected ? 1.0 : 0.9).animation(
-                        .spring(response: 0.25, dampingFraction: 0.7), value: isSelected
-                    )
-                }.frame(height: 32)
+                    Image(systemName: iconName).font(.system(size: iconSize, weight: .semibold))
+                        .foregroundStyle(isSelected ? .white : .secondary).scaleEffect(isSelected ? 1.0 : 0.9)
+                }.frame(minHeight: pillHeight)
 
                 Text(tab.title).font(.caption).fontWeight(isSelected ? .semibold : .medium).foregroundStyle(
-                    isSelected ? accentColor : .secondary)
+                    isSelected ? accentColor : .secondary
+                ).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity).contentShape(Rectangle())
         }.buttonStyle(TabButtonStyle())
+            .accessibilityLabel(tab.title)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityShowsLargeContentViewer {
+                Label(tab.title, systemImage: iconName)
+            }
+    }
+
+    @ViewBuilder private var selectionPill: some View {
+        let pill = Capsule().fill(accentColor).frame(width: pillWidth, height: pillHeight)
+            .shadow(color: accentColor.opacity(0.4), radius: 8, y: 2)
+        if reduceMotion {
+            pill.transition(.opacity)
+        } else {
+            pill.matchedGeometryEffect(id: "tabPill", in: pillNamespace)
+        }
     }
 }
 
@@ -166,24 +214,60 @@ struct CustomTabBar: View {
 
 struct TabButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.scaleEffect(configuration.isPressed ? 0.94 : 1.0).opacity(
+        TabButtonPressBody(configuration: configuration)
+    }
+}
+
+/// ButtonStyle cannot read the environment itself, so the press body does it.
+private struct TabButtonPressBody: View {
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let pressScale: CGFloat = reduceMotion ? 1.0 : 0.94
+        configuration.label.scaleEffect(configuration.isPressed ? pressScale : 1.0).opacity(
             configuration.isPressed ? 0.85 : 1.0
-        ).animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+        ).animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
 // MARK: - Haptics
 
 enum Haptics {
+    private static let lightImpact = UIImpactFeedbackGenerator(style: .light)
+    private static let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
+    private static let heavyImpact = UIImpactFeedbackGenerator(style: .heavy)
+    private static let softImpact = UIImpactFeedbackGenerator(style: .soft)
+    private static let rigidImpact = UIImpactFeedbackGenerator(style: .rigid)
+    private static let notificationGenerator = UINotificationFeedbackGenerator()
+    private static let selectionGenerator = UISelectionFeedbackGenerator()
+
+    // Each call re-prepares its generator so the next tap fires without the cold-start lag.
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
-        UIImpactFeedbackGenerator(style: style).impactOccurred()
+        let generator = impactGenerator(for: style)
+        generator.impactOccurred()
+        generator.prepare()
     }
 
     static func notification(_ type: UINotificationFeedbackGenerator.FeedbackType) {
-        UINotificationFeedbackGenerator().notificationOccurred(type)
+        notificationGenerator.notificationOccurred(type)
+        notificationGenerator.prepare()
     }
 
-    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+    static func selection() {
+        selectionGenerator.selectionChanged()
+        selectionGenerator.prepare()
+    }
+
+    private static func impactGenerator(for style: UIImpactFeedbackGenerator.FeedbackStyle) -> UIImpactFeedbackGenerator {
+        switch style {
+        case .light: lightImpact
+        case .heavy: heavyImpact
+        case .soft: softImpact
+        case .rigid: rigidImpact
+        default: mediumImpact
+        }
+    }
 }
 
 // MARK: - SkeletonBox
@@ -401,14 +485,16 @@ struct ToastView: View {
     }
 
     var body: some View {
+        // A rounded rectangle rather than a capsule, so a message that wraps to several lines still looks right.
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         HStack(spacing: 10) {
-            Image(systemName: type.icon).foregroundStyle(type.color)
-            Text(message).font(.subheadline.weight(.medium))
+            Image(systemName: type.icon).foregroundStyle(type.color).accessibilityHidden(true)
+            Text(message).font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
         }.padding(.horizontal, 16).padding(.vertical, 12).background(
-            colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemBackground), in: Capsule()
-        ).overlay(Capsule().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1)).shadow(
+            colorScheme == .dark ? Color(.tertiarySystemBackground) : Color(.systemBackground), in: shape
+        ).overlay(shape.stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1)).shadow(
             color: .black.opacity(colorScheme == .dark ? 0.3 : 0.1), radius: 10, y: 5
-        )
+        ).accessibilityElement(children: .combine)
     }
 }
 
@@ -435,44 +521,57 @@ struct EmptyStateView: View {
     var action: (() -> Void)?
     var actionTitle: String?
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
         VStack(spacing: 24) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 180, height: 8).offset(
-                    y: 40)
-                RoundedRectangle(cornerRadius: 8).fill(
-                    colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)
-                ).frame(width: 120, height: 60).offset(y: 10)
-                ZStack {
-                    Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.25 : 0.15)).frame(
-                        width: 80, height: 80
-                    )
-                    Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.08)).frame(
-                        width: 110, height: 110
-                    ).scaleEffect(animate ? 1.1 : 1.0)
-                    Image(systemName: icon).font(.system(size: 36)).foregroundStyle(Color.accentColor).offset(
-                        x: animate ? 2 : -2)
-                }.offset(y: -20)
-            }.frame(height: 120)
+            illustration
             VStack(spacing: 8) {
                 Text(title).font(.title3.weight(.semibold))
-                Text(message).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
+                Text(message).font(.subheadline).foregroundStyle(.secondary)
+            }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .combine)
             if let action, let actionTitle {
                 Button {
                     Haptics.impact(.light)
                     action()
                 } label: {
-                    Text(actionTitle).font(.subheadline.weight(.semibold)).padding(.horizontal, 24).padding(
-                        .vertical, 12
-                    )
+                    Text(actionTitle).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
+                        .padding(.horizontal, 24).padding(.vertical, 12)
                 }.buttonStyle(.borderedProminent)
             }
-        }.padding(32).onAppear {
+        }.padding(32).onAppear { updateBreathing(reduceMotion: reduceMotion) }
+            .onChange(of: reduceMotion) { _, isReduced in updateBreathing(reduceMotion: isReduced) }
+    }
+
+    private func updateBreathing(reduceMotion: Bool) {
+        if reduceMotion {
+            // A short finite animation replaces the running repeatForever, which stops it.
+            withAnimation(reducedMotionFade) { animate = false }
+        } else {
             withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { animate = true }
         }
+    }
+
+    private var illustration: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.2)).frame(width: 180, height: 8).offset(
+                y: 40)
+            RoundedRectangle(cornerRadius: 8).fill(
+                colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15)
+            ).frame(width: 120, height: 60).offset(y: 10)
+            ZStack {
+                Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.25 : 0.15)).frame(
+                    width: 80, height: 80
+                )
+                Circle().fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.08)).frame(
+                    width: 110, height: 110
+                ).scaleEffect(animate ? 1.1 : 1.0)
+                Image(systemName: icon).font(.system(size: 36)).foregroundStyle(Color.accentColor).offset(
+                    x: animate ? 2 : -2)
+            }.offset(y: -20)
+        }.frame(height: 120).accessibilityHidden(true)
     }
 }
 
@@ -533,76 +632,155 @@ struct RouteHeader: View {
     var showsTimingControls = true
     var swapAccessibilityLabel = "Swap stations"
     var swapAccessibilityValue: String? = nil
+    var departureAnchor: Date? = nil
+    var onDepartureChipTap: (() -> Void)? = nil
+    var onClearDepartureAnchor: (() -> Void)? = nil
     private let swapRotationStep: Double = 180
     private let swapAnimation: Animation = .spring(response: 0.3)
+    private static let defaultSwapIcon = "arrow.left.arrow.right"
+    private static let stackedSwapIcon = "arrow.up.arrow.down"
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var swapButtonSize: CGFloat = 36
     @State private var swapRotation: Double = 0
     @State private var pulseHint = false
 
     var body: some View {
         VStack(spacing: 16) {
-            HStack(spacing: 12) {
-                StationButton(
-                    label: "From", station: startStation, icon: "location.circle.fill", color: .green
-                ) {
-                    Haptics.selection()
-                    onStartTap()
-                }.layoutPriority(1)
-                swapButton
-                StationButton(
-                    label: "To", station: endStation, icon: "flag.circle.fill", color: .red
-                ) {
-                    Haptics.selection()
-                    onEndTap()
-                }.layoutPriority(1)
-            }
-            HStack(spacing: 12) {
-                if showsTimingControls, let station = startStation {
-                    if let time = travelTimeToStart {
-                        Button {
-                            onSetTravelTime(station)
-                        } label: {
-                            Label("\(time) min", systemImage: "figure.walk").font(.caption).foregroundStyle(.blue)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        travelTimeHintButton(for: station)
-                    }
-                    if let buffer = bufferTimeToStart {
-                        Button {
-                            onSetBufferTime(station)
-                        } label: {
-                            Label("\(buffer) min buffer", systemImage: "clock.badge.checkmark").font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        bufferTimeHintButton(for: station)
-                    }
-                }
-                Spacer()
-            }
+            stationRow
+            timingRow
         }.padding(16).background(colorScheme == .dark ? Color(.secondarySystemBackground) : .white).clipShape(
             RoundedRectangle(cornerRadius: 20)
         ).overlay(
             RoundedRectangle(cornerRadius: 20).stroke(
                 colorScheme == .dark ? Color.white.opacity(0.1) : Color.clear, lineWidth: 1
             )
-        ).shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 8, y: 4).onAppear {
+        ).shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 8, y: 4)
+            .onAppear { updateHintPulse(reduceMotion: reduceMotion) }
+            .onChange(of: reduceMotion) { _, isReduced in updateHintPulse(reduceMotion: isReduced) }
+    }
+
+    /// Side by side normally; stacked at accessibility sizes so both station names keep their full width.
+    @ViewBuilder private var stationRow: some View {
+        let fromButton = StationButton(label: "From", station: startStation, icon: "location.circle.fill", color: .green) {
+            Haptics.selection()
+            onStartTap()
+        }
+        let toButton = StationButton(label: "To", station: endStation, icon: "flag.circle.fill", color: .red) {
+            Haptics.selection()
+            onEndTap()
+        }
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 8) {
+                fromButton
+                swapButton
+                toButton
+            }
+        } else {
+            HStack(spacing: 12) {
+                fromButton.layoutPriority(1)
+                swapButton
+                toButton.layoutPriority(1)
+            }
+        }
+    }
+
+    private var timingRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                timingControls
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 10) { timingControls }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder private var timingControls: some View {
+        if showsTimingControls, let station = startStation {
+            if let time = travelTimeToStart {
+                Button {
+                    onSetTravelTime(station)
+                } label: {
+                    Label("\(time) min", systemImage: "figure.walk").font(.caption).foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+            } else {
+                travelTimeHintButton(for: station)
+            }
+            if let buffer = bufferTimeToStart {
+                Button {
+                    onSetBufferTime(station)
+                } label: {
+                    Label("\(buffer) min buffer", systemImage: "clock.badge.checkmark").font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+            } else {
+                bufferTimeHintButton(for: station)
+            }
+        }
+        if showsTimingControls, let onDepartureChipTap {
+            departureChip(onTap: onDepartureChipTap)
+        }
+    }
+
+    private func departureChip(onTap: @escaping () -> Void) -> some View {
+        let isAnchored = departureAnchor != nil
+        let title = Self.departureChipTitle(for: departureAnchor)
+        return HStack(spacing: 6) {
+            Button(action: onTap) {
+                Label(title, systemImage: "clock").font(.caption.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Departure time, \(title)")
+            .accessibilityHint("Choose when to look for trains")
+            if isAnchored, let onClearDepartureAnchor {
+                Button(action: onClearDepartureAnchor) {
+                    Image(systemName: "xmark.circle.fill").font(.caption)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to now")
+            }
+        }
+        .foregroundStyle(isAnchored ? Color.white : Color.accentColor)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(isAnchored ? Color.accentColor : Color.accentColor.opacity(0.12), in: Capsule())
+    }
+
+    /// "Now", "Today 17:30", "Tomorrow 07:00", or the weekday for anything later.
+    static func departureChipTitle(for anchor: Date?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let anchor else { return "Now" }
+        let time = anchor.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(anchor, inSameDayAs: now) { return "Today \(time)" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(anchor, inSameDayAs: tomorrow) {
+            return "Tomorrow \(time)"
+        }
+        return anchor.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    }
+
+    private func updateHintPulse(reduceMotion: Bool) {
+        if reduceMotion {
+            withAnimation(reducedMotionFade) { pulseHint = false }
+        } else {
             withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) { pulseHint = true }
         }
     }
 
     @ViewBuilder
     private var swapButton: some View {
+        let isStacked = dynamicTypeSize.isAccessibilitySize && swapIcon == Self.defaultSwapIcon
         let button = Button {
             Haptics.impact(.light)
-            withAnimation(swapAnimation) { swapRotation += swapRotationStep }
+            withAnimation(reduceMotion ? nil : swapAnimation) { swapRotation += swapRotationStep }
             onSwap()
         } label: {
-            Image(systemName: swapIcon).font(.body.weight(.semibold)).foregroundStyle(.white)
-                .frame(width: 36, height: 36).background(Color.accentColor, in: Circle()).rotationEffect(
-                    .degrees(swapRotation))
+            Image(systemName: isStacked ? Self.stackedSwapIcon : swapIcon).font(.body.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: swapButtonSize, height: swapButtonSize).background(Color.accentColor, in: Circle())
+                .rotationEffect(.degrees(swapRotation))
         }.buttonStyle(.plain).accessibilityLabel(swapAccessibilityLabel)
 
         if let swapAccessibilityValue {
@@ -651,9 +829,10 @@ struct StationButton: View {
                     Image(systemName: icon).foregroundStyle(color)
                     Text(label).foregroundStyle(.secondary)
                 }.font(.caption)
+                // Wraps rather than truncates, so a long station name is always readable in full.
                 Text(station?.name ?? "Select").font(.subheadline.weight(.medium)).foregroundStyle(
                     station == nil ? .secondary : .primary
-                ).lineLimit(1).truncationMode(.tail)
+                ).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).padding(12).background(
                 colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.1),
                 in: RoundedRectangle(cornerRadius: 12)
@@ -664,6 +843,7 @@ struct StationButton: View {
             showFullName = true
         }.popover(isPresented: $showFullName, arrowEdge: .bottom) {
             Text(station?.name ?? "").font(.subheadline.weight(.medium)).padding(.horizontal, 16).padding(.vertical, 12)
+                .fixedSize(horizontal: false, vertical: true)
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -752,6 +932,7 @@ struct TrainTypeFilterBar: View {
                             )
                             .foregroundStyle(isEnabled ? style.foreground : .secondary)
                     }.buttonStyle(.plain)
+                        .accessibilityAddTraits(isEnabled ? .isSelected : [])
                 }
             }
         }
@@ -767,6 +948,7 @@ struct EndOfListFooter: View {
         VStack(spacing: 6) {
             Capsule().frame(width: 40, height: 4).foregroundStyle(.quaternary)
             Text("Showing \(count) connections").font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity).padding(.vertical, 12)
     }
 }
@@ -826,7 +1008,7 @@ struct TravelTimeSheet: View {
                     }
                 }
             }
-        }.presentationDetents([.height(220)])
+        }.modifier(TimingSheetDetents())
     }
 }
 
@@ -870,6 +1052,144 @@ struct BufferTimeSheet: View {
                     }
                 }
             }
-        }.presentationDetents([.height(220)])
+        }.modifier(TimingSheetDetents())
+    }
+}
+
+/// The 220 pt detent scales with Dynamic Type, and the sheet can always be pulled to full height.
+private struct TimingSheetDetents: ViewModifier {
+    @ScaledMetric(relativeTo: .body) private var compactHeight: CGFloat = 220
+
+    func body(content: Content) -> some View {
+        content.presentationDetents([.height(compactHeight), .large])
+    }
+}
+
+// MARK: - DepartureTimeSheet
+
+/// Picks the time the Train list jumps to. The presenter sets the detent.
+struct DepartureTimeSheet: View {
+    let anchor: Date?
+    let onApply: (Date) -> Void
+    let onBackToNow: () -> Void
+
+    private static let pickerRange: TimeInterval = 7 * 24 * 60 * 60
+    private static let eveningHour = 17
+    private static let eveningMinute = 30
+    private static let morningHour = 7
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var selectedDate: Date
+
+    init(anchor: Date?, onApply: @escaping (Date) -> Void, onBackToNow: @escaping () -> Void) {
+        self.anchor = anchor
+        self.onApply = onApply
+        self.onBackToNow = onBackToNow
+        _selectedDate = State(initialValue: max(anchor ?? Date(), Date()))
+    }
+
+    private struct QuickChoice: Identifiable {
+        let title: String
+        let date: Date
+        var id: String { title }
+    }
+
+    private func quickChoices(now: Date, calendar: Calendar = .current) -> [QuickChoice] {
+        var choices = [
+            QuickChoice(title: "+1 h", date: now.addingTimeInterval(60 * 60)),
+            QuickChoice(title: "+2 h", date: now.addingTimeInterval(2 * 60 * 60)),
+        ]
+        let startOfToday = calendar.startOfDay(for: now)
+        if let eveningToday = calendar.date(
+            bySettingHour: Self.eveningHour, minute: Self.eveningMinute, second: 0, of: startOfToday
+        ) {
+            let evening = eveningToday > now ? eveningToday : calendar.date(byAdding: .day, value: 1, to: eveningToday)
+            if let evening {
+                let time = evening.formatted(date: .omitted, time: .shortened)
+                choices.append(QuickChoice(title: "Evening \(time)", date: evening))
+            }
+        }
+        if let startOfTomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday),
+           let morning = calendar.date(bySettingHour: Self.morningHour, minute: 0, second: 0, of: startOfTomorrow)
+        {
+            let time = morning.formatted(date: .omitted, time: .shortened)
+            choices.append(QuickChoice(title: "Tomorrow \(time)", date: morning))
+        }
+        return choices
+    }
+
+    private var chipColumns: [GridItem] {
+        let column = GridItem(.flexible(), spacing: 10)
+        return dynamicTypeSize.isAccessibilitySize ? [column] : [column, column]
+    }
+
+    var body: some View {
+        let now = Date()
+        let range = now ... now.addingTimeInterval(Self.pickerRange)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    LazyVGrid(columns: chipColumns, spacing: 10) {
+                        ForEach(quickChoices(now: now)) { choice in
+                            Button {
+                                Haptics.selection()
+                                apply(choice.date)
+                            } label: {
+                                Text(choice.title).font(.subheadline.weight(.semibold))
+                                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Or pick a time").font(.subheadline).foregroundStyle(.secondary)
+                        datePicker(in: range)
+                    }
+
+                    Button {
+                        apply(selectedDate)
+                    } label: {
+                        Text("Show trains").font(.headline).multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    if anchor != nil {
+                        Button {
+                            onBackToNow()
+                            dismiss()
+                        } label: {
+                            Text("Back to now").font(.headline).multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }.padding(20)
+            }
+            .navigationTitle("Departure time").navigationBarTitleDisplayMode(.inline).toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+    }
+
+    /// One compact picker normally; date and time on separate rows at accessibility sizes so neither is clipped.
+    @ViewBuilder private func datePicker(in range: ClosedRange<Date>) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                DatePicker("Date", selection: $selectedDate, in: range, displayedComponents: .date)
+                DatePicker("Time", selection: $selectedDate, in: range, displayedComponents: .hourAndMinute)
+            }.labelsHidden().datePickerStyle(.compact)
+        } else {
+            DatePicker("Departs", selection: $selectedDate, in: range, displayedComponents: [.date, .hourAndMinute])
+                .labelsHidden().datePickerStyle(.compact)
+        }
+    }
+
+    private func apply(_ date: Date) {
+        onApply(date)
+        dismiss()
     }
 }

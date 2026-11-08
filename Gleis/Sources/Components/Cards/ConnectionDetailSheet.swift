@@ -5,29 +5,51 @@ import SwiftUI
 struct ConnectionDetailSheet: View {
     let connection: TrainConnection
     private let transportService: TransportService
+    private let onRemind: (() -> Void)?
+    private let onPin: (() -> Void)?
+    private let isReminderSet: Bool
+    private let isPinned: Bool
+    private let presenterLeaveTime: Date?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var resolvedConnection: TrainConnection
     @State private var isLoadingDetails = false
     @State private var hasLoadedDetails = false
 
     init(
         connection: TrainConnection,
-        transportService: TransportService = .shared
+        transportService: TransportService = .shared,
+        onRemind: (() -> Void)? = nil,
+        onPin: (() -> Void)? = nil,
+        isReminderSet: Bool = false,
+        isPinned: Bool = false,
+        leaveTime: Date? = nil
     ) {
         self.connection = connection
         self.transportService = transportService
+        self.onRemind = onRemind
+        self.onPin = onPin
+        self.isReminderSet = isReminderSet
+        self.isPinned = isPinned
+        presenterLeaveTime = leaveTime
         _resolvedConnection = State(initialValue: connection)
     }
 
     var body: some View {
+        let leaveTime = resolvedLeaveTime
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    connectionSummary
+                    connectionSummary(leaveTime: leaveTime)
                     serviceAlertsSection
                     connectionLegs
+                    if stacksForAccessibilitySize { stackedJourneyActions(leaveTime: leaveTime) }
                 }
                 .padding()
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !stacksForAccessibilitySize { journeyActionBar(leaveTime: leaveTime) }
             }
             .refreshable { await loadConnectionDetailsIfNeeded(force: true) }
             .navigationTitle("Connection Details")
@@ -37,49 +59,189 @@ struct ConnectionDetailSheet: View {
         .task(id: connection.id) { await loadConnectionDetailsIfNeeded() }
     }
 
-    private var connectionSummary: some View {
+    // Falls back to the travel and buffer times saved for the station this train leaves from.
+    @MainActor private var resolvedLeaveTime: Date {
+        if let presenterLeaveTime { return presenterLeaveTime }
+        return SettingsManager.shared.trainCommuteConfig.leaveTime(
+            for: resolvedConnection, fromStationId: resolvedConnection.departureStation.id
+        )
+    }
+
+    private var stacksForAccessibilitySize: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    private func connectionSummary(leaveTime: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                LineBadge(line: resolvedConnection.lineNumber, colors: resolvedConnection.lineColors)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(resolvedConnection.departureStation.name) to \(resolvedConnection.arrivalStation.name)").font(
-                        .subheadline.weight(.semibold)
-                    ).scalableText(minimumScale: 0.7)
-                    Text("\(Int(resolvedConnection.duration / 60)) min total").font(.caption).foregroundStyle(
-                        .secondary
-                    )
-                }
-                Spacer()
-                if resolvedConnection.transfers > 0 {
-                    Text("\(resolvedConnection.transfers) transfers").font(.caption.weight(.semibold)).foregroundStyle(
-                        .orange
-                    )
-                }
+            TimelineView(.everyMinute) { context in
+                leaveTimeHeadline(leaveTime: leaveTime, now: context.date)
             }
+            summaryHeader
             if isLoadingDetails {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("Loading intermediate stops")
                 }.font(.caption2).foregroundStyle(.secondary)
             }
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Depart").font(.caption2).foregroundStyle(.secondary)
-                    DelayedTimeText(time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay)
-                    if let platform = summaryDeparturePlatform {
-                        Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("Arrive").font(.caption2).foregroundStyle(.secondary)
-                    DelayedTimeText(time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay)
-                    if let platform = summaryArrivalPlatform {
-                        Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                    }
+            departArriveRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func leaveTimeHeadline(leaveTime: Date, now: Date) -> some View {
+        let countdown = leaveCountdown(leaveTime: leaveTime, now: now)
+        return (Text("Leave at ") + Text(leaveTime, style: .time) + Text(" · \(countdown.text)"))
+            .font(.title2.weight(.bold).monospacedDigit())
+            .foregroundStyle(countdown.color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private struct LeaveCountdown {
+        let text: String
+        let color: Color
+    }
+
+    private func leaveCountdown(leaveTime: Date, now: Date) -> LeaveCountdown {
+        let remaining = leaveTime.timeIntervalSince(now)
+        if remaining > 0 {
+            let minutesLeft = Int((remaining / 60).rounded(.up))
+            return LeaveCountdown(text: "in \(abbreviatedDurationText(minutes: minutesLeft))", color: .urgency(for: remaining))
+        }
+        if resolvedConnection.departureTime > now { return LeaveCountdown(text: "leave now", color: .urgencyRed) }
+        return LeaveCountdown(text: "train has left", color: .secondary)
+    }
+
+    private var summaryHeader: some View {
+        let layout = stacksForAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
+            LineBadge(line: resolvedConnection.lineNumber, colors: resolvedConnection.lineColors)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(resolvedConnection.departureStation.name) to \(resolvedConnection.arrivalStation.name)")
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(abbreviatedDurationText(minutes: Int(resolvedConnection.duration / 60))) total")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(changesText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(resolvedConnection.transfers > 0 ? Color.orange : Color.secondary)
+                .fixedSize()
+        }
+    }
+
+    private var changesText: String {
+        switch resolvedConnection.transfers {
+        case ...0: return "Direct"
+        case 1: return "1 change"
+        default: return "\(resolvedConnection.transfers) changes"
+        }
+    }
+
+    private var departArriveRow: some View {
+        let layout = stacksForAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top))
+        return layout {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Depart").font(.caption2).foregroundStyle(.secondary)
+                DelayedTimeText(time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay)
+                if let platform = summaryDeparturePlatform {
+                    Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
                 }
             }
-        }.padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: stacksForAccessibilitySize ? .leading : .trailing, spacing: 4) {
+                Text("Arrive").font(.caption2).foregroundStyle(.secondary)
+                DelayedTimeText(time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay)
+                if let platform = summaryArrivalPlatform {
+                    Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: stacksForAccessibilitySize ? .leading : .trailing)
+        }
+    }
+
+    private func journeyActionBar(leaveTime: Date) -> some View {
+        let shareItem = shareText(leaveTime: leaveTime)
+        // When neither one-line row fits, ViewThatFits falls back to the last row, where the titles wrap instead.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                journeyActionButtons
+                ShareLink(item: shareItem) {
+                    Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                }
+            }
+            HStack(spacing: 8) {
+                journeyActionButtons
+                iconOnlyShareLink(item: shareItem)
+            }
+            HStack(alignment: .center, spacing: 8) {
+                journeyActionButtons
+                iconOnlyShareLink(item: shareItem)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func iconOnlyShareLink(item: String) -> some View {
+        ShareLink(item: item) { Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly) }
+    }
+
+    // At accessibility sizes the actions scroll with the content so a tall stack never covers the route.
+    private func stackedJourneyActions(leaveTime: Date) -> some View {
+        VStack(spacing: 8) {
+            journeyActionButtons
+            ShareLink(item: shareText(leaveTime: leaveTime)) {
+                Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder private var journeyActionButtons: some View {
+        if let onRemind {
+            Button(action: onRemind) {
+                Label {
+                    Text(isReminderSet ? "Cancel reminder" : "Remind me")
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: isReminderSet ? "bell.fill" : "bell")
+                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        if let onPin {
+            Button(action: onPin) {
+                Label {
+                    Text(isPinned ? "Unpin journey" : "Pin as my journey")
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func shareText(leaveTime: Date) -> String {
+        let departure = resolvedConnection.departureTime.formatted(date: .omitted, time: .shortened)
+        let arrival = resolvedConnection.arrivalTime.formatted(date: .omitted, time: .shortened)
+        let leave = leaveTime.formatted(date: .omitted, time: .shortened)
+        return "\(resolvedConnection.lineNumber) \(resolvedConnection.departureStation.name) \(departure) to "
+            + "\(resolvedConnection.arrivalStation.name) \(arrival), \(changesText.lowercased()). Leave at \(leave)."
     }
 
     @ViewBuilder private var serviceAlertsSection: some View {
@@ -213,6 +375,11 @@ struct ConnectionLegRow: View {
     var showTopConnector: Bool = false
     var showBottomConnector: Bool = false
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var railWidth: CGFloat = 20
+    @ScaledMetric(relativeTo: .caption) private var endpointNodeSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption) private var stopNodeSize: CGFloat = 6
+    @ScaledMetric(relativeTo: .caption) private var walkNodeSize: CGFloat = 10
 
     private struct LegStopEntry: Identifiable {
         let id: String
@@ -307,24 +474,24 @@ struct ConnectionLegRow: View {
     private var compactWalkingBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(showTopConnector ? railColor.opacity(0.6) : .clear).frame(width: 2, height: 10)
+                railSegment(fill: showTopConnector ? railColor.opacity(0.6) : .clear, minimumHeight: 10)
                 Circle()
                     .stroke(railColor.opacity(0.7), lineWidth: 2)
-                    .frame(width: 10, height: 10)
-                Rectangle().fill(showBottomConnector ? railColor.opacity(0.6) : .clear).frame(width: 2, height: 10)
-            }.frame(width: 20)
+                    .frame(width: walkNodeSize, height: walkNodeSize)
+                railSegment(fill: showBottomConnector ? railColor.opacity(0.6) : .clear, minimumHeight: 10)
+            }.frame(width: railWidth)
 
-            HStack(spacing: 8) {
-                Text(walkingTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer()
-                if let walkingDurationMinutes {
-                    Text("\(walkingDurationMinutes) min")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    walkingTitleText
+                    Spacer()
+                    walkingDurationText
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    walkingTitleText
+                    walkingDurationText
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -333,7 +500,31 @@ struct ConnectionLegRow: View {
                 in: RoundedRectangle(cornerRadius: 10)
             )
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 2)
+    }
+
+    private var walkingTitleText: some View {
+        Text(walkingTitle)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var walkingDurationText: some View {
+        if let walkingDurationMinutes {
+            Text(abbreviatedDurationText(minutes: walkingDurationMinutes))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // The rail stretches with the row (the row is height-fixed to its content) so a wrapped name never breaks it.
+    private func railSegment(fill: Color, minimumHeight: CGFloat) -> some View {
+        Rectangle()
+            .fill(fill)
+            .frame(width: 2)
+            .frame(minHeight: minimumHeight, idealHeight: minimumHeight, maxHeight: .infinity)
     }
 
     private var fullLegBody: some View {
@@ -351,79 +542,101 @@ struct ConnectionLegRow: View {
         let connectorColor = isPassed ? railColor : railColor.opacity(0.35)
         let nodeFillColor = isPassed ? railColor : (colorScheme == .dark ? railColor.opacity(0.4) : railColor.opacity(0.22))
 
+        let stacksForAccessibilitySize = dynamicTypeSize.isAccessibilitySize
+        let nodeSize = stop.isEndpoint ? endpointNodeSize : stopNodeSize
+
         return HStack(alignment: .center, spacing: 12) {
             VStack(spacing: 0) {
-                Rectangle()
-                    .fill((isFirst ? showTopConnector : true) ? connectorColor : .clear)
-                    .frame(width: 2, height: stop.isEndpoint ? 8 : 10)
+                railSegment(
+                    fill: (isFirst ? showTopConnector : true) ? connectorColor : .clear,
+                    minimumHeight: stop.isEndpoint ? 8 : 10
+                )
 
                 Circle()
                     .fill(nodeFillColor)
-                    .frame(width: stop.isEndpoint ? 12 : 6, height: stop.isEndpoint ? 12 : 6)
+                    .frame(width: nodeSize, height: nodeSize)
                     .overlay(Circle().stroke(railColor, lineWidth: stop.isEndpoint ? 2 : 1))
 
-                Rectangle()
-                    .fill((isLast ? showBottomConnector : true) ? connectorColor : .clear)
-                    .frame(width: 2, height: stop.isEndpoint ? 8 : 10)
+                railSegment(
+                    fill: (isLast ? showBottomConnector : true) ? connectorColor : .clear,
+                    minimumHeight: stop.isEndpoint ? 8 : 10
+                )
             }
-            .frame(width: 20)
+            .frame(width: railWidth)
 
-            if isFirst {
-                let style = Color.lineBadgeStyle(for: leg.lineNumber, apiColors: leg.lineColors)
-                Text(leg.lineNumber)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(style.foreground)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(style.background, in: RoundedRectangle(cornerRadius: 5))
-            }
+            if isFirst, !stacksForAccessibilitySize { legLineBadge.fixedSize() }
 
             VStack(alignment: .leading, spacing: 1) {
+                if isFirst, stacksForAccessibilitySize { legLineBadge.padding(.bottom, 2) }
+
                 Text(stop.name)
                     .font(.caption.weight(stop.isEndpoint ? .semibold : .regular))
                     .foregroundStyle(isPassed ? .secondary : .primary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 4) {
-                    if let scheduledTime = stop.scheduledTime {
-                        Text(scheduledTime, style: .time)
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .strikethrough()
-                    }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 4) { stopTimeDetails(stop: stop, isPassed: isPassed) }
+                    VStack(alignment: .leading, spacing: 1) { stopTimeDetails(stop: stop, isPassed: isPassed) }
+                }
 
-                    if let time = stop.time {
-                        Text(time, style: .time)
-                            .font(stop.isEndpoint ? .subheadline.monospacedDigit().weight(.semibold) : .caption.monospacedDigit())
-                            .foregroundStyle(isPassed ? .secondary : .primary)
-                    }
-
-                    if let delayMinutes = stop.delayMinutes, delayMinutes > 0 {
-                        Text("+\(delayMinutes)'")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.orange)
-                    }
-
-                    if stop.showChangedBadge {
-                        Text("(changed)")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
+                if stacksForAccessibilitySize, let platform = stop.platform, stop.isEndpoint {
+                    platformCapsule(platform).padding(.top, 2)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
-
-            if let platform = stop.platform, stop.isEndpoint {
-                Text("Platform \(platform)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(colorScheme == .dark ? 0.18 : 0.08), in: Capsule())
+            if !stacksForAccessibilitySize, let platform = stop.platform, stop.isEndpoint {
+                platformCapsule(platform).fixedSize()
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, stop.isEndpoint ? 5 : 2)
+    }
+
+    private var legLineBadge: some View {
+        let style = Color.lineBadgeStyle(for: leg.lineNumber, apiColors: leg.lineColors)
+        return Text(leg.lineNumber)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(style.foreground)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(style.background, in: RoundedRectangle(cornerRadius: 5))
+    }
+
+    private func platformCapsule(_ platform: String) -> some View {
+        Text("Platform \(platform)")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(colorScheme == .dark ? 0.18 : 0.08), in: Capsule())
+    }
+
+    @ViewBuilder private func stopTimeDetails(stop: LegStopEntry, isPassed: Bool) -> some View {
+        if let scheduledTime = stop.scheduledTime {
+            Text(scheduledTime, style: .time)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .strikethrough()
+        }
+
+        if let time = stop.time {
+            Text(time, style: .time)
+                .font(stop.isEndpoint ? .subheadline.monospacedDigit().weight(.semibold) : .caption.monospacedDigit())
+                .foregroundStyle(isPassed ? .secondary : .primary)
+        }
+
+        if let delayMinutes = stop.delayMinutes, delayMinutes > 0 {
+            Text("+\(delayMinutes)'")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.orange)
+        }
+
+        if stop.showChangedBadge {
+            Text("(changed)")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
     }
 }
 
@@ -443,6 +656,8 @@ struct TransferRow: View {
     let hasUpcomingTransitLeg: Bool
 
     @Environment(\.colorScheme) var colorScheme
+    @ScaledMetric(relativeTo: .caption) private var railWidth: CGFloat = 20
+    @ScaledMetric(relativeTo: .caption) private var nodeSize: CGFloat = 12
 
     private enum TransferUrgency {
         case walking
@@ -527,7 +742,7 @@ struct TransferRow: View {
     private var riskBadgeText: String? {
         if urgency == .missed { return "Missed" }
         guard let transferMinutes else { return nil }
-        return "\(transferMinutes) min"
+        return abbreviatedDurationText(minutes: transferMinutes)
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }
@@ -538,9 +753,9 @@ struct TransferRow: View {
     }
     private var normalizedCurrentPlatform: String? { currentPlatform.trimmedNonEmpty }
     private var normalizedNextPlatform: String? { nextPlatform.trimmedNonEmpty }
-    private var platformChangeText: String? {
+    private var platformChange: (from: String, to: String)? {
         guard let from = normalizedCurrentPlatform, let to = normalizedNextPlatform, from != to else { return nil }
-        return "Platform \(from) -> \(to)"
+        return (from, to)
     }
     private var detailsText: String {
         if urgency == .missed {
@@ -565,7 +780,7 @@ struct TransferRow: View {
         return "Walk transfer at \(stationName)"
     }
     private var connectorSegmentHeight: CGFloat { 24 }
-    private var shouldShowMetaRow: Bool { platformChangeText != nil || nextDepartureTime != nil }
+    private var shouldShowMetaRow: Bool { platformChange != nil || nextDepartureTime != nil }
 
     var body: some View {
         Group {
@@ -575,35 +790,34 @@ struct TransferRow: View {
                 fullTransferBody
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 3)
+    }
+
+    private var railSegment: some View {
+        Rectangle()
+            .fill(isPassed ? lineColor : lineColor.opacity(0.35))
+            .frame(width: 2)
+            .frame(minHeight: connectorSegmentHeight, idealHeight: connectorSegmentHeight, maxHeight: .infinity)
     }
 
     private var compactWalkingBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
-                    width: 2,
-                    height: connectorSegmentHeight
-                )
-                Circle().stroke(Color.secondary, lineWidth: 2).frame(width: 12, height: 12).overlay(
+                railSegment
+                Circle().stroke(Color.secondary, lineWidth: 2).frame(width: nodeSize, height: nodeSize).overlay(
                     Image(systemName: "figure.walk")
-                        .font(.system(size: 6, weight: .semibold))
+                        .font(.system(size: nodeSize / 2, weight: .semibold))
                         .foregroundStyle(Color.secondary)
                 )
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
-                    width: 2,
-                    height: connectorSegmentHeight
-                )
-            }.frame(width: 20)
+                railSegment
+            }.frame(width: railWidth)
 
-            HStack(spacing: 8) {
-                Text(compactWalkingTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isPassed ? .secondary : .primary)
-                    .lineLimit(1)
-
-                Spacer()
-            }
+            Text(compactWalkingTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isPassed ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(
@@ -615,74 +829,44 @@ struct TransferRow: View {
     private var fullTransferBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
-                    width: 2,
-                    height: connectorSegmentHeight
-                )
+                railSegment
 
                 ZStack {
-                    Circle().stroke(indicatorColor, lineWidth: 2).frame(width: 12, height: 12)
-                    Image(systemName: transferIconName).font(.system(size: 6, weight: .bold)).foregroundStyle(
+                    Circle().stroke(indicatorColor, lineWidth: 2).frame(width: nodeSize, height: nodeSize)
+                    Image(systemName: transferIconName).font(.system(size: nodeSize / 2, weight: .bold)).foregroundStyle(
                         indicatorColor)
                 }
 
-                Rectangle().fill(isPassed ? lineColor : lineColor.opacity(0.35)).frame(
-                    width: 2,
-                    height: connectorSegmentHeight
-                )
-            }.frame(width: 20)
+                railSegment
+            }.frame(width: railWidth)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: transferIconName)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(indicatorColor)
-                    Text(transferTitle)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(summaryTextColor)
-                        .scalableText(minimumScale: 0.8)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    if let riskBadgeText {
-                        Text(riskBadgeText)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(indicatorColor, in: Capsule())
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        transferTitleLabel
+                        Spacer()
+                        riskBadge
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        transferTitleLabel
+                        riskBadge
                     }
                 }
 
                 Text(detailsText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if shouldShowMetaRow {
-                    HStack(spacing: 6) {
-                        if let platformChangeText {
-                            Text(platformChangeText)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.blue)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
-                        }
-
-                        if let nextDepartureTime {
-                            Text("Departs").font(.caption2).foregroundStyle(.secondary)
-                            Text(nextDepartureTime, style: .time)
-                                .font(.caption2.monospacedDigit().weight(.medium))
-                                .foregroundStyle(isPassed ? .secondary : .primary)
-                        }
-
-                        Spacer()
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { transferMetaItems }
+                        VStack(alignment: .leading, spacing: 4) { transferMetaItems }
                     }
                 }
 
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .background(
@@ -690,4 +874,53 @@ struct TransferRow: View {
             )
         }
     }
+
+    private var transferTitleLabel: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: transferIconName)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(indicatorColor)
+            Text(transferTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(summaryTextColor)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var riskBadge: some View {
+        if let riskBadgeText {
+            Text(riskBadgeText)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(indicatorColor, in: Capsule())
+        }
+    }
+
+    @ViewBuilder private var transferMetaItems: some View {
+        if let platformChange {
+            (Text("Platform \(platformChange.from) ") + Text(Image(systemName: "arrow.right")) + Text(" \(platformChange.to)"))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.blue)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
+                .accessibilityLabel("Platform \(platformChange.from) to \(platformChange.to)")
+        }
+
+        if let nextDepartureTime {
+            HStack(spacing: 6) {
+                Text("Departs").font(.caption2).foregroundStyle(.secondary)
+                Text(nextDepartureTime, style: .time)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(isPassed ? .secondary : .primary)
+            }
+        }
+    }
+}
+
+/// Minutes as "15 min" or "3 hr, 31 min" in the user's locale.
+private func abbreviatedDurationText(minutes: Int) -> String {
+    Duration.seconds(max(0, minutes) * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
 }

@@ -11,6 +11,8 @@ struct DisplayConnection: Identifiable {
     // Phase flags, moved forward by the view model at each phase boundary rather than every second
     private(set) var isLeaveWindowPassed: Bool
     private(set) var hasDeparted: Bool
+    /// True once the leave time is at most `leaveCountdownWindow` away, passed included.
+    private(set) var isWithinLeaveCountdownWindow: Bool
 
     var id: String { connection.id }
 
@@ -26,6 +28,7 @@ struct DisplayConnection: Identifiable {
         )
         isLeaveWindowPassed = phase.isLeaveWindowPassed
         hasDeparted = phase.hasDeparted
+        isWithinLeaveCountdownWindow = phase.isWithinLeaveCountdownWindow
     }
 
     func timeRemaining(at date: Date) -> TimeInterval {
@@ -40,16 +43,22 @@ struct DisplayConnection: Identifiable {
         max(0, min(1, timeRemaining(at: date) / 1800))
     }
 
-    /// Recomputes the phase flags at `currentTime` and returns whether either one changed.
+    /// Recomputes the phase flags at `currentTime` and returns whether any of them changed.
     mutating func updatePhase(at currentTime: Date) -> Bool {
         let phase = Self.connectionPhase(
             leaveTime: leaveTime,
             departureTime: connection.departureTime,
             currentTime: currentTime
         )
-        guard phase.isLeaveWindowPassed != isLeaveWindowPassed || phase.hasDeparted != hasDeparted else { return false }
+        let current = Phase(
+            isLeaveWindowPassed: isLeaveWindowPassed,
+            hasDeparted: hasDeparted,
+            isWithinLeaveCountdownWindow: isWithinLeaveCountdownWindow
+        )
+        guard phase != current else { return false }
         isLeaveWindowPassed = phase.isLeaveWindowPassed
         hasDeparted = phase.hasDeparted
+        isWithinLeaveCountdownWindow = phase.isWithinLeaveCountdownWindow
         return true
     }
 
@@ -72,7 +81,7 @@ struct DisplayConnection: Identifiable {
 
     /// The next time after `date` at which a phase flag flips or a threshold haptic is due.
     func nextPhaseBoundary(after date: Date) -> Date? {
-        var boundaries = [leaveTime, connection.departureTime]
+        var boundaries = [leaveTime, connection.departureTime, leaveTime.addingTimeInterval(-Self.leaveCountdownWindow)]
         if isSelected || isPinned {
             boundaries += [
                 leaveTime.addingTimeInterval(-Self.warningHapticLeadTime),
@@ -84,16 +93,27 @@ struct DisplayConnection: Identifiable {
 
     // MARK: - Static Helpers
 
+    /// How far ahead a leave time gets a live countdown and a full card instead of a static time.
+    static let leaveCountdownWindow: TimeInterval = 60 * 60
     private static let warningHapticLeadTime: TimeInterval = 300
     private static let finalHapticLeadTime: TimeInterval = 120
+
+    private struct Phase: Equatable {
+        let isLeaveWindowPassed: Bool
+        let hasDeparted: Bool
+        let isWithinLeaveCountdownWindow: Bool
+    }
 
     private static func connectionPhase(
         leaveTime: Date,
         departureTime: Date,
         currentTime: Date
-    ) -> (isLeaveWindowPassed: Bool, hasDeparted: Bool) {
+    ) -> Phase {
         let hasDeparted = currentTime >= departureTime
-        let isLeaveWindowPassed = currentTime >= leaveTime && !hasDeparted
-        return (isLeaveWindowPassed, hasDeparted)
+        return Phase(
+            isLeaveWindowPassed: currentTime >= leaveTime && !hasDeparted,
+            hasDeparted: hasDeparted,
+            isWithinLeaveCountdownWindow: leaveTime.timeIntervalSince(currentTime) <= leaveCountdownWindow
+        )
     }
 }

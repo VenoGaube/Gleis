@@ -330,4 +330,14 @@ enum LoadingState<T> {
         if case let .loaded(v) = self { return v }
         return nil
     }
+
+    /// One number per case, so a view can key a cross-fade on which state is showing.
+    var phaseKey: Int {
+        switch self {
+        case .idle: 0
+        case .loading: 1
+        case .loaded: 2
+        case .error: 3
+        }
+    }
 }
