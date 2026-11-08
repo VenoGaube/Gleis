@@ -94,11 +94,8 @@ struct ContentView: View {
             didPrewarmRepeatTab = true
             commuteViewModel.onAppear()
             await commuteViewModel.loadStationsIfNeeded()
-        }.onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }.onChange(
-            of: deepLinkConnectionId
-        ) { _, newValue in
-            if newValue != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { deepLinkConnectionId = nil } }
-        }.fullScreenCover(isPresented: $showOnboarding) {
+        }.onAppear { if !settingsManager.appSettings.hasCompletedOnboarding { showOnboarding = true } }
+        .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
                 .environmentObject(settingsManager)
                 .onDisappear {

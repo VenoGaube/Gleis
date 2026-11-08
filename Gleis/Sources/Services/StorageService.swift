@@ -4,7 +4,7 @@ import Foundation
 
 enum StorageKey: String {
     case appSettings, trainCommuteConfig, cachedStations, oebbAuthSession, scheduledReminders, savedCommuteRoute,
-         archivedSchedulesByStationPair, pinnedJourney
+         archivedSchedulesByStationPair, pinnedJourney, deliveredServiceAlerts
 }
 
 // MARK: - ArchivedSchedules
@@ -50,7 +50,7 @@ struct ArchivedSchedules: Codable {
 
 // MARK: - LocalStorageService
 
-final class LocalStorageService: StorageServiceProtocol {
+final class LocalStorageService: StorageServiceProtocol, @unchecked Sendable {
     static let shared = LocalStorageService()
     private let defaults = UserDefaults.standard
     private let encoder = JSONEncoder()
@@ -122,9 +122,16 @@ final class SettingsManager: ObservableObject {
         try? storage.save(scheduledReminders, forKey: StorageKey.scheduledReminders.rawValue)
     }
 
-    func pruneExpiredReminders(before date: Date = Date()) {
+    /// Drops reminders whose leave time has passed. Cheap to call often: it only
+    /// touches storage when something was actually removed.
+    @discardableResult
+    func pruneExpiredReminders(before date: Date = Date()) -> Int {
+        let countBefore = scheduledReminders.count
         scheduledReminders.removeAll { $0.leaveTime < date }
+        let removed = countBefore - scheduledReminders.count
+        guard removed > 0 else { return 0 }
         try? storage.save(scheduledReminders, forKey: StorageKey.scheduledReminders.rawValue)
+        return removed
     }
 
     // MARK: - Pinned Journey Management
@@ -140,14 +147,24 @@ final class SettingsManager: ObservableObject {
         try? storage.delete(forKey: StorageKey.pinnedJourney.rawValue)
     }
 
+    /// Pure query. Expiry is handled by `checkAndClearExpiredPin()`, which callers
+    /// invoke explicitly — this used to unpin as a side effect, which meant writing
+    /// `@Published` state from inside a SwiftUI view update.
     func isPinned(_ connectionId: String) -> Bool {
-        guard let pinned = pinnedJourney else { return false }
-        // Auto-unpin if arrival time passed
-        if pinned.shouldAutoUnpin() {
-            unpinJourney()
-            return false
-        }
+        guard let pinned = pinnedJourney, !pinned.shouldAutoUnpin() else { return false }
         return pinned.connectionId == connectionId
+    }
+
+    /// Brings the stored pin back in line with live data for the same journey.
+    func syncPinnedJourney(with connections: [TrainConnection]) {
+        guard let pinned = pinnedJourney,
+              let live = connections.first(where: { $0.id == pinned.connectionId })
+        else { return }
+
+        let updated = pinned.refreshed(from: live)
+        guard updated != pinned else { return }
+        pinnedJourney = updated
+        try? storage.save(updated, forKey: StorageKey.pinnedJourney.rawValue)
     }
 
     func checkAndClearExpiredPin() {

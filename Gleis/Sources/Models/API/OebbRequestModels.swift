@@ -135,7 +135,9 @@ struct OebbGateTripSearchRequest: Encodable {
     struct TripSearch: Encodable {
         let depLocL: [LocationRef]
         let arrLocL: [LocationRef]
-        let minChgTime: String
+        /// Optional so it can be omitted entirely, letting the provider apply its own
+        /// per-station minimum change times.
+        let minChgTime: String?
         let liveSearch: Bool
         let maxChg: String
         let outFrwd: Bool

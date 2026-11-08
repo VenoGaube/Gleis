@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-final class NotificationService: NotificationServiceProtocol {
+final class NotificationService: NotificationServiceProtocol, @unchecked Sendable {
     static let shared = NotificationService()
     private let center = UNUserNotificationCenter.current()
 
@@ -24,10 +24,14 @@ final class NotificationService: NotificationServiceProtocol {
         content.sound = config.notificationSettings.soundEnabled ? .default : nil
         content.categoryIdentifier = config.transportType.rawValue
         content.interruptionLevel = preview.interruptionLevel
+        content.userInfo[NotificationPayload.deepLinkKey] = NotificationPayload.connectionDeepLink(id: connection.id)
+        content.targetContentIdentifier = connection.id
 
         let leaveTime = config.leaveTime(for: connection, fromStationId: fromStationId)
         let triggerDate = type == .fiveMinuteWarning ? leaveTime.addingTimeInterval(-5 * 60) : leaveTime
-        guard triggerDate > Date() else { return }
+        // Returning silently here used to leave the caller showing "Reminder set"
+        // for a notification that could never fire.
+        guard triggerDate > Date() else { throw GleisError.reminderTimeAlreadyPassed }
 
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute, .second], from: triggerDate
@@ -63,6 +67,8 @@ final class NotificationService: NotificationServiceProtocol {
         content.sound = .default
         content.categoryIdentifier = "service_alert_\(connection.lineNumber)"
         content.interruptionLevel = .timeSensitive
+        content.userInfo[NotificationPayload.deepLinkKey] = NotificationPayload.connectionDeepLink(id: connection.id)
+        content.targetContentIdentifier = connection.id
 
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let identifier = serviceAlertNotificationId(
@@ -75,74 +81,92 @@ final class NotificationService: NotificationServiceProtocol {
 
     func cancelNotification(id: String) { center.removePendingNotificationRequests(withIdentifiers: [id]) }
 
-    func cancelServiceAlertNotifications(reminderId: String) {
+    /// Awaits the pending-request query before removing.
+    ///
+    /// The callback form raced with rescheduling: commute identifiers are
+    /// deterministic, so a removal that landed after a re-add deleted the
+    /// notification that had just been scheduled.
+    private func removePendingNotifications(matching predicate: @Sendable @escaping (String) -> Bool) async {
+        let requests = await center.pendingNotificationRequests()
+        let identifiers = requests.map(\.identifier).filter(predicate)
+        guard !identifiers.isEmpty else { return }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+
+    func cancelServiceAlertNotifications(reminderId: String) async {
         let prefix = "serviceAlert_\(reminderId)_"
-        center.getPendingNotificationRequests { requests in
-            let identifiers = requests
-                .map(\.identifier)
-                .filter { $0.hasPrefix(prefix) }
-            guard !identifiers.isEmpty else { return }
-            self.center.removePendingNotificationRequests(withIdentifiers: identifiers)
-        }
+        await removePendingNotifications { $0.hasPrefix(prefix) }
     }
 
-    func cancelCommuteNotification(day: Weekday, direction: CommuteDirection) {
-        let ids = [
-            "commute_\(direction.rawValue)_\(day.rawValue)_5min", "commute_\(direction.rawValue)_\(day.rawValue)_leave",
-        ]
-        center.removePendingNotificationRequests(withIdentifiers: ids)
-    }
-
-    func cancelAllCommuteNotifications() {
-        center.getPendingNotificationRequests { requests in
-            let commuteIds = requests.filter { $0.identifier.hasPrefix("commute_") }.map(\.identifier)
-            self.center.removePendingNotificationRequests(withIdentifiers: commuteIds)
-        }
+    func cancelAllCommuteNotifications() async {
+        await removePendingNotifications { $0.hasPrefix("commute_") }
     }
 
     func scheduleCommuteNotification(
-        route: SavedCommuteRoute, day: Weekday, schedule: DaySchedule, direction: CommuteDirection,
-        config: RouteConfiguration
+        route: SavedCommuteRoute,
+        day: Weekday,
+        schedule: DaySchedule,
+        direction: CommuteDirection,
+        config _: RouteConfiguration,
+        occurrence: CommuteOccurrencePlanner.Occurrence,
+        occurrenceIndex: Int
     ) async throws {
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized else { throw GleisError.notificationPermissionDenied }
-        guard let fromStation = route.fromStation(for: direction),
+        guard route.fromStation(for: direction) != nil,
               let destination = route.toStation(for: direction)?.name else { return }
 
-        let walkingTime = config.travelTime(for: fromStation.id) ?? config.walkingTimeMinutes
-        let bufferTime = config.bufferTime(for: fromStation.id) ?? config.bufferTimeMinutes
-        let leaveMinutes = schedule.departureHour * 60 + schedule.departureMinute - walkingTime - bufferTime
-
         // Repeat journeys always use both notification types.
-        try await scheduleWeeklyNotification(
-            id: "commute_\(direction.rawValue)_\(day.rawValue)_5min", weekday: day.rawValue, minutes: leaveMinutes - 5,
+        try await scheduleDatedNotification(
+            id: commuteNotificationId(direction: direction, day: day, suffix: "5min", occurrenceIndex: occurrenceIndex),
+            fireDate: occurrence.leaveDate.addingTimeInterval(-5 * 60),
             title: "⏰ 5 Minutes",
-            body: "\(schedule.lineNumber) to \(destination) departs at \(schedule.departureTimeString)", level: .active
+            body: "\(schedule.lineNumber) to \(destination) departs at \(schedule.departureTimeString)",
+            level: .active,
+            deepLink: NotificationPayload.repeatScheduleDeepLink
         )
-        try await scheduleWeeklyNotification(
-            id: "commute_\(direction.rawValue)_\(day.rawValue)_leave", weekday: day.rawValue, minutes: leaveMinutes,
-            title: "🚨 GO!", body: "Catch \(schedule.lineNumber) at \(schedule.departureTimeString) → \(destination)",
-            level: .timeSensitive
+        try await scheduleDatedNotification(
+            id: commuteNotificationId(direction: direction, day: day, suffix: "leave", occurrenceIndex: occurrenceIndex),
+            fireDate: occurrence.leaveDate,
+            title: "🚨 GO!",
+            body: "Catch \(schedule.lineNumber) at \(schedule.departureTimeString) → \(destination)",
+            level: .timeSensitive,
+            deepLink: NotificationPayload.repeatScheduleDeepLink
         )
     }
 
-    private func scheduleWeeklyNotification(
-        id: String, weekday: Int, minutes: Int, title: String, body: String, level: UNNotificationInterruptionLevel
-    ) async throws {
-        let normalized = normalizedWeeklyTrigger(weekday: weekday, minutes: minutes)
+    /// Identifiers stay prefixed with `commute_` so a bulk cancel still finds them.
+    private func commuteNotificationId(
+        direction: CommuteDirection,
+        day: Weekday,
+        suffix: String,
+        occurrenceIndex: Int
+    ) -> String {
+        let base = "commute_\(direction.rawValue)_\(day.rawValue)_\(suffix)"
+        return occurrenceIndex == 0 ? base : "\(base)_\(occurrenceIndex)"
+    }
 
-        var components = DateComponents()
-        components.weekday = normalized.weekday
-        components.hour = normalized.minutes / 60
-        components.minute = normalized.minutes % 60
+    private func scheduleDatedNotification(
+        id: String,
+        fireDate: Date,
+        title: String,
+        body: String,
+        level: UNNotificationInterruptionLevel,
+        deepLink: String
+    ) async throws {
+        guard fireDate > Date() else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.interruptionLevel = level
+        content.userInfo[NotificationPayload.deepLinkKey] = deepLink
 
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: fireDate
+        )
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
 
@@ -200,25 +224,5 @@ final class NotificationService: NotificationServiceProtocol {
             hash = hash &* prime
         }
         return hash
-    }
-
-    private func normalizedWeeklyTrigger(weekday: Int, minutes: Int) -> (weekday: Int, minutes: Int) {
-        var normalizedWeekday = weekday
-        var normalizedMinutes = minutes
-        let dayMinutes = 24 * 60
-
-        while normalizedMinutes < 0 {
-            normalizedMinutes += dayMinutes
-            normalizedWeekday -= 1
-            if normalizedWeekday < 1 { normalizedWeekday = 7 }
-        }
-
-        while normalizedMinutes >= dayMinutes {
-            normalizedMinutes -= dayMinutes
-            normalizedWeekday += 1
-            if normalizedWeekday > 7 { normalizedWeekday = 1 }
-        }
-
-        return (normalizedWeekday, normalizedMinutes)
     }
 }

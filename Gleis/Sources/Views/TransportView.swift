@@ -173,7 +173,8 @@ struct TransportView: View {
                     message: "Tap the stations above to choose your start and destination"
                 ).frame(maxWidth: .infinity).padding(.top, 40)
             }
-        case .loading: SkeletonLoadingView(count: 3).padding(.top, 8)
+        case .loading:
+            ConnectionsLoadingView(startedAt: viewModel.loadingStartedAt ?? Date()).padding(.top, 8)
         case .loaded:
             let displayConnections = viewModel.displayConnections
             if displayConnections.isEmpty {

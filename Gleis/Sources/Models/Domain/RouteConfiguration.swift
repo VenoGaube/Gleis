@@ -144,4 +144,16 @@ enum Weekday: Int, CaseIterable, Codable, Identifiable {
     static var mondayFirst: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday] }
     static var workweek: [Weekday] { [.monday, .tuesday, .wednesday, .thursday, .friday] }
     static var weekend: [Weekday] { [.saturday, .sunday] }
+
+    /// The next calendar date that falls on this weekday, today included.
+    ///
+    /// Timetables differ by day of week, so anything searching on a day's behalf has
+    /// to search that day — seeding from "today" showed a Thursday timetable while the
+    /// user was configuring Monday.
+    func nextOccurrence(after reference: Date = Date(), calendar: Calendar = .current) -> Date {
+        let startOfReference = calendar.startOfDay(for: reference)
+        let referenceWeekday = calendar.component(.weekday, from: startOfReference)
+        let offset = (rawValue - referenceWeekday + 7) % 7
+        return calendar.date(byAdding: .day, value: offset, to: startOfReference) ?? startOfReference
+    }
 }

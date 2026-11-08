@@ -6,6 +6,19 @@ actor OebbAPIClient {
         pattern: "\\b([A-Z]{1,6})\\s*([0-9]{1,5})\\b"
     )
 
+    /// Transfer bounds for a trip search.
+    ///
+    /// `maxChg: "1000"` with `minChgTime: "-1"` asked the provider for every
+    /// theoretically possible itinerary, and it answered with them: a Stadlau-to-Graz
+    /// search returned a six-transfer and a twelve-transfer night trip. Those are not
+    /// journeys anyone takes, and because the gate caps a response at six or seven
+    /// trips whatever `numF` says, each one displaced a real departure. A sane ceiling
+    /// is both faster to compute and strictly more useful.
+    private static let gateMaximumChanges = "3"
+    /// Let the provider apply its own station-specific minimum change times. `-1`
+    /// disabled them, producing transfers that cannot physically be made.
+    private static let gateMinimumChangeTime: String? = nil
+
     private let baseURL = URL(string: "https://shop.oebbtickets.at")!
     private let fahrplanBaseURL = URL(string: "https://fahrplan.oebb.at")!
     private let storage: StorageServiceProtocol
@@ -13,6 +26,7 @@ actor OebbAPIClient {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private var authSession: OebbAuthSession?
+    private var lastGateSnapshotPruneAt: Date?
 
     private lazy var dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -42,6 +56,13 @@ actor OebbAPIClient {
         self.storage = storage
         self.urlSession = urlSession
         authSession = try? storage.load(forKey: StorageKey.oebbAuthSession.rawValue)
+
+        // Clear anything left over from previous runs, even if this launch never fetches.
+        let cutoff = Date().addingTimeInterval(-Self.gateSnapshotMaximumAge)
+        let maximumCount = Self.gateSnapshotMaximumCount
+        Task.detached(priority: .background) {
+            Self.pruneGateSnapshots(olderThan: cutoff, keepingAtMost: maximumCount)
+        }
     }
 
     // MARK: - Public API
@@ -175,9 +196,9 @@ actor OebbAPIClient {
                     req: .init(
                         depLocL: [.init(lid: makeGateLid(for: from), name: from.name)],
                         arrLocL: [.init(lid: makeGateLid(for: to), name: to.name)],
-                        minChgTime: "-1",
+                        minChgTime: Self.gateMinimumChangeTime,
                         liveSearch: false,
-                        maxChg: "1000",
+                        maxChg: Self.gateMaximumChanges,
                         outFrwd: true,
                         outTime: requestTime,
                         outDate: requestDate,
@@ -297,6 +318,7 @@ actor OebbAPIClient {
                 fallbackName: fallbackFrom.name,
                 fallbackEsn: fallbackFrom.number
             ) ?? mappedSections.first?.from ?? fallbackFromStop
+            let tripCancelled = connection.isCancelled
             let arrStop = mapGateTripStop(
                 connection.arr,
                 serviceDay: serviceDay,
@@ -314,7 +336,7 @@ actor OebbAPIClient {
 
             return OebbConnection(
                 id: normalizedId,
-                from: depStop,
+                from: tripCancelled ? depStop.markedCancelled() : depStop,
                 to: arrStop,
                 sections: mappedSections.isEmpty ? nil : mappedSections,
                 switches: connection.chg,
@@ -476,7 +498,8 @@ actor OebbAPIClient {
             departurePlatform: normalizedDeparturePlatform,
             arrivalPlatform: normalizedArrivalPlatform,
             departurePlatformDeviation: departurePlatformDeviation,
-            arrivalPlatformDeviation: arrivalPlatformDeviation
+            arrivalPlatformDeviation: arrivalPlatformDeviation,
+            cancelled: stopRef.isCancelled ? true : nil
         )
     }
 
@@ -819,6 +842,11 @@ actor OebbAPIClient {
         let files: FileInfo
     }
 
+    /// Writes a request/response pair to disk for debugging.
+    ///
+    /// Debug builds only, and off the actor. These are roughly 200KB per fetch and were
+    /// written synchronously inside the actor, so with the 45s foreground refresh timer
+    /// every other call into this client queued behind the disk I/O of the last one.
     private func persistGateSnapshotArtifact(
         routeSignature: String,
         requestData: Data,
@@ -827,18 +855,45 @@ actor OebbAPIClient {
         forwardCursor: String?,
         backwardCursor: String?
     ) {
-        let fileManager = FileManager.default
-        guard let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+#if DEBUG
+        guard let rootURL = Self.gateSnapshotsRootURL else { return }
 
         let now = Date()
+        Task.detached(priority: .background) {
+            Self.writeGateSnapshot(
+                rootURL: rootURL,
+                now: now,
+                routeSignature: routeSignature,
+                requestData: requestData,
+                responseData: responseData,
+                extractedConnectionIDs: extractedConnectionIDs,
+                forwardCursor: forwardCursor,
+                backwardCursor: backwardCursor
+            )
+        }
+
+        pruneGateSnapshotsIfNeeded(now: now)
+#endif
+    }
+
+    private static func writeGateSnapshot(
+        rootURL: URL,
+        now: Date,
+        routeSignature: String,
+        requestData: Data,
+        responseData: Data,
+        extractedConnectionIDs: [String],
+        forwardCursor: String?,
+        backwardCursor: String?
+    ) {
+        let fileManager = FileManager.default
         let safeRoute = routeSignature.replacingOccurrences(
             of: "[^A-Za-z0-9_-]",
             with: "_",
             options: .regularExpression
         )
         let folderName = "\(Int(now.timeIntervalSince1970))_\(safeRoute)"
-        let folderURL = baseURL.appendingPathComponent("oebb_gate_snapshots", isDirectory: true)
-            .appendingPathComponent(folderName, isDirectory: true)
+        let folderURL = rootURL.appendingPathComponent(folderName, isDirectory: true)
 
         do {
             try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -856,6 +911,63 @@ actor OebbAPIClient {
             try metadataData.write(to: folderURL.appendingPathComponent("meta.json"), options: .atomic)
         } catch {
             // Best effort only.
+        }
+    }
+
+    // MARK: - Gate Snapshot Retention
+
+    /// Snapshots are debugging artifacts. Without retention they accumulate for every
+    /// successful gate fetch — which, with the foreground refresh timer, is a new
+    /// request/response pair on disk roughly every 45 seconds for as long as the app
+    /// is open. Keep only a recent, bounded window.
+    private static let gateSnapshotMaximumAge: TimeInterval = 24 * 60 * 60
+    private static let gateSnapshotMaximumCount = 50
+    private static let gateSnapshotPruneInterval: TimeInterval = 5 * 60
+
+    private static var gateSnapshotsRootURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("oebb_gate_snapshots", isDirectory: true)
+    }
+
+    private func pruneGateSnapshotsIfNeeded(now: Date) {
+        if let lastPrune = lastGateSnapshotPruneAt, now.timeIntervalSince(lastPrune) < Self.gateSnapshotPruneInterval {
+            return
+        }
+        lastGateSnapshotPruneAt = now
+
+        let cutoff = now.addingTimeInterval(-Self.gateSnapshotMaximumAge)
+        let maximumCount = Self.gateSnapshotMaximumCount
+        Task.detached(priority: .background) {
+            Self.pruneGateSnapshots(olderThan: cutoff, keepingAtMost: maximumCount)
+        }
+    }
+
+    private static func pruneGateSnapshots(olderThan cutoff: Date, keepingAtMost maximumCount: Int) {
+        let fileManager = FileManager.default
+        guard let rootURL = gateSnapshotsRootURL,
+              let folders = try? fileManager.contentsOfDirectory(
+                  at: rootURL,
+                  includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+                  options: [.skipsHiddenFiles]
+              )
+        else { return }
+
+        // Folder names are "<unixTimestamp>_<route>", so the leading component dates
+        // the snapshot without needing to stat every directory.
+        let dated = folders.compactMap { url -> (url: URL, date: Date)? in
+            guard let stamp = url.lastPathComponent.split(separator: "_").first,
+                  let seconds = TimeInterval(stamp)
+            else {
+                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate
+                return modified.map { (url, $0) }
+            }
+            return (url, Date(timeIntervalSince1970: seconds))
+        }
+        .sorted { $0.date > $1.date }
+
+        for (index, entry) in dated.enumerated() where entry.date < cutoff || index >= maximumCount {
+            try? fileManager.removeItem(at: entry.url)
         }
     }
 

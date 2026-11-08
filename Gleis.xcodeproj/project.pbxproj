@@ -46,6 +46,14 @@
 		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044 /* CommuteScheduleViewModel.swift */; };
 		B046 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046 /* CameraService.swift */; };
 		B047 /* WidgetSyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047 /* WidgetSyncDiagnostics.swift */; };
+		B049 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F049 /* DeepLinkRouter.swift */; };
+		B050 /* WidgetSnapshotReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F050 /* WidgetSnapshotReconciler.swift */; };
+		B051 /* WidgetBackgroundRefreshScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F051 /* WidgetBackgroundRefreshScheduler.swift */; };
+		B052 /* ConnectionDeduplicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F052 /* ConnectionDeduplicator.swift */; };
+		B053 /* ServiceAlertStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F053 /* ServiceAlertStabilizer.swift */; };
+		B054 /* CommuteNotificationReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F054 /* CommuteNotificationReconciler.swift */; };
+		B055 /* ServiceAlertNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F055 /* ServiceAlertNotifier.swift */; };
+		B056 /* SerialQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F056 /* SerialQueue.swift */; };
 		W001 /* GleisWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF01 /* GleisWidget.swift */; };
 		W002 /* SharedWidgetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = WF02 /* SharedWidgetModels.swift */; };
 		W003 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WF03 /* WidgetKit.framework */; };
@@ -120,6 +128,14 @@
 		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
 		F046 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F047 /* WidgetSyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSyncDiagnostics.swift; sourceTree = "<group>"; };
+		F056 /* SerialQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerialQueue.swift; sourceTree = "<group>"; };
+		F055 /* ServiceAlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceAlertNotifier.swift; sourceTree = "<group>"; };
+		F054 /* CommuteNotificationReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteNotificationReconciler.swift; sourceTree = "<group>"; };
+		F052 /* ConnectionDeduplicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDeduplicator.swift; sourceTree = "<group>"; };
+		F053 /* ServiceAlertStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceAlertStabilizer.swift; sourceTree = "<group>"; };
+		F049 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
+		F050 /* WidgetSnapshotReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotReconciler.swift; sourceTree = "<group>"; };
+		F051 /* WidgetBackgroundRefreshScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBackgroundRefreshScheduler.swift; sourceTree = "<group>"; };
 		F100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F101 /* Gleis.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gleis.entitlements; sourceTree = "<group>"; };
 		WF00 /* GleisWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GleisWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -286,6 +302,10 @@
 				F009 /* TransportService.swift */,
 				F046 /* CameraService.swift */,
 				F043 /* StationSearchService.swift */,
+				F052 /* ConnectionDeduplicator.swift */,
+				F053 /* ServiceAlertStabilizer.swift */,
+				F054 /* CommuteNotificationReconciler.swift */,
+				F055 /* ServiceAlertNotifier.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -313,6 +333,10 @@
 				F014 /* ConnectionCache.swift */,
 				F041 /* ToastManager.swift */,
 				F047 /* WidgetSyncDiagnostics.swift */,
+				F049 /* DeepLinkRouter.swift */,
+				F050 /* WidgetSnapshotReconciler.swift */,
+				F051 /* WidgetBackgroundRefreshScheduler.swift */,
+				F056 /* SerialQueue.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
@@ -525,8 +549,16 @@
 				B039 /* DisplayConnection.swift in Sources */,
 				B041 /* ToastManager.swift in Sources */,
 				B043 /* StationSearchService.swift in Sources */,
+				B052 /* ConnectionDeduplicator.swift in Sources */,
+				B053 /* ServiceAlertStabilizer.swift in Sources */,
+				B054 /* CommuteNotificationReconciler.swift in Sources */,
+				B055 /* ServiceAlertNotifier.swift in Sources */,
 				B044 /* CommuteScheduleViewModel.swift in Sources */,
 				B047 /* WidgetSyncDiagnostics.swift in Sources */,
+				B049 /* DeepLinkRouter.swift in Sources */,
+				B050 /* WidgetSnapshotReconciler.swift in Sources */,
+				B051 /* WidgetBackgroundRefreshScheduler.swift in Sources */,
+				B056 /* SerialQueue.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -153,6 +153,52 @@ struct SkeletonBox: View {
     }
 }
 
+// MARK: - ConnectionsLoadingView
+
+/// The wait shown when there is no cached timetable to fall back on.
+///
+/// The provider takes 5-8s to answer a trip search, and longer on a busy route, so a
+/// bare shimmer leaves the user unsure whether anything is happening. This says what
+/// is being waited on, and admits it when the wait runs long rather than looking stuck.
+struct ConnectionsLoadingView: View {
+    /// When the wait began. Owned by the caller so it survives the parent's re-renders.
+    let startedAt: Date
+    var skeletonCount: Int = 3
+
+    private static let slowThreshold: TimeInterval = 5
+    private static let verySlowThreshold: TimeInterval = 12
+
+    private func message(at now: Date) -> String {
+        switch now.timeIntervalSince(startedAt) {
+        case ..<Self.slowThreshold: "Loading live departures…"
+        case ..<Self.verySlowThreshold: "Still loading — ÖBB is answering slowly."
+        default: "ÖBB is taking longer than usual. Hang tight."
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // TimelineView drives the elapsed-time copy without any view state to lose.
+            TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                let text = message(at: context.date)
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .animation(.easeInOut(duration: 0.25), value: text)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(text)
+            }
+
+            SkeletonLoadingView(count: skeletonCount)
+        }
+    }
+}
+
 // MARK: - SkeletonLoadingView
 
 struct SkeletonLoadingView: View {
@@ -422,7 +468,7 @@ struct ErrorView: View {
 
     private var errorInfo: (icon: String, color: Color) {
         switch error {
-        case .networkError: ("wifi.slash", .orange)
+        case .networkError, .offline, .timeout: ("wifi.slash", .orange)
         case .noRouteConfigured: ("map", .blue)
         case .apiError: ("server.rack", .red)
         default: ("exclamationmark.triangle.fill", .orange)

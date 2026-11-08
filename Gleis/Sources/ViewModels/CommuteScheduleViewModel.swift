@@ -144,9 +144,9 @@ final class CommuteScheduleViewModel: ObservableObject {
     }
 
     func clearSchedule(day: Weekday, direction: CommuteDirection) {
-        notificationService.cancelCommuteNotification(day: day, direction: direction)
         route.removeSchedule(for: day, direction: direction)
         save()
+        rescheduleAllNotifications()
         toastManager.show("Cleared \(day.fullName) schedule", type: .info)
     }
 
@@ -157,6 +157,8 @@ final class CommuteScheduleViewModel: ObservableObject {
             .sorted()
         route.pruneOldSkippedDates()
         save()
+        // Skips are applied when occurrences are planned, so the set must be rebuilt.
+        rescheduleAllNotifications()
     }
 
     var excludedDates: [Date] {
@@ -165,9 +167,9 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     func resetToDefaults() {
         Haptics.notification(.warning)
-        notificationService.cancelAllCommuteNotifications()
         route = SavedCommuteRoute()
         save()
+        Task { await notificationService.cancelAllCommuteNotifications() }
     }
 
     func findSuggestedSchedule(
@@ -192,22 +194,7 @@ final class CommuteScheduleViewModel: ObservableObject {
     // MARK: - Notifications
 
     func rescheduleAllNotifications() {
-        Task {
-            notificationService.cancelAllCommuteNotifications()
-            let cfg = config
-            for (day, schedule) in route.toWorkSchedules {
-                guard route.isDayActive(day, direction: .toWork) else { continue }
-                try? await notificationService.scheduleCommuteNotification(
-                    route: route, day: day, schedule: schedule, direction: .toWork, config: cfg
-                )
-            }
-            for (day, schedule) in route.toHomeSchedules {
-                guard route.isDayActive(day, direction: .toHome) else { continue }
-                try? await notificationService.scheduleCommuteNotification(
-                    route: route, day: day, schedule: schedule, direction: .toHome, config: cfg
-                )
-            }
-        }
+        Task { await CommuteNotificationReconciler.reconcile(notificationService: notificationService) }
     }
 
     // MARK: - Private
@@ -253,12 +240,12 @@ final class CommuteScheduleViewModel: ObservableObject {
             return makeSchedule(from: exact)
         }
 
-        let normalizedTemplateLine = normalizeLine(template.lineNumber)
+        let normalizedTemplateLine = ConnectionIdentity.normalizeLine(template.lineNumber)
         let templateMinutes = template.departureHour * 60 + template.departureMinute
         let calendar = Calendar.current
 
         let sameLineMatches: [(TrainConnection, Int)] = eligibleConnections.compactMap { connection in
-            guard normalizeLine(connection.lineNumber) == normalizedTemplateLine else { return nil }
+            guard ConnectionIdentity.normalizeLine(connection.lineNumber) == normalizedTemplateLine else { return nil }
             let hour = calendar.component(.hour, from: connection.departureTime)
             let minute = calendar.component(.minute, from: connection.departureTime)
             let diff = abs((hour * 60 + minute) - templateMinutes)
@@ -285,7 +272,7 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     private func connectionMatchesTemplate(_ connection: TrainConnection, template: DaySchedule) -> Bool {
         let calendar = Calendar.current
-        return normalizeLine(connection.lineNumber) == normalizeLine(template.lineNumber)
+        return ConnectionIdentity.normalizeLine(connection.lineNumber) == ConnectionIdentity.normalizeLine(template.lineNumber)
             && calendar.component(.hour, from: connection.departureTime) == template.departureHour
             && calendar.component(.minute, from: connection.departureTime) == template.departureMinute
     }
@@ -301,13 +288,6 @@ final class CommuteScheduleViewModel: ObservableObject {
             isDailyRepeat: false,
             transfers: connection.transfers
         )
-    }
-
-    private func normalizeLine(_ line: String) -> String {
-        line
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-            .replacingOccurrences(of: " ", with: "")
     }
 
 }

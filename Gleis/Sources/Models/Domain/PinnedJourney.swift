@@ -10,7 +10,7 @@ struct PinnedJourney: Codable, Equatable {
     let arrivalStation: Station
     let platform: String?
     let delay: Int
-    let pinnedAt: Date
+    private(set) var pinnedAt: Date
     let legs: [ConnectionLeg]
     let transfers: Int
 
@@ -25,6 +25,19 @@ struct PinnedJourney: Codable, Equatable {
 
     /// Returns whether the journey has departed
     var hasDeparted: Bool { Date() >= departureTime }
+
+    /// Re-reads the live values for this journey while keeping when it was pinned.
+    ///
+    /// A pin is a snapshot taken at pin time, so without this the card at the top of
+    /// the Train tab kept showing the delay, platform and times as they were when the
+    /// user pinned it — the one journey they care about most going stale while the
+    /// same train in the list below updated normally.
+    func refreshed(from connection: TrainConnection) -> PinnedJourney {
+        guard connection.id == connectionId else { return self }
+        var updated = PinnedJourney(from: connection)
+        updated.pinnedAt = pinnedAt
+        return updated
+    }
 
     /// Creates a PinnedJourney from a TrainConnection
     init(from connection: TrainConnection) {

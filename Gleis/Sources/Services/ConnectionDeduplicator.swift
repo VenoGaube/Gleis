@@ -1,0 +1,130 @@
+import Foundation
+
+// MARK: - ConnectionIdentity
+
+/// Normalisation shared by connection de-duplication and reminder re-matching.
+///
+/// The provider returns the same journey under different ids across pages and
+/// refreshes, with cosmetic differences in line and platform spelling, so both
+/// features need to compare them the same way.
+enum ConnectionIdentity {
+    static func normalizeLine(_ line: String) -> String {
+        line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+    }
+
+    static func normalizePlatform(_ platform: String?) -> String {
+        (platform ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+
+    static func minuteTimestamp(_ date: Date?) -> String {
+        guard let date else { return "nil" }
+        return String(Int(date.timeIntervalSince1970 / 60))
+    }
+
+    /// Identifies a journey by what it physically is — stations, times to the minute,
+    /// and its legs — rather than by the provider's volatile connection id.
+    static func signature(for connection: TrainConnection) -> String {
+        let legSignature = connection.legs.map(legSignature).joined(separator: ";")
+        return [
+            connection.departureStation.id,
+            connection.arrivalStation.id,
+            minuteTimestamp(connection.departureTime),
+            minuteTimestamp(connection.arrivalTime),
+            "\(connection.transfers)",
+            legSignature,
+        ].joined(separator: "|")
+    }
+
+    static func legSignature(_ leg: ConnectionLeg) -> String {
+        [
+            leg.isWalking ? "W" : "T",
+            normalizeLine(leg.lineNumber),
+            leg.from.id,
+            leg.to.id,
+            minuteTimestamp(leg.departureTime),
+            minuteTimestamp(leg.arrivalTime),
+        ].joined(separator: "~")
+    }
+}
+
+// MARK: - ConnectionDeduplicator
+
+/// Collapses duplicate representations of the same journey, keeping the richest copy.
+///
+/// Stateless: everything it needs about the user's reminders and pin is passed in,
+/// so the same inputs always produce the same output.
+enum ConnectionDeduplicator {
+    /// The user-state that makes one duplicate preferable to another. Keeping the copy
+    /// the user already has a reminder or pin against avoids breaking those references.
+    struct PreferenceContext {
+        let pinnedConnectionId: String?
+        let reminderIds: Set<String>
+        let savedRoute: SavedCommuteRoute
+        let previousIds: Set<String>
+
+        func hasReminder(for connection: TrainConnection) -> Bool {
+            reminderIds.contains(connection.id) || savedRoute.hasActiveReminder(for: connection)
+        }
+    }
+
+    static func deduplicate(_ connections: [TrainConnection], context: PreferenceContext) -> [TrainConnection] {
+        guard connections.count > 1 else { return connections }
+
+        var bestBySignature: [String: TrainConnection] = [:]
+        for connection in connections {
+            let signature = ConnectionIdentity.signature(for: connection)
+            guard let existing = bestBySignature[signature] else {
+                bestBySignature[signature] = connection
+                continue
+            }
+            if shouldPrefer(connection, over: existing, context: context) {
+                bestBySignature[signature] = connection
+            }
+        }
+
+        return bestBySignature.values.sorted { lhs, rhs in
+            if lhs.departureTime != rhs.departureTime { return lhs.departureTime < rhs.departureTime }
+            if lhs.arrivalTime != rhs.arrivalTime { return lhs.arrivalTime < rhs.arrivalTime }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private static func shouldPrefer(
+        _ candidate: TrainConnection,
+        over current: TrainConnection,
+        context: PreferenceContext
+    ) -> Bool {
+        let candidateScore = preferenceScore(for: candidate, context: context)
+        let currentScore = preferenceScore(for: current, context: context)
+        if candidateScore != currentScore { return candidateScore > currentScore }
+        // Tie-break on id so the result is stable across refreshes.
+        return candidate.id < current.id
+    }
+
+    private static func preferenceScore(for connection: TrainConnection, context: PreferenceContext) -> Int {
+        var score = 0
+
+        if context.pinnedConnectionId == connection.id { score += 1000 }
+        if context.hasReminder(for: connection) { score += 800 }
+        if context.previousIds.contains(connection.id) { score += 300 }
+        if connection.serviceAlerts != nil { score += 80 }
+        score += (connection.serviceAlerts ?? []).filter(\.isActive).count * 40
+        if !ConnectionIdentity.normalizePlatform(connection.platform).isEmpty { score += 2 }
+
+        score += connection.legs.reduce(0) { partial, leg in
+            var legScore = 0
+            if !leg.isWalking { legScore += 10 }
+            if leg.stopCount != nil { legScore += 5 }
+            if !leg.intermediateStops.isEmpty { legScore += 5 }
+            if !ConnectionIdentity.normalizePlatform(leg.platform).isEmpty { legScore += 2 }
+            return partial + legScore
+        }
+
+        return score
+    }
+}

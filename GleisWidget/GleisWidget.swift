@@ -12,267 +12,163 @@ struct SelectTransportIntent: WidgetConfigurationIntent {
 // MARK: - GleisProvider
 
 struct GleisProvider: AppIntentTimelineProvider {
+    /// How far ahead we materialise one-minute countdown ticks. Beyond this the
+    /// reload policy refreshes the timeline, so pre-rendering further is wasted work.
+    private static let minuteTickHorizon: TimeInterval = 60 * 60
+    /// Hard ceiling on timeline length. The horizon above keeps us well under this;
+    /// it exists so a pathological snapshot can never produce an unbounded timeline.
+    private static let maximumEntryCount = 150
+    /// Seconds before the leave time at which the countdown changes colour.
+    private static let urgencyThresholds: [TimeInterval] = [300, 120]
+
     func placeholder(in _: Context) -> GleisEntry {
         GleisEntry(date: Date(), data: WidgetData.placeholder, configuration: SelectTransportIntent())
     }
 
     func snapshot(for configuration: SelectTransportIntent, in _: Context) async -> GleisEntry {
-        GleisEntry(date: Date(), data: loadData(), configuration: configuration)
+        let now = Date()
+        return GleisEntry(date: now, data: loadData(), configuration: configuration)
     }
 
     func timeline(for configuration: SelectTransportIntent, in _: Context) async -> Timeline<GleisEntry> {
         let data = loadData()
         let now = Date()
-        var entries: [GleisEntry] = []
-        var scheduledTimestamps = Set<Int>()
 
-        if let data {
-            let activeData = staleAdjustedData(data, now: now)
-            appendTimelineEntry(
-                at: now,
-                data: activeData,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-
-            if activeData.state != .stale {
-                appendBoundaryEntries(
-                    for: activeData,
-                    now: now,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
-        } else {
+        guard let data else {
+            let isUnreadable = AppGroupStorage.isPrimaryWidgetSnapshotUnreadable(for: .trainCommute)
             WidgetSyncDiagnostics.staleDisplay(
-                reason: "no_snapshot_available",
+                reason: isUnreadable ? "snapshot_unreadable" : "no_snapshot_available",
                 generatedAt: now,
                 coverageEnd: now
             )
-            appendTimelineEntry(
-                at: now,
-                data: nil,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
+            // An unreadable snapshot means the app has one but this build can't parse
+            // it; telling the user to set up a route they already have would be wrong.
+            let snapshot: WidgetRenderSnapshot? = isUnreadable
+                ? WidgetRenderSnapshot(
+                    routeText: "",
+                    compactRouteText: "",
+                    state: .stale,
+                    stateMessage: "Open Gleis to refresh departures.",
+                    recoveryAction: .openLiveRoute,
+                    connection: nil,
+                    leaveTime: nil
+                )
+                : nil
+            let entry = GleisEntry(date: now, snapshot: snapshot, configuration: configuration)
+            return Timeline(entries: [entry], policy: timelineReloadPolicy(now: now, data: nil, entryCount: 1))
+        }
+
+        let isExhausted = data.isCoverageExhausted(at: now)
+        if isExhausted || data.state == .stale {
+            if isExhausted, data.state != .stale {
+                WidgetSyncDiagnostics.staleDisplay(
+                    reason: "coverage_exhausted",
+                    generatedAt: data.generatedAt,
+                    coverageEnd: data.coverageEnd
+                )
+            }
+            let entry = GleisEntry(
+                date: now,
+                snapshot: data.renderSnapshot(at: now, overridingState: .stale, message: "Refreshing departures..."),
+                configuration: configuration
+            )
+            return Timeline(entries: [entry], policy: timelineReloadPolicy(now: now, data: data, entryCount: 1))
+        }
+
+        let instants = renderInstants(for: data, now: now)
+        let entries = instants.map { instant -> GleisEntry in
+            // Past the covered horizon we can no longer vouch for the data, so the
+            // boundary entry flips the widget into its refreshing state.
+            let isPastCoverage = instant > data.coverageEnd
+            return GleisEntry(
+                date: instant,
+                snapshot: data.renderSnapshot(
+                    at: instant,
+                    overridingState: isPastCoverage ? .stale : nil,
+                    message: isPastCoverage ? "Refreshing departures..." : nil
+                ),
+                configuration: configuration
             )
         }
 
-        let sortedEntries = entries.sorted { $0.date < $1.date }
-        let refreshPolicy = timelineReloadPolicy(now: now, data: data, entryCount: sortedEntries.count)
-
-        return Timeline(entries: sortedEntries, policy: refreshPolicy)
+        return Timeline(
+            entries: entries,
+            policy: timelineReloadPolicy(now: now, data: data, entryCount: entries.count)
+        )
     }
 
     private func loadData() -> WidgetData? {
         AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute)
     }
 
-    private func staleAdjustedData(_ data: WidgetData, now: Date) -> WidgetData {
-        guard data.state != .stale else { return data }
-        guard data.isCoverageExhausted(at: now) else { return data }
-        WidgetSyncDiagnostics.staleDisplay(
-            reason: "coverage_exhausted",
-            generatedAt: data.generatedAt,
-            coverageEnd: data.coverageEnd
-        )
-        return staleData(from: data, updatedAt: now, message: "Refreshing departures...")
-    }
+    // MARK: - Entry Scheduling
 
-    private func appendBoundaryEntries(
-        for data: WidgetData,
-        now: Date,
-        configuration: SelectTransportIntent,
-        entries: inout [GleisEntry],
-        scheduledTimestamps: inout Set<Int>
-    ) {
-        if let current = data.connection(at: now) {
-            if current.leaveTime > now {
-                appendMinuteCountdownEntries(
-                    for: current.leaveTime,
-                    now: now,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-                appendSecondCountdownEntries(
-                    from: max(now, current.leaveTime.addingTimeInterval(-60)),
-                    through: current.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-                appendTimelineEntry(
-                    at: current.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
+    /// The instants at which the rendered widget actually changes.
+    ///
+    /// Sub-minute countdowns are deliberately absent: the views use
+    /// `Text(_:style: .timer)` inside the final minute, which updates itself without
+    /// needing an entry per second.
+    private func renderInstants(for data: WidgetData, now: Date) -> [Date] {
+        var instants: Set<Date> = [now]
+        let horizonEnd = now.addingTimeInterval(Self.minuteTickHorizon)
 
-            let nextTransition = current.connection.departureTime.addingTimeInterval(1)
-            if nextTransition > now {
-                appendTimelineEntry(
-                    at: nextTransition,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
-            if let next = data.connection(at: nextTransition), next.connection.id != current.connection.id {
-                appendMinuteCountdownEntries(
-                    for: next.leaveTime,
-                    now: now,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-                appendSecondCountdownEntries(
-                    from: max(now, next.leaveTime.addingTimeInterval(-60)),
-                    through: next.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-
-                if next.leaveTime > now {
-                    appendTimelineEntry(
-                        at: next.leaveTime,
-                        data: data,
-                        configuration: configuration,
-                        entries: &entries,
-                        scheduledTimestamps: &scheduledTimestamps
-                    )
-                }
-            }
-        } else if let firstFuture = data.futureConnections(from: now).first {
-            appendMinuteCountdownEntries(
-                for: firstFuture.leaveTime,
-                now: now,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-            appendSecondCountdownEntries(
-                from: max(now, firstFuture.leaveTime.addingTimeInterval(-60)),
-                through: firstFuture.leaveTime,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-            if firstFuture.leaveTime > now {
-                appendTimelineEntry(
-                    at: firstFuture.leaveTime,
-                    data: data,
-                    configuration: configuration,
-                    entries: &entries,
-                    scheduledTimestamps: &scheduledTimestamps
-                )
-            }
+        // `connection(at:)` surfaces the first connection still catchable at a given
+        // instant, so the displayed journey rolls over exactly at its leave time.
+        // Walk that chain forward until it leaves the horizon. Each step strictly
+        // advances the cursor past a leave time, and there are finitely many, so the
+        // connection count bounds the walk.
+        var cursor = now
+        var remainingSteps = data.connectionCount
+        while remainingSteps > 0, cursor <= horizonEnd, let current = data.connection(at: cursor) {
+            insertCountdownInstants(for: current.leaveTime, from: cursor, through: horizonEnd, into: &instants)
+            guard current.leaveTime <= horizonEnd else { break }
+            cursor = current.leaveTime
+            remainingSteps -= 1
         }
 
         let coverageBoundary = data.coverageEnd.addingTimeInterval(1)
-        if coverageBoundary > now {
-            let staleSnapshot = staleData(from: data, updatedAt: coverageBoundary, message: "Refreshing departures...")
-            appendTimelineEntry(
-                at: coverageBoundary,
-                data: staleSnapshot,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-        }
+        if coverageBoundary > now, coverageBoundary <= horizonEnd { instants.insert(coverageBoundary) }
+
+        let sorted = instants.filter { $0 >= now }.sorted()
+        return Array(sorted.prefix(Self.maximumEntryCount))
     }
 
-    private func appendSecondCountdownEntries(
+    /// Minute boundaries of the countdown to `leaveTime`, plus the colour-change and
+    /// arrival instants, limited to the `start...end` window.
+    private func insertCountdownInstants(
+        for leaveTime: Date,
         from start: Date,
         through end: Date,
-        data: WidgetData,
-        configuration: SelectTransportIntent,
-        entries: inout [GleisEntry],
-        scheduledTimestamps: inout Set<Int>
+        into instants: inout Set<Date>
     ) {
-        guard end > start else { return }
-        var cursor = start
-        while cursor <= end {
-            appendTimelineEntry(
-                at: cursor,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
-            cursor = cursor.addingTimeInterval(1)
-        }
-    }
+        guard leaveTime > start else { return }
+        var candidates = Self.urgencyThresholds.map { leaveTime.addingTimeInterval(-$0) }
+        candidates.append(leaveTime)
 
-    private func appendMinuteCountdownEntries(
-        for leaveTime: Date,
-        now: Date,
-        data: WidgetData,
-        configuration: SelectTransportIntent,
-        entries: inout [GleisEntry],
-        scheduledTimestamps: inout Set<Int>
-    ) {
-        // Minute updates happen exactly when remaining time crosses a minute boundary.
-        // We cap at 12h to avoid excessively large timelines on very distant departures.
-        let maximumMinuteEntries = 12 * 60
-        var added = 0
+        // Start at the latest minute boundary inside the window rather than walking
+        // back from a leave time that may be many hours out.
         var tick = leaveTime.addingTimeInterval(-60)
-
-        while tick > now, added < maximumMinuteEntries {
-            appendTimelineEntry(
-                at: tick,
-                data: data,
-                configuration: configuration,
-                entries: &entries,
-                scheduledTimestamps: &scheduledTimestamps
-            )
+        if tick > end {
+            let minutesBeyond = (tick.timeIntervalSince(end) / 60).rounded(.up)
+            tick = tick.addingTimeInterval(-minutesBeyond * 60)
+        }
+        while tick > start {
+            candidates.append(tick)
             tick = tick.addingTimeInterval(-60)
-            added += 1
+        }
+
+        for candidate in candidates where candidate > start && candidate <= end {
+            instants.insert(candidate)
         }
     }
 
-    private func staleData(from data: WidgetData, updatedAt: Date, message: String) -> WidgetData {
-        WidgetData(
-            transportType: data.transportType,
-            connections: [],
-            leaveTimes: [],
-            fromStationName: data.fromStationName,
-            toStationName: data.toStationName,
-            updatedAt: updatedAt,
-            generatedAt: updatedAt,
-            coverageStart: data.coverageStart,
-            coverageEnd: data.coverageEnd,
-            routeSignature: data.routeSignature,
-            snapshotSignature: data.snapshotSignature,
-            state: .stale,
-            stateMessage: message,
-            recoveryAction: data.recoveryAction
-        )
-    }
+    // MARK: - Reload Policy
 
     private func timelineReloadPolicy(
         now: Date,
         data: WidgetData?,
         entryCount: Int
     ) -> TimelineReloadPolicy {
-        // When we already provided concrete boundary entries, let the system consume them first.
-        if let data, data.state == .fresh, entryCount > 1 {
-            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_boundary_entries_at_end")
-            return .atEnd
-        }
-
         guard let data else {
             WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_no_data_10m")
             return .after(now.addingTimeInterval(10 * 60))
@@ -292,35 +188,37 @@ struct GleisProvider: AppIntentTimelineProvider {
             WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_low_coverage_5m")
             return .after(now.addingTimeInterval(5 * 60))
         }
+        // We materialised ticks only up to the horizon, so reload as they run out.
+        if entryCount > 1 {
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_boundary_entries_at_end")
+            return .atEnd
+        }
         WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_normal_10m")
         return .after(now.addingTimeInterval(10 * 60))
     }
-
-    private func appendTimelineEntry(
-        at date: Date,
-        data: WidgetData?,
-        configuration: SelectTransportIntent,
-        entries: inout [GleisEntry],
-        scheduledTimestamps: inout Set<Int>
-    ) {
-        let key = Int(date.timeIntervalSince1970.rounded())
-        guard !scheduledTimestamps.contains(key) else { return }
-        scheduledTimestamps.insert(key)
-        entries.append(GleisEntry(date: date, data: data, configuration: configuration))
-    }
-
 }
 
 // MARK: - GleisEntry
 
 struct GleisEntry: TimelineEntry {
     let date: Date
-    let data: WidgetData?
+    let snapshot: WidgetRenderSnapshot?
     let configuration: SelectTransportIntent
 
+    init(date: Date, snapshot: WidgetRenderSnapshot?, configuration: SelectTransportIntent) {
+        self.date = date
+        self.snapshot = snapshot
+        self.configuration = configuration
+    }
+
+    /// Convenience for call sites that still hold a full snapshot (placeholders, previews).
+    init(date: Date, data: WidgetData?, configuration: SelectTransportIntent) {
+        self.init(date: date, snapshot: data?.renderSnapshot(at: date), configuration: configuration)
+    }
+
     var relevance: TimelineEntryRelevance? {
-        guard let data, let current = data.connection(at: date) else { return nil }
-        let remaining = current.leaveTime.timeIntervalSince(date)
+        guard let leaveTime = snapshot?.leaveTime else { return nil }
+        let remaining = leaveTime.timeIntervalSince(date)
         return TimelineEntryRelevance(score: remaining < 300 ? 1.0 : 0.5)
     }
 }
@@ -348,16 +246,15 @@ struct GleisWidgetEntryView: View {
 extension View {
     func widgetBackground(entry: GleisEntry, colorScheme: ColorScheme) -> some View {
         let color: Color = {
-            guard let data = entry.data else {
+            guard let data = entry.snapshot else {
                 return colorScheme == .dark ? Color(.systemBackground) : .white
             }
             if data.state == .fallback { return .orange }
             if data.state == .stale { return .gray }
-            guard let current = data.connection(at: entry.date) else {
+            guard let leaveTime = data.leaveTime else {
                 return colorScheme == .dark ? Color(.systemBackground) : .white
             }
-            let remaining = current.leaveTime.timeIntervalSince(entry.date)
-            return urgencyColor(remaining)
+            return urgencyColor(leaveTime.timeIntervalSince(entry.date))
         }()
 
         return containerBackground(for: .widget) {
@@ -379,7 +276,7 @@ struct SmallWidgetView: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        if let data = entry.data, let current = data.connection(at: entry.date) {
+        if let data = entry.snapshot, let current = data.scheduled {
             let conn = current.connection
 
             VStack(spacing: 0) {
@@ -407,7 +304,12 @@ struct SmallWidgetView: View {
                 HStack(spacing: 6) {
                     Spacer(minLength: 0)
                     LineBadge(line: conn.lineNumber, lineColors: conn.lineColors, size: .small)
-                    if conn.hasServiceAlert {
+                    if conn.isCancelled {
+                        Image(systemName: "xmark.octagon.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.red)
+                            .accessibilityLabel("Service cancelled")
+                    } else if conn.hasServiceAlert {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.red)
@@ -437,7 +339,7 @@ struct SmallWidgetView: View {
                 .padding(.bottom, 12)
             }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
         } else {
-            EmptyWidgetView(size: .small, data: entry.data)
+            EmptyWidgetView(size: .small, snapshot: entry.snapshot)
         }
     }
 }
@@ -449,7 +351,7 @@ struct MediumWidgetView: View {
     let entry: GleisEntry
 
     var body: some View {
-        if let data = entry.data, let current = data.connection(at: entry.date) {
+        if let data = entry.snapshot, let current = data.scheduled {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
             let conn = current.connection
 
@@ -497,25 +399,33 @@ struct MediumWidgetView: View {
                     }
 
                     HStack(spacing: 8) {
-                        if conn.isDelayed {
+                        if conn.isCancelled {
                             HStack(spacing: 4) {
-                                Image(systemName: "clock.badge.exclamationmark").font(.caption2)
-                                Text("+\(conn.delay) min").font(.caption.weight(.semibold))
-                            }.foregroundStyle(.orange)
-                        }
-                        if conn.hasServiceAlert {
-                            HStack(spacing: 4) {
-                                Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                                Text("Service alert").font(.caption.weight(.semibold))
+                                Image(systemName: "xmark.octagon.fill").font(.caption2)
+                                Text("Cancelled").font(.caption.weight(.bold))
                             }
                             .foregroundStyle(.red)
+                        } else {
+                            if conn.isDelayed {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "clock.badge.exclamationmark").font(.caption2)
+                                    Text("+\(conn.delay) min").font(.caption.weight(.semibold))
+                                }.foregroundStyle(.orange)
+                            }
+                            if conn.hasServiceAlert {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+                                    Text("Service alert").font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(.red)
+                            }
                         }
                     }
                 }.padding(14)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).widgetURL(
                 entryURL(entry, fallbackConnectionId: conn.id))
         } else {
-            EmptyWidgetView(size: .medium, data: entry.data)
+            EmptyWidgetView(size: .medium, snapshot: entry.snapshot)
         }
     }
 }
@@ -527,7 +437,7 @@ struct CircularWidgetView: View {
     let entry: GleisEntry
 
     var body: some View {
-        if let data = entry.data, let current = data.connection(at: entry.date) {
+        if let data = entry.snapshot, let current = data.scheduled {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
             let progress = min(1, max(0, remaining / 1800))
 
@@ -579,7 +489,7 @@ struct RectangularWidgetView: View {
     let entry: GleisEntry
 
     var body: some View {
-        if let data = entry.data, let current = data.connection(at: entry.date) {
+        if let data = entry.snapshot, let current = data.scheduled {
             let remaining = current.leaveTime.timeIntervalSince(entry.date)
             let conn = current.connection
 
@@ -630,16 +540,22 @@ struct RectangularWidgetView: View {
                             .scalableText(minimumScale: 0.8)
                     }
 
-                    if conn.isDelayed {
-                        Text("+\(conn.delay)'")
+                    if conn.isCancelled {
+                        Text("Cancelled")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.orange)
-                    }
-
-                    if conn.hasServiceAlert {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
                             .foregroundStyle(.red)
+                    } else {
+                        if conn.isDelayed {
+                            Text("+\(conn.delay)'")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.orange)
+                        }
+
+                        if conn.hasServiceAlert {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
             }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
@@ -649,7 +565,8 @@ struct RectangularWidgetView: View {
                     Image(systemName: "tram.fill").widgetAccentable()
                     Text("Gleis").fontWeight(.semibold)
                 }.font(.headline)
-                Text(WidgetData.emptyHintText(for: entry.data)).font(.subheadline).foregroundStyle(.secondary)
+                Text(entry.snapshot?.emptyHintText ?? WidgetRenderSnapshot.missingHintText)
+                    .font(.subheadline).foregroundStyle(.secondary)
             }.widgetURL(entryURL(entry))
         }
     }
@@ -870,23 +787,23 @@ struct DepartureInfo: View {
 
 struct EmptyWidgetView: View {
     let size: EmptySize
-    let data: WidgetData?
+    let snapshot: WidgetRenderSnapshot?
 
     enum EmptySize { case small, medium }
 
     var body: some View {
-        let accentColor: Color = switch data?.state {
+        let accentColor: Color = switch snapshot?.state {
         case .fallback: .orange
         case .stale: .secondary
         default: .trainBlue
         }
-        let hasSnapshot = data != nil
-        let title = switch data?.state {
+        let hasSnapshot = snapshot != nil
+        let title = switch snapshot?.state {
         case .fallback: "Offline data"
         case .stale: "No departures"
         default: hasSnapshot ? "No departures" : "Set up route"
         }
-        let subtitle = WidgetData.emptyHintText(for: data)
+        let subtitle = snapshot?.emptyHintText ?? WidgetRenderSnapshot.missingHintText
 
         switch size {
         case .small:
@@ -896,7 +813,7 @@ struct EmptyWidgetView: View {
                     Image(systemName: "tram.fill").font(.title3).foregroundStyle(accentColor)
                 }
                 Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(recoveryURL(for: data))
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).widgetURL(recoveryURL(for: snapshot))
 
         case .medium:
             HStack(spacing: 16) {
@@ -912,7 +829,7 @@ struct EmptyWidgetView: View {
 
                 Spacer()
             } // .padding()
-            .widgetURL(recoveryURL(for: data))
+            .widgetURL(recoveryURL(for: snapshot))
         }
     }
 }
@@ -944,14 +861,14 @@ private let timeFormatter: DateFormatter = {
 }()
 
 private func entryURL(_ entry: GleisEntry, fallbackConnectionId: String? = nil) -> URL? {
-    if let data = entry.data, data.state != .fresh, let url = recoveryURL(for: data) { return url }
+    if let data = entry.snapshot, data.state != .fresh, let url = recoveryURL(for: data) { return url }
     if let fallbackConnectionId { return connectionDeepLink(id: fallbackConnectionId) }
     return URL(string: "gleis://commute")
 }
 
-private func recoveryURL(for data: WidgetData?) -> URL? {
-    guard let action = data?.recoveryAction else {
-        if data == nil { return URL(string: "gleis://setup") }
+private func recoveryURL(for snapshot: WidgetRenderSnapshot?) -> URL? {
+    guard let action = snapshot?.recoveryAction else {
+        if snapshot == nil { return URL(string: "gleis://setup") }
         return nil
     }
 

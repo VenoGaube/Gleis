@@ -27,6 +27,7 @@ struct SettingsView: View {
                 List {
                     notificationSection
                         .id(listTopAnchorId)
+                    leaveTimeSection
                     remindersSection
                     #if DEBUG
                     widgetDebugSection
@@ -52,6 +53,36 @@ struct SettingsView: View {
 
     private var isNotificationEnabled: Bool { notificationStatus == .authorized || notificationStatus == .provisional }
 
+    /// Exposes `useDelayInLeaveTime`, which the leave-time maths has always
+    /// supported but which nothing could switch on.
+    private var leaveTimeSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { settingsManager.trainCommuteConfig.usesDelayInLeaveTime },
+                set: { newValue in
+                    var config = settingsManager.trainCommuteConfig
+                    config.useDelayInLeaveTime = newValue
+                    settingsManager.updateConfig(config)
+                    Haptics.selection()
+                }
+            )) {
+                SettingsRow(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", title: "Account For Delays", color: .trainBlue)
+            }
+        } header: {
+            Text("Leave Time")
+        } footer: {
+            if settingsManager.trainCommuteConfig.usesDelayInLeaveTime {
+                Text(
+                    "Leave times follow the live delay, so a late train means you can leave later. Turn this off to always plan against the scheduled departure."
+                )
+            } else {
+                Text(
+                    "Leave times are based on the scheduled departure. Turn this on to push your leave time back when a train is running late."
+                )
+            }
+        }
+    }
+
     private var notificationSection: some View {
         Section {
             // Permission Status (opens Settings)
@@ -65,6 +96,34 @@ struct SettingsView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
             }.buttonStyle(.plain)
+            Toggle(isOn: Binding(
+                get: { settingsManager.trainCommuteConfig.notificationSettings.soundEnabled },
+                set: { newValue in
+                    var config = settingsManager.trainCommuteConfig
+                    config.notificationSettings.soundEnabled = newValue
+                    settingsManager.updateConfig(config)
+                    Haptics.selection()
+                }
+            )) {
+                SettingsRow(icon: "speaker.wave.2.fill", title: "Reminder Sound", color: .purple)
+            }
+            .disabled(!isNotificationEnabled)
+
+            NavigationLink {
+                ReminderMessageEditor()
+                    .environmentObject(settingsManager)
+            } label: {
+                HStack {
+                    SettingsRow(icon: "text.bubble.fill", title: "Reminder Message", color: .teal)
+                    Spacer()
+                    Text(settingsManager.trainCommuteConfig.notificationSettings.customMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 140, alignment: .trailing)
+                }
+            }
         } header: {
             Text("Notifications")
         } footer: {
@@ -231,17 +290,68 @@ struct SettingsView: View {
     }
 
     private func removeRepeatSchedule(day: Weekday, direction: CommuteDirection) {
-        NotificationService.shared.cancelCommuteNotification(day: day, direction: direction)
         var route = settingsManager.savedCommuteRoute
         route.removeSchedule(for: day, direction: direction)
         settingsManager.updateSavedCommuteRoute(route)
+        Task { await CommuteNotificationReconciler.reconcile() }
     }
 
     private func cancelReminder(_ reminder: ScheduledReminder) {
         NotificationService.shared.cancelNotification(id: "\(reminder.id)_fiveMinuteWarning")
         NotificationService.shared.cancelNotification(id: "\(reminder.id)_exactTime")
-        NotificationService.shared.cancelServiceAlertNotifications(reminderId: reminder.id)
+        Task { await NotificationService.shared.cancelServiceAlertNotifications(reminderId: reminder.id) }
         settingsManager.removeReminder(connectionId: reminder.id)
+    }
+}
+
+// MARK: - ReminderMessageEditor
+
+/// Edits the line that leads the five-minute warning. The field existed on
+/// `NotificationSettings` from the start but nothing could change it, so every
+/// reminder shipped with the built-in default.
+struct ReminderMessageEditor: View {
+    @EnvironmentObject private var settingsManager: SettingsManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: String = ""
+
+    private static let maximumLength = 80
+    private static let defaultMessage = "🚂 Time to catch your train!"
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Time to catch your train!", text: $draft, axis: .vertical)
+                    .lineLimit(1 ... 3)
+                    .onChange(of: draft) { _, newValue in
+                        if newValue.count > Self.maximumLength {
+                            draft = String(newValue.prefix(Self.maximumLength))
+                        }
+                    }
+            } header: {
+                Text("Message")
+            } footer: {
+                Text("Shown at the top of the five-minute warning. \(Self.maximumLength - draft.count) characters left.")
+            }
+
+            Section {
+                Button("Reset To Default") {
+                    draft = Self.defaultMessage
+                    Haptics.selection()
+                }
+                .disabled(draft == Self.defaultMessage)
+            }
+        }
+        .navigationTitle("Reminder Message")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { draft = settingsManager.trainCommuteConfig.notificationSettings.customMessage }
+        .onDisappear(perform: persist)
+    }
+
+    private func persist() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        var config = settingsManager.trainCommuteConfig
+        config.notificationSettings.customMessage = trimmed.isEmpty ? Self.defaultMessage : trimmed
+        settingsManager.updateConfig(config)
     }
 }
 

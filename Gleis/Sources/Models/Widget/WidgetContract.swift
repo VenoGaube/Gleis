@@ -152,7 +152,7 @@ struct WidgetData: Codable {
         let scheduled = scheduledConnections
         guard !scheduled.isEmpty else { return nil }
 
-        for item in scheduled where item.connection.departureTime > date {
+        for item in scheduled where item.leaveTime > date {
             return item
         }
         return nil
@@ -167,8 +167,10 @@ struct WidgetData: Codable {
 
     var isFallback: Bool { state == .fallback }
 
+    var connectionCount: Int { min(connections.count, leaveTimes.count) }
+
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
-        scheduledConnections.filter { $0.connection.departureTime > date }
+        scheduledConnections.filter { $0.leaveTime > date }
     }
 
     func hasCoverage(at date: Date) -> Bool {
@@ -247,6 +249,7 @@ struct WidgetConnection: Codable {
     let hasReminder: Bool
     let isPinned: Bool
     let hasServiceAlert: Bool
+    let isCancelled: Bool
 
     var isDelayed: Bool { delay > 0 }
 
@@ -263,7 +266,8 @@ struct WidgetConnection: Codable {
         stopCount: Int?,
         hasReminder: Bool = false,
         isPinned: Bool = false,
-        hasServiceAlert: Bool = false
+        hasServiceAlert: Bool = false,
+        isCancelled: Bool = false
     ) {
         self.id = id
         self.lineNumber = lineNumber
@@ -278,6 +282,49 @@ struct WidgetConnection: Codable {
         self.hasReminder = hasReminder
         self.isPinned = isPinned
         self.hasServiceAlert = hasServiceAlert
+        self.isCancelled = isCancelled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, lineNumber, lineColors, departureTime, arrivalTime, destination, platform
+        case transfers, delay, stopCount, hasReminder, isPinned, hasServiceAlert, isCancelled
+    }
+
+    /// Decoded leniently for `isCancelled` so a snapshot written by an older build
+    /// still loads instead of blanking the widget until the app next writes one.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let lineNumber = try container.decode(String.self, forKey: .lineNumber)
+        let lineColors = try container.decodeIfPresent(TrainLineColors.self, forKey: .lineColors)
+        let departureTime = try container.decode(Date.self, forKey: .departureTime)
+        let arrivalTime = try container.decode(Date.self, forKey: .arrivalTime)
+        let destination = try container.decode(String.self, forKey: .destination)
+        let platform = try container.decodeIfPresent(String.self, forKey: .platform)
+        let transfers = try container.decodeIfPresent(Int.self, forKey: .transfers)
+        let delay = try container.decode(Int.self, forKey: .delay)
+        let stopCount = try container.decodeIfPresent(Int.self, forKey: .stopCount)
+        let hasReminder = try container.decodeIfPresent(Bool.self, forKey: .hasReminder) ?? false
+        let isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        let hasServiceAlert = try container.decodeIfPresent(Bool.self, forKey: .hasServiceAlert) ?? false
+        let isCancelled = try container.decodeIfPresent(Bool.self, forKey: .isCancelled) ?? false
+
+        self.init(
+            id: id,
+            lineNumber: lineNumber,
+            lineColors: lineColors,
+            departureTime: departureTime,
+            arrivalTime: arrivalTime,
+            destination: destination,
+            platform: platform,
+            transfers: transfers,
+            delay: delay,
+            stopCount: stopCount,
+            hasReminder: hasReminder,
+            isPinned: isPinned,
+            hasServiceAlert: hasServiceAlert,
+            isCancelled: isCancelled
+        )
     }
 }
 
@@ -301,19 +348,97 @@ enum AppGroupStorage {
         defaults.set(encoded, forKey: primaryStorageKey(for: type))
     }
 
+    enum SnapshotLoadResult {
+        case snapshot(WidgetData)
+        /// A snapshot exists but this build cannot read it (schema change).
+        case unreadable
+        case missing
+    }
+
     static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
-        guard let defaults = sharedDefaults else { return nil }
-
-        if let primary = defaults.data(forKey: primaryStorageKey(for: type)),
-           let decoded = try? JSONDecoder().decode(WidgetData.self, from: primary)
-        {
-            return decoded
-        }
-
+        if case let .snapshot(data) = loadPrimaryWidgetSnapshot(for: type) { return data }
         return nil
+    }
+
+    /// Distinguishes "no route configured yet" from "a snapshot is there but this
+    /// build can't decode it" — previously both rendered as "set up your commute",
+    /// which tells a configured user to redo setup they have already done.
+    static func loadPrimaryWidgetSnapshot(for type: TransportType) -> SnapshotLoadResult {
+        guard let defaults = sharedDefaults,
+              let primary = defaults.data(forKey: primaryStorageKey(for: type))
+        else { return .missing }
+
+        guard let decoded = try? JSONDecoder().decode(WidgetData.self, from: primary) else { return .unreadable }
+        return .snapshot(decoded)
+    }
+
+    static func isPrimaryWidgetSnapshotUnreadable(for type: TransportType) -> Bool {
+        if case .unreadable = loadPrimaryWidgetSnapshot(for: type) { return true }
+        return false
     }
 
     private static func primaryStorageKey(for type: TransportType) -> String {
         "\(widgetDataKey)_\(normalizedKeyComponent(type.rawValue))"
+    }
+}
+
+// MARK: - WidgetRenderSnapshot
+
+/// The minimal slice of `WidgetData` a single timeline entry needs to render.
+///
+/// Timeline entries are archived individually by WidgetKit, so embedding the full
+/// snapshot (up to `WidgetSnapshotBuilder.maxStoredConnectionLimit` connections) in
+/// every entry multiplied the serialized timeline size by the entry count. Each entry
+/// only ever renders one connection, so it carries exactly that one.
+struct WidgetRenderSnapshot: Codable, Sendable {
+    let routeText: String
+    let compactRouteText: String
+    let state: WidgetDataState
+    let stateMessage: String?
+    let recoveryAction: WidgetRecoveryAction?
+    let connection: WidgetConnection?
+    let leaveTime: Date?
+
+    var isFallback: Bool { state == .fallback }
+
+    /// The connection to render, paired with its leave time, when one is scheduled.
+    var scheduled: (connection: WidgetConnection, leaveTime: Date)? {
+        guard let connection, let leaveTime else { return nil }
+        return (connection, leaveTime)
+    }
+
+    var emptyHintText: String {
+        if let stateMessage, !stateMessage.isEmpty { return stateMessage }
+        switch state {
+        case .fallback: return "Open the app to refresh."
+        case .stale: return "Check again soon or update route."
+        case .fresh: return "Tap to set up your commute"
+        }
+    }
+
+    static let missingHintText = "Tap to set up your commute"
+}
+
+extension WidgetData {
+    /// Resolves the connection active at `date` and projects this snapshot down to
+    /// what a single timeline entry renders.
+    func renderSnapshot(
+        at date: Date,
+        overridingState: WidgetDataState? = nil,
+        message: String? = nil
+    ) -> WidgetRenderSnapshot {
+        let resolvedState = overridingState ?? state
+        // A stale entry deliberately drops its connection so the view falls through
+        // to the "refreshing" empty state rather than showing data we no longer trust.
+        let active = resolvedState == .stale ? nil : connection(at: date)
+        return WidgetRenderSnapshot(
+            routeText: routeText,
+            compactRouteText: compactRouteText,
+            state: resolvedState,
+            stateMessage: message ?? stateMessage,
+            recoveryAction: recoveryAction,
+            connection: active?.connection,
+            leaveTime: active?.leaveTime
+        )
     }
 }

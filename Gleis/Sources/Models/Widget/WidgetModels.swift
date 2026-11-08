@@ -119,7 +119,8 @@ enum WidgetSnapshotBuilder {
             stopCount: stopCount,
             hasReminder: candidate.isSelected,
             isPinned: candidate.isPinned,
-            hasServiceAlert: (connection.serviceAlerts ?? []).contains(where: \.isActive)
+            hasServiceAlert: (connection.serviceAlerts ?? []).contains(where: \.isActive),
+            isCancelled: connection.isCancelled
         )
     }
 
@@ -186,8 +187,8 @@ enum WidgetSnapshotBuilder {
     ) -> [WidgetSnapshotCandidate] {
         candidates
             .filter { candidate in
-                // Keep departures visible until train departure, even when the leave window is already missed.
-                guard candidate.connection.departureTime > referenceDate else {
+                // Widget only surfaces connections that are still catchable.
+                guard candidate.leaveTime > referenceDate else {
                     return false
                 }
                 if excludingPinned {

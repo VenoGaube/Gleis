@@ -341,6 +341,26 @@ struct OebbConnectionStop: Decodable {
         arrivalPlatformDeviation = try container.decodeIfPresent(String.self, forKey: .arrivalPlatformDeviation)
         cancelled = OebbDecoding.boolIfPresent(container, forKey: .cancelled)
     }
+
+    /// Returns a copy flagged as cancelled, for propagating a trip-level cancellation
+    /// onto the connection's endpoints where `ConnectionMapper` reads it.
+    func markedCancelled() -> OebbConnectionStop {
+        OebbConnectionStop(
+            name: name,
+            esn: esn,
+            departure: departure,
+            arrival: arrival,
+            departureRealtime: departureRealtime,
+            arrivalRealtime: arrivalRealtime,
+            departureDelay: departureDelay,
+            arrivalDelay: arrivalDelay,
+            departurePlatform: departurePlatform,
+            arrivalPlatform: arrivalPlatform,
+            departurePlatformDeviation: departurePlatformDeviation,
+            arrivalPlatformDeviation: arrivalPlatformDeviation,
+            cancelled: true
+        )
+    }
 }
 
 // MARK: - OebbConnectionDetailResponse
@@ -513,7 +533,9 @@ struct OebbGateTripConnection: Decodable {
     let durS: String?
     let date: String?
 
-    enum CodingKeys: String, CodingKey { case cid, cksum, dep, arr, secL, msgL, chg, durS, date }
+    let isCncl: Bool?
+
+    enum CodingKeys: String, CodingKey { case cid, cksum, dep, arr, secL, msgL, chg, durS, date, isCncl }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -526,6 +548,16 @@ struct OebbGateTripConnection: Decodable {
         chg = OebbDecoding.intIfPresent(container, forKey: .chg)
         durS = try? container.decodeIfPresent(String.self, forKey: .durS)
         date = try? container.decodeIfPresent(String.self, forKey: .date)
+        isCncl = OebbDecoding.boolIfPresent(container, forKey: .isCncl)
+    }
+
+    /// True when the trip itself, either end of it, or any leg is cancelled.
+    var isCancelled: Bool {
+        if isCncl == true { return true }
+        if dep?.isCancelled == true || arr?.isCancelled == true { return true }
+        return (secL ?? []).contains { section in
+            section.jny?.isCncl == true || section.dep?.isCancelled == true || section.arr?.isCancelled == true
+        }
     }
 }
 
@@ -555,8 +587,10 @@ struct OebbGateTripJourney: Decodable {
     let dirTxt: String?
     let durS: String?
     let date: String?
+    /// HAFAS cancels a whole run with `isCncl`.
+    let isCncl: Bool?
 
-    enum CodingKeys: String, CodingKey { case stopL, prodL, msgL, dirTxt, durS, date }
+    enum CodingKeys: String, CodingKey { case stopL, prodL, msgL, dirTxt, durS, date, isCncl }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -566,6 +600,7 @@ struct OebbGateTripJourney: Decodable {
         dirTxt = try? container.decodeIfPresent(String.self, forKey: .dirTxt)
         durS = try? container.decodeIfPresent(String.self, forKey: .durS)
         date = try? container.decodeIfPresent(String.self, forKey: .date)
+        isCncl = OebbDecoding.boolIfPresent(container, forKey: .isCncl)
     }
 }
 
@@ -614,10 +649,13 @@ struct OebbGateTripStopRef: Decodable {
     let aTZOffset: Int?
     let dTZOffsetR: Int?
     let aTZOffsetR: Int?
+    /// HAFAS marks a cancelled call at a stop with `dCncl` / `aCncl`.
+    let dCncl: Bool?
+    let aCncl: Bool?
 
     enum CodingKeys: String, CodingKey {
         case locX, idx, dTimeS, aTimeS, dTimeR, aTimeR, dPltfS, aPltfS, dPltfR, aPltfR
-        case dProdX, aProdX, dTZOffset, aTZOffset, dTZOffsetR, aTZOffsetR
+        case dProdX, aProdX, dTZOffset, aTZOffset, dTZOffsetR, aTZOffsetR, dCncl, aCncl
     }
 
     init(from decoder: Decoder) throws {
@@ -638,7 +676,11 @@ struct OebbGateTripStopRef: Decodable {
         aTZOffset = OebbDecoding.intIfPresent(container, forKey: .aTZOffset)
         dTZOffsetR = OebbDecoding.intIfPresent(container, forKey: .dTZOffsetR)
         aTZOffsetR = OebbDecoding.intIfPresent(container, forKey: .aTZOffsetR)
+        dCncl = OebbDecoding.boolIfPresent(container, forKey: .dCncl)
+        aCncl = OebbDecoding.boolIfPresent(container, forKey: .aCncl)
     }
+
+    var isCancelled: Bool { dCncl == true || aCncl == true }
 }
 
 struct OebbGateTextValue: Decodable {

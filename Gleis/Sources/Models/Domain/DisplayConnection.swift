@@ -39,13 +39,17 @@ struct DisplayConnection: Identifiable {
     mutating func updateTime(currentTime: Date) {
         let newRemaining = leaveTime.timeIntervalSince(currentTime)
 
-        // Only trigger haptics on threshold crossings
-        if timeRemaining >= 300, newRemaining < 300 {
-            Haptics.notification(.warning)
-        } else if timeRemaining >= 120, newRemaining < 120 {
-            Haptics.notification(.error)
-        } else if timeRemaining >= 0, newRemaining < 0 {
-            Haptics.notification(.error)
+        // Haptics only for a journey the user committed to. Firing them for every
+        // visible connection meant a buzz each time any of ~25 rows crossed a
+        // threshold, for trains the user is not taking.
+        if isSelected || isPinned {
+            if timeRemaining >= 300, newRemaining < 300 {
+                Haptics.notification(.warning)
+            } else if timeRemaining >= 120, newRemaining < 120 {
+                Haptics.notification(.error)
+            } else if timeRemaining >= 0, newRemaining < 0 {
+                Haptics.notification(.error)
+            }
         }
 
         timeRemaining = newRemaining

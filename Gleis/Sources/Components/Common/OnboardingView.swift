@@ -62,6 +62,9 @@ struct OnboardingView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.25), value: currentStepIndex)
+                .onChange(of: currentStepIndex) { _, newIndex in
+                    persistRouteBeforeTimingStepIfNeeded(movingTo: newIndex)
+                }
 
                 footer
             }
@@ -149,6 +152,11 @@ struct OnboardingView: View {
         }
     }
 
+    private func persistRouteBeforeTimingStepIfNeeded(movingTo index: Int) {
+        guard steps[safe: index] == .timing else { return }
+        persistSetupSelections()
+    }
+
     @ViewBuilder private func stepView(_ step: OnboardingStep) -> some View {
         switch step {
         case .welcome:
@@ -167,6 +175,8 @@ struct OnboardingView: View {
                 destinationStation: $destinationStation,
                 pinnedJourney: $pinnedJourney
             )
+        case .timing:
+            TimingSetupStepView(step: step, originStation: originStation ?? settingsManager.trainCommuteConfig.startStation)
         case .widget:
             WidgetStepView(step: step, pinnedJourney: pinnedJourney)
         case .notifications:
@@ -230,6 +240,7 @@ struct OnboardingView: View {
 enum OnboardingStep: CaseIterable {
     case welcome
     case journey
+    case timing
     case widget
     case notifications
 
@@ -237,6 +248,7 @@ enum OnboardingStep: CaseIterable {
         switch self {
         case .welcome: "WELCOME"
         case .journey: "SETUP"
+        case .timing: "TIMING"
         case .widget: "WIDGET"
         case .notifications: "ALERTS"
         }
@@ -246,6 +258,7 @@ enum OnboardingStep: CaseIterable {
         switch self {
         case .welcome: "Your Real Train View"
         case .journey: "Pick Your Daily Route"
+        case .timing: "How Long To The Platform?"
         case .widget: "See It On Your Home Screen"
         case .notifications: "Get The Right Nudge"
         }
@@ -255,12 +268,186 @@ enum OnboardingStep: CaseIterable {
         switch self {
         case .welcome: "This is the exact My Journey and connection card UI you get in the Train tab."
         case .journey: "Select origin and destination and preview the real connection cards from your route."
+        case .timing: "Gleis subtracts this from each departure to tell you when to leave. Without it, leave time is just departure time."
         case .widget: "Add the widget to your home screen for live departure, countdown, and platform info."
         case .notifications: "Allow alerts so Gleis can remind you when it is actually time to leave."
         }
     }
 
     var requiresPinnedJourney: Bool { false }
+}
+
+// MARK: - TimingSetupStepView
+
+/// Collects walking and buffer time during setup.
+///
+/// These default to zero, and nothing in the app used to ask for them — so a new
+/// user's "leave at" time was identical to the departure time, quietly making the
+/// app's core number useless until they discovered the per-station sheets.
+struct TimingSetupStepView: View {
+    let step: OnboardingStep
+    let originStation: Station?
+
+    @StateObject private var settingsManager = SettingsManager.shared
+
+    private var walkingMinutes: Int {
+        settingsManager.trainCommuteConfig.travelTime(for: originStation?.id)
+            ?? settingsManager.trainCommuteConfig.walkingTimeMinutes
+    }
+
+    private var bufferMinutes: Int {
+        settingsManager.trainCommuteConfig.bufferTime(for: originStation?.id)
+            ?? settingsManager.trainCommuteConfig.bufferTimeMinutes
+    }
+
+    private var totalLeadMinutes: Int { walkingMinutes + bufferMinutes }
+
+    var body: some View {
+        OnboardingPanel(step: step) {
+            VStack(spacing: 14) {
+                OnboardingTimingStepper(
+                    title: "Getting to the platform",
+                    subtitle: originStation.map { "From home to \($0.name)" } ?? "Door to platform",
+                    systemImage: "figure.walk",
+                    tint: .trainBlue,
+                    minutes: walkingMinutes,
+                    range: 0 ... 90,
+                    onChange: updateWalking
+                )
+
+                OnboardingTimingStepper(
+                    title: "Extra buffer",
+                    subtitle: "Breathing room so you are not sprinting",
+                    systemImage: "hourglass",
+                    tint: .orange,
+                    minutes: bufferMinutes,
+                    range: 0 ... 30,
+                    onChange: updateBuffer
+                )
+
+                summaryCard
+            }
+        }
+    }
+
+    private var summaryCard: some View {
+        VStack(spacing: 6) {
+            if totalLeadMinutes == 0 {
+                Text("Leave time will equal departure time")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text("Set at least a walking time so Gleis can tell you when to head out.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Leave \(totalLeadMinutes) min before departure")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("You can fine-tune this per station any time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+    }
+
+    /// Writes both the route-wide default and the origin override, so the value
+    /// applies immediately and survives a later change of starting station.
+    private func updateWalking(_ minutes: Int) {
+        var config = settingsManager.trainCommuteConfig
+        config.walkingTimeMinutes = minutes
+        if let id = originStation?.id { config.setTravelTime(minutes, for: id) }
+        settingsManager.updateConfig(config)
+    }
+
+    private func updateBuffer(_ minutes: Int) {
+        var config = settingsManager.trainCommuteConfig
+        config.bufferTimeMinutes = minutes
+        if let id = originStation?.id { config.setBufferTime(minutes, for: id) }
+        settingsManager.updateConfig(config)
+    }
+}
+
+// MARK: - OnboardingTimingStepper
+
+struct OnboardingTimingStepper: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    let minutes: Int
+    let range: ClosedRange<Int>
+    let onChange: (Int) -> Void
+
+    private let quickPicks = [0, 5, 10, 15]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                    .foregroundStyle(tint)
+                    .frame(width: 32, height: 32)
+                    .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("\(minutes) min")
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(tint)
+            }
+
+            Stepper(
+                value: Binding(get: { minutes }, set: onChange),
+                in: range,
+                step: 1
+            ) {
+                EmptyView()
+            }
+            .labelsHidden()
+
+            HStack(spacing: 8) {
+                ForEach(quickPicks.filter { range.contains($0) }, id: \.self) { value in
+                    Button {
+                        Haptics.selection()
+                        onChange(value)
+                    } label: {
+                        Text("\(value)")
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(minutes == value ? tint.opacity(0.22) : Color.primary.opacity(0.06))
+                            )
+                            .foregroundStyle(minutes == value ? tint : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+    }
 }
 
 // MARK: - WelcomeStepView

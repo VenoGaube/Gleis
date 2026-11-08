@@ -151,7 +151,8 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
             }
             if schedule.departureHour == connHour,
                schedule.departureMinute == connMinute,
-               schedule.lineNumber == connection.lineNumber
+               ConnectionIdentity.normalizeLine(schedule.lineNumber)
+               == ConnectionIdentity.normalizeLine(connection.lineNumber)
             {
                 return .toWork
             }
@@ -164,7 +165,8 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
             }
             if schedule.departureHour == connHour,
                schedule.departureMinute == connMinute,
-               schedule.lineNumber == connection.lineNumber
+               ConnectionIdentity.normalizeLine(schedule.lineNumber)
+               == ConnectionIdentity.normalizeLine(connection.lineNumber)
             {
                 return .toHome
             }

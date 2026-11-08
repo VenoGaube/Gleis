@@ -23,8 +23,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private var cachedStationsByTransport: [String: [Station]] = [:]
     private var stationFetchTasksByTransport: [String: Task<[Station], Error>] = [:]
     private var resolvedStationRefsByStationId: [String: OebbStationRef] = [:]
-    private var prefetchedCurrentConnectionsByRoute: [String: [TrainConnection]] = [:]
-    private var prefetchedMidnightConnectionsByRoute: [String: [TrainConnection]] = [:]
+    private var prewarmedPagesByRoute: [String: PrewarmEntry] = [:]
 
     init(apiClient: OebbAPIClient = .shared, storage: StorageServiceProtocol = LocalStorageService.shared) {
         self.apiClient = apiClient
@@ -41,19 +40,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         )
     }
 
-    func fetchConnectionsFromMidnight(
-        from: Station, to: Station, transportType: TransportType
-    ) async throws -> [TrainConnection] {
-        if let prefetched = consumePrefetchedMidnightConnections(from: from, to: to, transportType: transportType) {
-            return Array(prefetched.prefix(FetchLimits.connectionBatchSize))
-        }
-
-        return try await fetchConnections(
-            from: from, to: to, transportType: transportType, departureTime: Calendar.current.startOfDay(for: Date()),
-            count: FetchLimits.connectionBatchSize
-        )
-    }
-
     func fetchMoreConnections(
         from: Station, to: Station, transportType: TransportType, after lastDeparture: Date
     ) async throws -> [TrainConnection] {
@@ -66,30 +52,13 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     func fetchConnections(
         from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
     ) async throws -> [TrainConnection] {
-        let prefetchedNearNow =
-            isNearNow(departureTime)
-                ? consumePrefetchedCurrentConnections(from: from, to: to, transportType: transportType) : nil
-
-        do {
-            return try await fetchConnectionsFromAPI(
-                from: from,
-                to: to,
-                transportType: transportType,
-                departureTime: departureTime,
-                count: count
-            )
-        } catch {
-            if isCancellation(error) { throw error }
-
-            // Fall back to near-now prefetch only when a live request fails.
-            // This keeps first paint responsive while prioritizing reliable alert data.
-            if let prefetchedNearNow,
-               prefetchedNearNow.allSatisfy({ $0.serviceAlerts != nil })
-            {
-                return Array(prefetchedNearNow.prefix(count))
-            }
-            throw error
-        }
+        try await fetchConnectionsFromAPI(
+            from: from,
+            to: to,
+            transportType: transportType,
+            departureTime: departureTime,
+            count: count
+        )
     }
 
     func fetchConnectionsPage(
@@ -100,74 +69,173 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         pageSize: Int,
         cursor: String?
     ) async throws -> ConnectionPage {
-        let normalizedPageSize = max(1, pageSize)
-        let prefetchedNearNow =
-            cursor == nil && isNearNow(seedDateTime)
-                ? consumePrefetchedCurrentConnections(from: from, to: to, transportType: transportType) : nil
+        return try await fetchConnectionsPageFromAPI(
+            from: from,
+            to: to,
+            transportType: transportType,
+            seedDateTime: seedDateTime,
+            pageSize: max(1, pageSize),
+            cursor: cursor
+        )
+    }
+
+    // MARK: - Launch Prewarm
+
+    private struct PrewarmEntry {
+        let task: Task<PrewarmedConnectionsPage, Error>
+        let startedAt: Date
+    }
+
+    /// How long a prewarmed first page stays claimable. Past this the departures it
+    /// holds are no longer current enough to present as live.
+    private static let prewarmFreshnessWindow: TimeInterval = 90
+
+    func prewarmConnections(from: Station, to: Station, transportType: TransportType) {
+        guard from.id != to.id else { return }
+        let key = routeKey(for: transportType, from: from, to: to)
+
+        let startedAt = Date()
+        connectionPrefetchLock.lock()
+        // Drop entries nobody claimed. A route the user navigated away from leaves its
+        // task running and its entry in the dictionary otherwise, one per distinct
+        // route for the life of the process.
+        for (staleKey, entry) in prewarmedPagesByRoute
+            where startedAt.timeIntervalSince(entry.startedAt) > Self.prewarmFreshnessWindow
+        {
+            entry.task.cancel()
+            prewarmedPagesByRoute.removeValue(forKey: staleKey)
+        }
+        if let existing = prewarmedPagesByRoute[key],
+           startedAt.timeIntervalSince(existing.startedAt) <= Self.prewarmFreshnessWindow
+        {
+            connectionPrefetchLock.unlock()
+            return
+        }
+        let task = Task<PrewarmedConnectionsPage, Error> { [weak self] in
+            guard let self else { throw CancellationError() }
+            let page = try await fetchConnectionsPageFromAPI(
+                from: from,
+                to: to,
+                transportType: transportType,
+                seedDateTime: startedAt,
+                pageSize: FetchLimits.connectionBatchSize,
+                cursor: nil
+            )
+            return PrewarmedConnectionsPage(page: page, seedDateTime: startedAt)
+        }
+        prewarmedPagesByRoute[key] = PrewarmEntry(task: task, startedAt: startedAt)
+        connectionPrefetchLock.unlock()
+    }
+
+    /// Lock use stays in a synchronous method; `NSLock` must not be held across an await.
+    private func takePrewarmEntry(forKey key: String) -> PrewarmEntry? {
+        connectionPrefetchLock.lock()
+        defer { connectionPrefetchLock.unlock() }
+        return prewarmedPagesByRoute.removeValue(forKey: key)
+    }
+
+    func claimPrewarmedConnections(
+        from: Station, to: Station, transportType: TransportType
+    ) async throws -> PrewarmedConnectionsPage? {
+        let key = routeKey(for: transportType, from: from, to: to)
+        guard let entry = takePrewarmEntry(forKey: key) else { return nil }
+        // Age is measured from when the request started, not from when it finished, so a
+        // slow response cannot be presented as fresher than the timetable it describes.
+        guard Date().timeIntervalSince(entry.startedAt) <= Self.prewarmFreshnessWindow else {
+            entry.task.cancel()
+            return nil
+        }
 
         do {
-            return try await fetchConnectionsPageFromAPI(
+            let result = try await entry.task.value
+            // Re-check after awaiting: the request itself can take most of the window.
+            guard Date().timeIntervalSince(entry.startedAt) <= Self.prewarmFreshnessWindow else { return nil }
+            return result
+        } catch {
+            // A failed prewarm is not an error for the caller; it just means there is
+            // nothing to inherit and the normal fetch should run.
+            if isCancellation(error) { return nil }
+            return nil
+        }
+    }
+
+    /// Pages the provider until the requested span of timetable is actually in hand.
+    ///
+    /// A single TripSearch returns six or seven trips no matter what `numF` says, so
+    /// one request covers minutes on a dense route and a few hours on a sparse one.
+    /// Callers that need "this morning" or "a day of departures" cannot express that
+    /// as a page size; they express it as coverage and this walks the cursor for them.
+    func fetchConnectionsCovering(
+        from: Station,
+        to: Station,
+        transportType: TransportType,
+        seedDateTime: Date,
+        coverage: ConnectionCoverage,
+        onPage: (@Sendable ([TrainConnection]) async -> Void)? = nil
+    ) async throws -> ConnectionCoverageResult {
+        var collected: [TrainConnection] = []
+        var seenIds = Set<String>()
+        var cursor: String?
+        let deadline = Date().addingTimeInterval(coverage.budget)
+
+        func isWanted(_ connection: TrainConnection) -> Bool {
+            if let notBefore = coverage.notBefore, connection.departureTime < notBefore { return false }
+            if let notAfter = coverage.notAfter, connection.departureTime >= notAfter { return false }
+            return true
+        }
+
+        func hasReachedCoverage() -> Bool {
+            if collected.count < coverage.minimumCount { return false }
+            guard let through = coverage.throughDeparture else { return true }
+            return collected.contains { $0.departureTime >= through }
+        }
+
+        for _ in 0 ..< FetchLimits.maxCoveragePages {
+            try Task.checkCancellation()
+            let page = try await fetchConnectionsPageFromAPI(
                 from: from,
                 to: to,
                 transportType: transportType,
                 seedDateTime: seedDateTime,
-                pageSize: normalizedPageSize,
+                pageSize: FetchLimits.connectionBatchSize,
                 cursor: cursor
             )
-        } catch {
-            if isCancellation(error) { throw error }
-            guard let prefetchedNearNow else { throw error }
-            return ConnectionPage(
-                connections: Array(prefetchedNearNow.prefix(normalizedPageSize)),
-                forwardCursor: nil,
-                backwardCursor: nil,
-                requestDate: Self.gateDateFormatter.string(from: seedDateTime),
-                requestTime: Self.gateTimeFormatter.string(from: seedDateTime),
-                pageSize: normalizedPageSize
-            )
+
+            var pageAdditions: [TrainConnection] = []
+            for connection in page.connections where isWanted(connection) {
+                if seenIds.insert(connection.id).inserted {
+                    collected.append(connection)
+                    pageAdditions.append(connection)
+                }
+            }
+
+            // Hand each page over as it lands. Pages get slower the deeper they go —
+            // measured 3.0s, 3.9s, 8.9s, 8.2s on one route — so waiting for the whole
+            // run before showing anything is the difference between a 3s and a 24s
+            // first paint.
+            if !pageAdditions.isEmpty, let onPage {
+                await onPage(pageAdditions.sorted { $0.departureTime < $1.departureTime })
+            }
+
+            // A cursor that is absent or unchanged means the provider has nothing
+            // further to offer; stop rather than refetching the same page.
+            guard let nextCursor = page.forwardCursor, nextCursor != cursor else {
+                cursor = nil
+                break
+            }
+            cursor = nextCursor
+
+            if hasReachedCoverage() { break }
+            // Stop before starting a page that cannot finish inside the budget.
+            if Date() >= deadline { break }
         }
-    }
 
-    func preloadCurrentConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType,
-        count: Int = FetchLimits.connectionBatchSize
-    ) async {
-        guard from.id != to.id else { return }
-        guard
-            let connections = try? await fetchConnectionsFromAPI(
-                from: from,
-                to: to,
-                transportType: transportType,
-                departureTime: Date(),
-                count: max(1, count)
-            ),
-            !connections.isEmpty
-        else { return }
-
-        storePrefetchedCurrentConnections(connections, from: from, to: to, transportType: transportType)
-    }
-
-    func preloadMidnightConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType,
-        count: Int = FetchLimits.connectionBatchSize
-    ) async {
-        guard from.id != to.id else { return }
-        guard
-            let connections = try? await fetchConnectionsFromAPI(
-                from: from,
-                to: to,
-                transportType: transportType,
-                departureTime: Calendar.current.startOfDay(for: Date()),
-                count: max(1, count)
-            ),
-            !connections.isEmpty
-        else { return }
-
-        storePrefetchedMidnightConnections(connections, from: from, to: to, transportType: transportType)
+        collected.sort { $0.departureTime < $1.departureTime }
+        return ConnectionCoverageResult(
+            connections: collected,
+            forwardCursor: cursor,
+            seedDateTime: seedDateTime
+        )
     }
 
     private func fetchConnectionsFromAPI(
@@ -247,7 +315,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
 
         let fetchTask = Task<[Station], Error> { [apiClient] in
-            try await apiClient.searchStations(query: "", count: FetchLimits.stationSearchCount).map {
+            try await apiClient.searchStations(query: "", count: FetchLimits.stationBrowseCount).map {
                 ConnectionMapper.mapStation($0, transportType: transportType)
             }
         }
@@ -411,56 +479,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     private func routeKey(for transportType: TransportType, from: Station, to: Station) -> String {
         "\(transportType.rawValue)|\(from.id)|\(to.id)"
-    }
-
-    private func isNearNow(_ departureTime: Date) -> Bool {
-        abs(departureTime.timeIntervalSinceNow) <= 10 * 60
-    }
-
-    private func storePrefetchedCurrentConnections(
-        _ connections: [TrainConnection],
-        from: Station,
-        to: Station,
-        transportType: TransportType
-    ) {
-        let key = routeKey(for: transportType, from: from, to: to)
-        connectionPrefetchLock.lock()
-        prefetchedCurrentConnectionsByRoute[key] = connections
-        connectionPrefetchLock.unlock()
-    }
-
-    private func consumePrefetchedCurrentConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType
-    ) -> [TrainConnection]? {
-        let key = routeKey(for: transportType, from: from, to: to)
-        connectionPrefetchLock.lock()
-        defer { connectionPrefetchLock.unlock() }
-        return prefetchedCurrentConnectionsByRoute.removeValue(forKey: key)
-    }
-
-    private func storePrefetchedMidnightConnections(
-        _ connections: [TrainConnection],
-        from: Station,
-        to: Station,
-        transportType: TransportType
-    ) {
-        let key = routeKey(for: transportType, from: from, to: to)
-        connectionPrefetchLock.lock()
-        prefetchedMidnightConnectionsByRoute[key] = connections
-        connectionPrefetchLock.unlock()
-    }
-
-    private func consumePrefetchedMidnightConnections(
-        from: Station,
-        to: Station,
-        transportType: TransportType
-    ) -> [TrainConnection]? {
-        let key = routeKey(for: transportType, from: from, to: to)
-        connectionPrefetchLock.lock()
-        defer { connectionPrefetchLock.unlock() }
-        return prefetchedMidnightConnectionsByRoute.removeValue(forKey: key)
     }
 
 }

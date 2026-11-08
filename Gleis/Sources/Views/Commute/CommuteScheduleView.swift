@@ -1298,8 +1298,11 @@ struct DayTrainPicker: View {
     @State private var hasMore = true
     @State private var selectedConnection: TrainConnection?
     @State private var showDetail: TrainConnection?
-    @State private var paginationSeedDateTime = Calendar.current.startOfDay(for: Date())
+    @State private var paginationSeedDateTime = Date()
     @State private var forwardCursor: String?
+    /// The calendar day being configured. Timetables are day-of-week specific, so the
+    /// search runs against the next occurrence of `day`, not against today.
+    private var serviceDay: Date { day.nextOccurrence() }
 
     init(
         day: Weekday, from: Station, to: Station, direction: CommuteDirection,
@@ -1361,79 +1364,108 @@ struct DayTrainPicker: View {
 
     private func loadConnections() async {
         isLoading = true
-        paginationSeedDateTime = Calendar.current.startOfDay(for: Date())
 
-        if let firstPage = try? await transportService.fetchConnectionsPage(
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: serviceDay)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+
+        // Seed before the first useful departure rather than at midnight. A
+        // midnight-anchored search spends its whole first response on night trains —
+        // for Stadlau to Graz that was 23:57 through 05:36, putting every morning
+        // departure two round trips out of reach.
+        paginationSeedDateTime = calendar.date(byAdding: .hour, value: 4, to: dayStart) ?? dayStart
+
+        let result = try? await transportService.fetchConnectionsCovering(
             from: from,
             to: to,
             transportType: transportType,
             seedDateTime: paginationSeedDateTime,
-            pageSize: FetchLimits.connectionBatchSize,
-            cursor: nil
-        ) {
-            connections = firstPage.connections
-            forwardCursor = firstPage.forwardCursor
-        } else {
-            connections =
-                await
-                    (try? transportService.fetchConnectionsFromMidnight(
-                        from: from,
-                        to: to,
-                        transportType: transportType
-                    ))
-                    ?? []
-            forwardCursor = nil
-        }
+            coverage: ConnectionCoverage(
+                minimumCount: Self.initialConnectionTarget,
+                throughDeparture: calendar.date(byAdding: .hour, value: 9, to: dayStart),
+                notBefore: dayStart,
+                notAfter: dayEnd
+            ),
+            onPage: { page in
+                await MainActor.run {
+                    appendPage(page)
+                    isLoading = false
+                }
+            }
+        )
 
-        hasMore = forwardCursor != nil || connections.count >= FetchLimits.connectionBatchSize
+        if let result {
+            connections = result.connections
+            forwardCursor = result.forwardCursor
+        }
+        hasMore = forwardCursor != nil && (connections.last?.departureTime ?? dayStart) < dayEnd
         isLoading = false
         preselectExisting()
     }
 
-    private func loadMore() {
-        guard hasMore, !isLoadingMore, let last = connections.last else { return }
-        let endOfDay = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: Date())!
-        guard last.departureTime < endOfDay || forwardCursor != nil else {
+    /// Merges a page into the list without disturbing what is already on screen.
+    private func appendPage(_ page: [TrainConnection]) {
+        let existingIds = Set(connections.map(\.id))
+        let additions = page.filter { !existingIds.contains($0.id) }
+        guard !additions.isEmpty else { return }
+        connections.append(contentsOf: additions)
+        connections.sort { $0.departureTime < $1.departureTime }
+    }
+
+    /// Roughly two pages' worth. The provider caps a response at six or seven trips, so
+    /// this plus the 09:00 coverage target lands the whole morning without paying for
+    /// the much slower third and fourth pages up front.
+    private static let initialConnectionTarget = 12
+
+    private func loadMore(remainingHops: Int = FetchLimits.maxCoveragePages) {
+        guard remainingHops > 0, hasMore, !isLoadingMore, let last = connections.last else { return }
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: serviceDay)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        guard forwardCursor != nil, last.departureTime < dayEnd else {
             hasMore = false
             return
         }
         isLoadingMore = true
         Task {
-            let more: [TrainConnection]
-            if let cursor = forwardCursor,
-               let page = try? await transportService.fetchConnectionsPage(
-                   from: from,
-                   to: to,
-                   transportType: transportType,
-                   seedDateTime: paginationSeedDateTime,
-                   pageSize: FetchLimits.connectionBatchSize,
-                   cursor: cursor
-               )
-            {
-                more = page.connections
-                if let nextCursor = page.forwardCursor, nextCursor != cursor {
-                    forwardCursor = nextCursor
-                } else {
-                    forwardCursor = nil
-                }
-            } else {
-                if forwardCursor != nil { forwardCursor = nil }
-                more =
-                    await
-                        (try? transportService.fetchMoreConnections(
-                            from: from, to: to, transportType: transportType, after: last.departureTime
-                        )) ?? []
+            guard let cursor = forwardCursor,
+                  let page = try? await transportService.fetchConnectionsPage(
+                      from: from,
+                      to: to,
+                      transportType: transportType,
+                      seedDateTime: paginationSeedDateTime,
+                      pageSize: FetchLimits.connectionBatchSize,
+                      cursor: cursor
+                  )
+            else {
+                // No usable cursor means no reliable way to continue this day's search.
+                // The departure-seeded fallback restarts the search and returns pages
+                // that overlap what is already shown, which stalled paging outright.
+                forwardCursor = nil
+                hasMore = false
+                isLoadingMore = false
+                return
             }
 
-            let today = Calendar.current.startOfDay(for: Date())
-            let newConns = more.filter { new in
-                !connections.contains { $0.id == new.id }
-                    && Calendar.current.isDate(new.departureTime, inSameDayAs: today)
+            let nextCursor = page.forwardCursor
+            forwardCursor = (nextCursor != nil && nextCursor != cursor) ? nextCursor : nil
+
+            let existingIds = Set(connections.map(\.id))
+            let newConns = page.connections.filter { new in
+                !existingIds.contains(new.id)
+                    && new.departureTime >= dayStart
+                    && new.departureTime < dayEnd
             }
             connections.append(contentsOf: newConns)
-            hasMore = (forwardCursor != nil || more.count >= FetchLimits.connectionBatchSize)
-                && (connections.last?.departureTime ?? Date()) < endOfDay
+            connections.sort { $0.departureTime < $1.departureTime }
+
+            // A page whose results were all filtered out leaves `connections.last`
+            // unchanged, so the list's onAppear trigger never fires again. Keep paging
+            // from here instead of waiting for a scroll that will not come.
+            let exhaustedDay = page.connections.contains { $0.departureTime >= dayEnd }
+            hasMore = forwardCursor != nil && !exhaustedDay
             isLoadingMore = false
+            if hasMore, newConns.isEmpty { loadMore(remainingHops: remainingHops - 1) }
         }
     }
 
@@ -1468,12 +1500,9 @@ struct DayTrainPicker: View {
             onFirstSchedule?()
         }
 
-        Task {
-            try? await notificationService.scheduleCommuteNotification(
-                route: route, day: day, schedule: schedule, direction: direction,
-                config: settingsManager.trainCommuteConfig
-            )
-        }
+        // Reconcile rather than scheduling this one entry directly: occurrences are
+        // dated, so the whole set has to be replanned against the saved route.
+        Task { await CommuteNotificationReconciler.reconcile(notificationService: notificationService) }
         dismiss()
     }
 }

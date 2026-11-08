@@ -137,7 +137,12 @@ struct ConnectionCard: View {
 
     @ViewBuilder
     private var headerStatusBadges: some View {
-        if connection.hasServiceAlerts, connection.isDelayed {
+        if connection.isCancelled {
+            // A cancelled service overrides every other status: the delay and alert
+            // badges describe a train that is not running.
+            CancelledBadge()
+                .frame(minHeight: 40, alignment: .center)
+        } else if connection.hasServiceAlerts, connection.isDelayed {
             VStack(alignment: .trailing, spacing: 6) {
                 ServiceAlertBadge()
                 DelayBadge(minutes: connection.delay)
@@ -422,6 +427,23 @@ struct DelayBadge: View {
             Text("+\(minutes)'")
         }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 6).padding(.vertical, 4)
             .background(Color.orange.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
+    }
+}
+
+struct CancelledBadge: View {
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "xmark.octagon.fill")
+            Text("Cancelled")
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.red)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(Color.red.opacity(colorScheme == .dark ? 0.3 : 0.18), in: Capsule())
+        .accessibilityLabel("Service cancelled")
     }
 }
 

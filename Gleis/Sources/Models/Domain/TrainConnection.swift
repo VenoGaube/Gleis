@@ -207,6 +207,9 @@ struct TrainConnection: Identifiable, Codable, Equatable {
     var serviceAlerts: [ServiceAlert]? = nil
 
     var isDelayed: Bool { delay > 0 }
+    /// The operator has cancelled this service. Parsed from the feed since the first
+    /// version but previously never surfaced, so a cancelled train looked normal.
+    var isCancelled: Bool { status == .cancelled }
     var duration: TimeInterval { max(0, arrivalTime.timeIntervalSince(departureTime)) }
     var hasServiceAlerts: Bool { !(serviceAlerts ?? []).isEmpty }
 
