@@ -182,6 +182,21 @@ actor OebbAPIClient {
 
     // MARK: - Seat Reservation
 
+    /// Prices the trip the way the shop's result list does; the offers call fails for a trip that was never priced.
+    func priceConnection(connectionId: String) async throws {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("api/offer/v1/prices"), resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "connectionIds[]", value: connectionId),
+            URLQueryItem(name: "sortType", value: "DEPARTURE"),
+            URLQueryItem(name: "bestPriceId", value: "undefined"),
+        ]
+        _ = try await performAuthorized(
+            url: components?.url, method: "GET", extraHeaders: seatReservationHeaders, decode: OebbIgnoredResponse.self
+        )
+    }
+
     func fetchOffers(connectionId: String) async throws -> OebbOffersResponse {
         let payload = OebbOffersRequest(
             selection: OebbOfferSelection(connectionId: connectionId, offerSections: []),

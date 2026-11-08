@@ -357,6 +357,8 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         var step = "shop timetable"
         do {
             let shopConnection = try await findShopConnection(for: connection)
+            step = "prices"
+            try await apiClient.priceConnection(connectionId: shopConnection.id)
             step = "offers"
             let offers = try await apiClient.fetchOffers(connectionId: shopConnection.id)
             guard !offers.offerError, let offerSections = offers.offerSections, !offerSections.isEmpty else {

@@ -1122,3 +1122,8 @@ enum OebbDecoding {
         return nil
     }
 }
+
+/// A reply whose body Gleis does not read, decoded only to confirm the call succeeded.
+struct OebbIgnoredResponse: Decodable {
+    init(from decoder: Decoder) throws {}
+}
