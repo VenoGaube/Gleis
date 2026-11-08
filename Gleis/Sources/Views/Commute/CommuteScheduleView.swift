@@ -443,14 +443,14 @@ struct CommuteScheduleView: View {
         }
         suggestionLoadingDays[direction] = Set(candidates)
 
-        let viewModel = viewModel
+        let scheduleViewModel = viewModel
         suggestionLookupTask = Task(priority: .utility) {
             await withTaskGroup(of: (Weekday, DaySchedule?).self) { group in
                 var remainingDays = candidates.makeIterator()
                 func startNextLookup() {
                     guard let candidateDay = remainingDays.next() else { return }
                     group.addTask {
-                        let matchedSchedule = await viewModel.findSuggestedSchedule(
+                        let matchedSchedule = await scheduleViewModel.findSuggestedSchedule(
                             for: candidateDay,
                             basedOn: schedule,
                             direction: direction
@@ -469,7 +469,7 @@ struct CommuteScheduleView: View {
                         suggestionLoadingDays[direction]?.remove(candidateDay)
 
                         guard let matchedSchedule else { return }
-                        guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
+                        guard scheduleViewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
                         guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
 
                         suggestions[direction, default: [:]][candidateDay] = matchedSchedule
