@@ -37,7 +37,7 @@ struct DisplayConnection: Identifiable {
     }
 
     func progress(at date: Date) -> Double {
-        max(0, min(1, timeRemaining(at: date) / 1800))
+        max(0, min(1, timeRemaining(at: date) / Self.leaveCountdownWindow))
     }
 
     /// Recomputes the phase flags at `currentTime` and returns whether any of them changed.
@@ -88,8 +88,8 @@ struct DisplayConnection: Identifiable {
 
     // MARK: - Static Helpers
 
-    /// How far ahead of the leave time the ring switches to a per-second countdown.
-    static let leaveCountdownWindow: TimeInterval = 60 * 60
+    /// How far ahead of the leave time the ring starts to empty and switches to a per-second countdown.
+    static let leaveCountdownWindow: TimeInterval = 30 * 60
     private static let warningHapticLeadTime: TimeInterval = 300
     private static let finalHapticLeadTime: TimeInterval = 120
 

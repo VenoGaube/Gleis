@@ -15,6 +15,8 @@ struct SeatMapSheet: View {
     private static let scottySearchBase = "https://fahrplan.oebb.at/bin/query.exe/dn"
     // One minute early so the chosen train is the first result; its "Ticket und Preise" link opens it in the shop.
     private static let scottySearchLeadTime: TimeInterval = 60
+    // Past this the sheet shows the failure state with Try Again instead of spinning on.
+    private static let seatMapLoadTimeout: TimeInterval = 40
     private static let scottyDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "de_AT")
@@ -33,8 +35,14 @@ struct SeatMapSheet: View {
         let trainLegs = connection.legs.filter { !$0.isWalking }
         let fromName = trainLegs.first?.from.name ?? connection.departureStation.name
         let toName = trainLegs.last?.to.name ?? connection.arrivalStation.name
-        let departure = (trainLegs.first?.departureTime ?? connection.departureTime)
-            .addingTimeInterval(-Self.scottySearchLeadTime)
+        let firstTrainLeg = trainLegs.first
+        let actualDeparture = firstTrainLeg?.departureTime ?? connection.departureTime
+        // Scotty searches the timetable, so a delayed train is found under its scheduled time.
+        let scheduledDeparture = ConnectionTransferPlanner.plannedTime(
+            from: actualDeparture,
+            delayMinutes: firstTrainLeg?.departureDelayMinutes ?? connection.delay
+        ) ?? actualDeparture
+        let departure = scheduledDeparture.addingTimeInterval(-Self.scottySearchLeadTime)
         var components = URLComponents(string: Self.scottySearchBase)
         components?.queryItems = [
             URLQueryItem(name: "S", value: fromName),
@@ -128,7 +136,9 @@ struct SeatMapSheet: View {
     private func loadSeatMaps() async {
         loadState = .loading
         do {
-            let legs = try await TransportService.shared.fetchSeatMaps(for: connection)
+            let legs = try await withTimeout(seconds: Self.seatMapLoadTimeout) { [connection] in
+                try await TransportService.shared.fetchSeatMaps(for: connection)
+            }
             if selectedLegID == nil || !legs.contains(where: { $0.id == selectedLegID }) {
                 selectedLegID = Self.defaultLegID(in: legs)
             }
@@ -489,9 +499,8 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
     @ScaledMetric(relativeTo: .caption2) private var minimumSeatSide: CGFloat = 28
     @State private var availableWidth: CGFloat = 0
 
-    private var cell: Double { Self.cellSize(of: layout) }
-
     var body: some View {
+        let cell = Self.cellSize(of: layout)
         let fitScale = availableWidth > 0 ? Double(availableWidth) / max(layout.width + cell, cell) : 0
         let minimumScale = Double(minimumSeatSide) / cell
         let scrolls = fitScale < minimumScale
@@ -499,9 +508,9 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
 
         Group {
             if scrolls {
-                ScrollView(.horizontal) { drawing(scale: scale) }
+                ScrollView(.horizontal) { drawing(scale: scale, cell: cell) }
             } else {
-                drawing(scale: scale).simultaneousGesture(swipe)
+                drawing(scale: scale, cell: cell).simultaneousGesture(swipe)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -514,7 +523,7 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
         .accessibilityLabel("Seats in coach \(coachID)")
     }
 
-    private func drawing(scale: Double) -> some View {
+    private func drawing(scale: Double, cell: Double) -> some View {
         let side = CGFloat(cell * scale)
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: side * 0.4)
@@ -522,12 +531,12 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
             ForEach(layout.fixtures) { fixture in
                 FixtureShape(kind: fixture.kind, side: side)
                     .frame(width: side, height: side)
-                    .position(center(x: fixture.x, y: fixture.y, scale: scale))
+                    .position(center(x: fixture.x, y: fixture.y, scale: scale, cell: cell))
             }
             ForEach(layout.places) { place in
                 SeatShape(place: place, side: side)
                     .frame(width: side, height: side)
-                    .position(center(x: place.x, y: place.y, scale: scale))
+                    .position(center(x: place.x, y: place.y, scale: scale, cell: cell))
             }
         }
         .frame(
@@ -537,7 +546,7 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
     }
 
     // Positions are top-left grid corners: half a cell centres the item and half a cell is the margin.
-    private func center(x: Double, y: Double, scale: Double) -> CGPoint {
+    private func center(x: Double, y: Double, scale: Double, cell: Double) -> CGPoint {
         CGPoint(x: (x + cell) * scale, y: (y + cell) * scale)
     }
 

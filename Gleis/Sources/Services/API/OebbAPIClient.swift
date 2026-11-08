@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 actor OebbAPIClient {
     static let shared = OebbAPIClient()
@@ -22,6 +23,9 @@ actor OebbAPIClient {
     private static let gateMidnightRolloverThreshold: TimeInterval = 12 * 60 * 60
     // Idle timeout on the shared auth call, so a server that goes silent fails before the 20 s user fetch budget.
     private static let authRequestTimeout: TimeInterval = 10
+    // Idle timeout on timetable searches, so a silent gate leaves time to fall back to the shop within the 20 s budget.
+    private static let timetableRequestTimeout: TimeInterval = 15
+    private static let seatLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Seats")
     // The seat reservation endpoints expect the web shop's client identity on top of the session headers.
     // Values the shop web app sent in the captured seat flow.
     private static let seatReservationClientId = "33"
@@ -161,7 +165,8 @@ actor OebbAPIClient {
         )
         let url = baseURL.appendingPathComponent("api/hafas/v4/timetable")
         let response = try await performAuthorized(
-            url: url, method: "POST", body: encoder.encode(payload), decode: OebbTimetableResponse.self
+            url: url, method: "POST", body: encoder.encode(payload), timeout: Self.timetableRequestTimeout,
+            decode: OebbTimetableResponse.self
         )
         return OebbTimetablePage(
             connections: Array(response.connections.prefix(pageSize)),
@@ -269,13 +274,12 @@ actor OebbAPIClient {
             decode: OebbOffersResponse.self,
             captureRaw: { rawResponse = $0 }
         )
-        #if DEBUG
         if response.offerError || (response.offerSections ?? []).isEmpty {
-            let requestBody = String(decoding: try encoder.encode(payload).prefix(300), as: UTF8.self)
             let responseBody = String(decoding: rawResponse.prefix(900), as: UTF8.self)
-            throw GleisError.apiError("offers returned no sections. Sent: \(requestBody) Got: \(responseBody)")
+            Self.seatLogger.debug(
+                "Offers for \(connectionId, privacy: .private) had no sections: \(responseBody, privacy: .private)"
+            )
         }
-        #endif
         return response
     }
 
@@ -377,6 +381,7 @@ actor OebbAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = Self.timetableRequestTimeout
         let encodedPayload = try encoder.encode(payload)
         request.httpBody = encodedPayload
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1161,12 +1166,13 @@ actor OebbAPIClient {
     // MARK: - Private Helpers
 
     private func performAuthorized<T: Decodable>(
-        url: URL?, method: String, body: Data? = nil, extraHeaders: [String: String] = [:], decode: T.Type,
-        captureRaw: ((Data) -> Void)? = nil
+        url: URL?, method: String, body: Data? = nil, extraHeaders: [String: String] = [:],
+        timeout: TimeInterval? = nil, decode: T.Type, captureRaw: ((Data) -> Void)? = nil
     ) async throws -> T {
         guard let url else { throw GleisError.networkError("Invalid URL") }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        if let timeout { request.timeoutInterval = timeout }
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         for (field, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: field) }
@@ -1238,8 +1244,13 @@ actor OebbAPIClient {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func ensureAuthSession() async throws -> OebbAuthSession {
-        if let session = authSession, !session.isExpired { return session }
+    /// Renews the auth session first when it would expire within `seconds`.
+    func ensureSessionValid(forAtLeast seconds: TimeInterval) async throws {
+        _ = try await ensureAuthSession(validFor: seconds)
+    }
+
+    private func ensureAuthSession(validFor seconds: TimeInterval = 0) async throws -> OebbAuthSession {
+        if let session = authSession, session.expiresAt > Date().addingTimeInterval(seconds) { return session }
         // Callers arriving while an init is in flight share it instead of starting their own.
         if let authTask { return try await authTask.value }
         let userId = authSession?.userId ?? makeUserId()

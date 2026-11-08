@@ -97,8 +97,7 @@ actor ConnectionCache {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// Clears cache files left behind by routes the user no longer uses. Files were
-    /// written per route pair and never removed.
+    /// Deletes route cache files older than `maximumAge`, and every file with the legacy token.
     private func pruneDiskIfNeeded() {
         guard !hasPrunedDisk else { return }
         hasPrunedDisk = true
@@ -113,23 +112,29 @@ actor ConnectionCache {
               )
         else { return }
 
-        for file in files where file.lastPathComponent.hasPrefix("connections_") {
+        let legacyFilePrefix = "\(Self.fileNamePrefix)\(Self.legacyFileNameToken)_"
+        for file in files where file.lastPathComponent.hasPrefix(Self.fileNamePrefix) {
+            let isLegacy = file.lastPathComponent.hasPrefix(legacyFilePrefix)
             let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate
-            guard let modified, modified < cutoff else { continue }
+            guard isLegacy || (modified.map { $0 < cutoff } ?? false) else { continue }
             try? fileManager.removeItem(at: file)
         }
     }
 
-    // The old transport-type token, kept so cache files already on disk keep their names.
-    private static let fileNameTypeToken = "Train"
+    private static let fileNamePrefix = "connections_"
+
+    // Bumped from the legacy token so files holding old trip ids are never read again.
+    private static let fileNameToken = "v2"
+
+    // Token of files written with old trip ids; only the prune above uses it, to delete them on first access.
+    private static let legacyFileNameToken = "Train"
 
     private func routeCacheFileURL(fromId: String, toId: String) -> URL? {
-        let typeToken = Self.fileNameTypeToken
         let fromToken = pathToken(fromId)
         let toToken = pathToken(toId)
         return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent(
-            "connections_\(typeToken)_\(fromToken)_\(toToken).json"
+            "\(Self.fileNamePrefix)\(Self.fileNameToken)_\(fromToken)_\(toToken).json"
         )
     }
 

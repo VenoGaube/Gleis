@@ -11,20 +11,6 @@ struct SeatMapLoadError: LocalizedError {
 final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
     private static let seatLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Seats")
-    private static let gateDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter
-    }()
-    private static let gateTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "HHmmss"
-        return formatter
-    }()
     private let apiClient: OebbAPIClient
     private let storage: StorageServiceProtocol
     private let stationCacheLock = NSLock()
@@ -356,18 +342,15 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private static let seatMapShopSearchCount = 5
     private static let shopJourneySectionType = "journey"
     private static let preferredReservationClasses = ["1", "2"]
-    private static let shopDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
-        return formatter
-    }()
+    /// Session lifetime the seat lookup needs, so its chain of shop calls stays on one ÖBB session.
+    private static let seatMapSessionMinimumLifetime: TimeInterval = 300
 
     /// Seat availability per leg, read from the ÖBB shop: timetable, offers, reservation details, then seat maps.
     func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
-        var step = "shop timetable"
+        var step = "session"
         do {
+            try await apiClient.ensureSessionValid(forAtLeast: Self.seatMapSessionMinimumLifetime)
+            step = "shop timetable"
             // A fresh passenger id per lookup, as the shop web app creates one per search.
             let passenger = OebbTimetableRequest.Passenger.adult(id: Int(Date().timeIntervalSince1970))
             let (shopConnection, searchDate) = try await findShopConnection(for: connection, passenger: passenger)
@@ -410,7 +393,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         } catch {
             if isCancellation(error) { throw CancellationError() }
             Self.seatLogger.error(
-                "Seat lookup for \(connection.lineNumber, privacy: .public) failed at \(step, privacy: .public): \(String(describing: error), privacy: .public)"
+                "Seat lookup for \(connection.lineNumber, privacy: .public) failed at \(step, privacy: .public): \(String(describing: error), privacy: .private)"
             )
             throw SeatMapLoadError(step: step, underlying: error)
         }
@@ -430,8 +413,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
         var searchedRefNumbers = Set<[Int]>()
         var searchedRoutes: [String] = []
-        var shopAnswered = false
-        var lastError: Error?
         for route in Self.shopSearchRoutes(for: connection, trainLegs: trainLegs) {
             do {
                 async let resolvedFromTask = resolveStation(route.from)
@@ -448,21 +429,22 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                     from: resolvedFrom.ref, to: resolvedTo.ref, departure: searchDate,
                     count: Self.seatMapShopSearchCount, passenger: passenger
                 )
-                shopAnswered = true
                 if let match = Self.shopConnection(
                     in: shopConnections, providerConnectionId: connection.providerConnectionId,
                     lineName: lineName, departures: [scheduledDeparture, trainDeparture]
                 ) {
                     return (match, searchDate)
                 }
+            } catch GleisError.stationNotFound {
+                // ÖBB answered the station search with nothing usable, so the next route may still find the train.
+                searchedRoutes.append("\(route.from.name) to \(route.to.name): station not found")
             } catch {
                 if isCancellation(error) { throw CancellationError() }
-                searchedRoutes.append("\(route.from.name) to \(route.to.name) failed: \(error)")
-                lastError = error
+                // A failed call stops here instead of repeating on each route.
+                throw mapError(error)
             }
         }
-        // No shop answer at all is a station or network problem, not a missing trip.
-        if !shopAnswered, let lastError { throw lastError }
+        if searchedRefNumbers.isEmpty { throw GleisError.stationNotFound }
         let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
         throw GleisError.apiError(
             "The ÖBB shop does not list \(trip), so its seats cannot be shown. Searched: \(searchedRoutes.joined(separator: "; "))."
@@ -503,9 +485,9 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     ) -> OebbConnection? {
         let sameTrain = shopConnections.filter { shop in
             (shop.sections ?? []).contains { section in
-                guard let category = section.category, !isWalkingCategory(category),
-                      normalizedLineName(shopLineName(category)) == lineName,
-                      let departure = section.from.departure.flatMap(shopDateFormatter.date)
+                guard let category = section.category, !ConnectionMapper.isWalkingCategory(category),
+                      normalizedLineName(ConnectionMapper.lineInfo(for: category).number) == lineName,
+                      let departure = ConnectionMapper.parseDate(section.from.departure)
                 else { return false }
                 return departures.contains { abs(departure.timeIntervalSince($0)) <= seatMapMatchTolerance }
             }
@@ -573,19 +555,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
-    /// Same shape ConnectionMapper gives a leg's line number: "RJ 654", or the number alone when it has letters.
-    private static func shopLineName(_ category: OebbCategory) -> String {
-        let name = category.shortName ?? category.displayName ?? category.name
-        guard let number = category.number, !number.isEmpty else { return name ?? "" }
-        if number.rangeOfCharacter(from: .letters) != nil { return number }
-        return name.map { "\($0) \(number)" } ?? number
-    }
-
-    private static func isWalkingCategory(_ category: OebbCategory) -> Bool {
-        let name = (category.shortName ?? category.displayName ?? category.name ?? "").uppercased()
-        return name == "W" || name == "WALK"
-    }
-
     private static func normalizedLineName(_ value: String) -> String {
         value.uppercased().filter { !$0.isWhitespace }
     }
@@ -637,11 +606,11 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             nearestGuess = nearestGuess ?? located.first
         }
         // The station's own entry without coordinates means any other hit would be a different station.
+        // A guess is not cached, so the next lookup searches again rather than reusing a possibly wrong station.
         if !foundOwnEntry, let nearestGuess {
             Self.seatLogger.notice(
                 "No exact ÖBB station for \(station.name, privacy: .public) (\(station.id, privacy: .public)), using \(nearestGuess.ref.name, privacy: .public) (\(nearestGuess.ref.number))"
             )
-            cacheResolvedStationRef(nearestGuess.ref, forStationId: station.id)
             return nearestGuess
         }
         Self.seatLogger.error("No ÖBB station found for \(station.name, privacy: .public) (\(station.id, privacy: .public))")

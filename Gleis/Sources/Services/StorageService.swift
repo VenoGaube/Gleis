@@ -60,7 +60,11 @@ final class LocalStorageService: StorageServiceProtocol, @unchecked Sendable {
 
     private init() {}
 
-    func save(_ value: some Codable, forKey key: String) throws { try defaults.set(encoder.encode(value), forKey: key) }
+    func save(_ value: some Codable, forKey key: String) throws {
+        try defaults.set(encoder.encode(value), forKey: key)
+        // The backup only explains a past decode failure, so good data replacing it ends its use.
+        defaults.removeObject(forKey: Self.corruptBackupKey(for: key))
+    }
 
     func load<T: Codable>(forKey key: String) throws -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }

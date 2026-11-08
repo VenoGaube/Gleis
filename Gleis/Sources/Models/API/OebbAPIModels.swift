@@ -11,8 +11,6 @@ struct OebbAuthSession: Codable, Sendable {
     let cookie: String?
     let expiresAt: Date
     let createdAt: Date
-
-    var isExpired: Bool { Date() >= expiresAt }
 }
 
 // MARK: - OebbAuthResponse

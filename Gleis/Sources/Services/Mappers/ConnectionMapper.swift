@@ -166,7 +166,7 @@ enum ConnectionMapper {
             ?? sections.first?.category
     }
 
-    private static func lineInfo(
+    static func lineInfo(
         for category: OebbCategory?
     ) -> (number: String, trainType: TrainType, lineColors: TrainLineColors?, isWalking: Bool) {
         guard let category else { return ("CONNECTION", .other, nil, false) }
@@ -183,7 +183,7 @@ enum ConnectionMapper {
         return (normalizedLineNumber, trainType, category.lineColors ?? trainType.colors, false)
     }
 
-    private static func isWalkingCategory(_ category: OebbCategory?) -> Bool {
+    static func isWalkingCategory(_ category: OebbCategory?) -> Bool {
         guard let category else { return false }
         let name = (category.shortName ?? category.displayName ?? category.name ?? "").uppercased()
         return name == "W" || name == "WALK"
@@ -461,16 +461,25 @@ enum ConnectionMapper {
     private static func findMatchingDetailSectionIndex(
         for leg: ConnectionLeg, detailSections: [OebbConnectionDetailSection], usedDetailIndices: inout Set<Int>
     ) -> Int? {
-        guard let normalizedFrom = normalizeStationName(leg.from.name),
-              let normalizedTo = normalizeStationName(leg.to.name) else { return nil }
         let match = detailSections.indices.first { index in
             let section = detailSections[index]
             return !usedDetailIndices.contains(index) && !isWalkingDetailSection(section)
-                && normalizeStationName(section.from?.name) == normalizedFrom
-                && normalizeStationName(section.to?.name) == normalizedTo
+                && isSameStationName(leg.from.name, section.from?.name)
+                && isSameStationName(leg.to.name, section.to?.name)
         }
         if let match { usedDetailIndices.insert(match) }
         return match
+    }
+
+    /// Equal comparable names, or equal once one side drops its trailing bracket: "Wien Hbf (Bahnsteige 3-12)" and "Wien Hbf".
+    private static func isSameStationName(_ first: String?, _ second: String?) -> Bool {
+        guard let first, let second else { return false }
+        let firstName = Station.comparableName(first)
+        let secondName = Station.comparableName(second)
+        guard !firstName.isEmpty, !secondName.isEmpty else { return false }
+        return firstName == secondName
+            || Station.comparableName(Station.nameWithoutBrackets(first)) == secondName
+            || Station.comparableName(Station.nameWithoutBrackets(second)) == firstName
     }
 
     private static func normalizeStationName(_ value: String?) -> String? {
@@ -650,7 +659,7 @@ enum ConnectionMapper {
         return adjusted < reference ? reference : adjusted
     }
 
-    private static func parseDate(_ value: String?) -> Date? {
+    static func parseDate(_ value: String?) -> Date? {
         guard let value else { return nil }
         parseDateLock.lock()
         defer { parseDateLock.unlock() }

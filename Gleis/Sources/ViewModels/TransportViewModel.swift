@@ -284,11 +284,6 @@ final class TransportViewModel: ObservableObject {
         await task.value
     }
 
-    @available(*, deprecated, message: "Pull-to-refresh no longer shows a toast; call refreshConnections(isUserInitiated:)")
-    func refreshConnections(showFeedback _: Bool, isUserInitiated: Bool = false) async {
-        await refreshConnections(isUserInitiated: isUserInitiated)
-    }
-
     /// Reads the in-flight flags at each decision, so a user trigger that joins mid-run still gets user semantics.
     private func performRefresh() async {
         isRefreshingConnections = true
@@ -809,8 +804,12 @@ final class TransportViewModel: ObservableObject {
     }
 
     func loadMoreAnchored() async {
+        await loadMoreAnchored(untilShownCount: filteredByTrainType(anchoredTrainConnections).count + 1)
+    }
+
+    private func loadMoreAnchored(untilShownCount shownTarget: Int) async {
         guard departureAnchor != nil, anchoredConnections.isLoaded, !isLoadingMoreAnchored, !anchoredReachedEnd,
-              let start = config.startStation, let end = config.endStation,
+              !isAnchoredListAtCap, let start = config.startStation, let end = config.endStation,
               let seedDateTime = anchoredSeedDateTime
         else { return }
         let generation = anchoredRequestGeneration
@@ -820,7 +819,7 @@ final class TransportViewModel: ObservableObject {
 
         do {
             guard let run = try await fetchNextAnchoredPages(
-                from: start, to: end, seedDateTime: seedDateTime, generation: generation
+                from: start, to: end, seedDateTime: seedDateTime, generation: generation, untilShownCount: shownTarget
             ) else { return }
             anchoredForwardCursor = run.forwardCursor
             if run.forwardCursor == nil { anchoredReachedEnd = true }
@@ -836,52 +835,72 @@ final class TransportViewModel: ObservableObject {
         let forwardCursor: String?
     }
 
-    /// Pages forward until a new train arrives or the provider runs out; nil when a newer jump superseded it.
+    /// Pages forward until the filtered list holds `shownTarget` trains or the provider runs out; nil when a newer jump superseded it.
+    /// Each page gets its own timeout, and a page that fails after earlier ones landed ends the run with what it has.
     private func fetchNextAnchoredPages(
         from start: Station,
         to end: Station,
         seedDateTime: Date,
-        generation: Int
+        generation: Int,
+        untilShownCount shownTarget: Int
     ) async throws -> AnchoredPageRun? {
-        var cursor = anchoredForwardCursor
+        let startCursor = anchoredForwardCursor
+        var cursor = startCursor
         var seenIds = Set(anchoredTrainConnections.map(\.id))
         var additions: [TrainConnection] = []
+        let target = min(shownTarget, config.displayMaxConnections)
         for _ in 0 ..< FetchLimits.maxCoveragePages {
-            let page = try await transportService.fetchConnectionsPage(
-                from: start,
-                to: end,
-                seedDateTime: seedDateTime,
-                pageSize: FetchLimits.connectionBatchSize,
-                cursor: cursor
-            )
+            let page: ConnectionPage
+            do {
+                page = try await fetchConnectionsPageWithTimeout(
+                    from: start, to: end, seedDateTime: seedDateTime, cursor: cursor,
+                    timeoutSeconds: Self.userInitiatedFetchTimeout
+                )
+            } catch let error where !(error is CancellationError) && cursor != startCursor {
+                guard isCurrentAnchoredRequest(generation) else { return nil }
+                Self.logger.error(
+                    "Anchored page after seed \(seedDateTime.formatted(.iso8601), privacy: .public) failed, keeping earlier pages: \(error.localizedDescription, privacy: .public)"
+                )
+                break
+            }
             guard isCurrentAnchoredRequest(generation) else { return nil }
             additions += page.connections.filter { seenIds.insert($0.id).inserted }
             guard let nextCursor = page.forwardCursor, nextCursor != cursor else {
                 return AnchoredPageRun(additions: additions, forwardCursor: nil)
             }
             cursor = nextCursor
-            if !additions.isEmpty { break }
+            let preview = mergedAnchoredConnections(anchoredTrainConnections, adding: additions, now: Date())
+            if filteredByTrainType(preview).count >= target { break }
         }
         return AnchoredPageRun(additions: additions, forwardCursor: cursor)
     }
 
     private func fetchAnchoredConnections(from start: Station, to end: Station, anchor: Date, generation: Int) async {
         let seedDateTime = anchor.addingTimeInterval(-Self.anchoredSearchLeadTime)
+        let service = transportService
+        let coverage = ConnectionCoverage(minimumCount: Self.anchoredInitialConnectionTarget, notBefore: seedDateTime)
         do {
-            let result = try await transportService.fetchConnectionsCovering(
-                from: start,
-                to: end,
-                seedDateTime: seedDateTime,
-                coverage: ConnectionCoverage(minimumCount: Self.anchoredInitialConnectionTarget, notBefore: seedDateTime),
-                onPage: { [weak self] page in
-                    await self?.appendAnchoredPage(page, generation: generation)
-                }
-            )
+            // The coverage run stops starting pages once its budget is spent, so allow one more page on top.
+            let result = try await withTimeout(seconds: coverage.budget + Self.userInitiatedFetchTimeout) { [weak self] in
+                try await service.fetchConnectionsCovering(
+                    from: start,
+                    to: end,
+                    seedDateTime: seedDateTime,
+                    coverage: coverage,
+                    onPage: { [weak self] page in
+                        await self?.appendAnchoredPage(page, generation: generation)
+                    }
+                )
+            }
             guard isCurrentAnchoredRequest(generation) else { return }
             anchoredSeedDateTime = result.seedDateTime
             anchoredForwardCursor = result.forwardCursor
             if result.forwardCursor == nil { anchoredReachedEnd = true }
             appendAnchoredPage(result.connections, generation: generation)
+            // The coverage target counts trains the filter may hide, so page on until enough of them show.
+            if filteredByTrainType(anchoredTrainConnections).count < Self.anchoredInitialConnectionTarget {
+                await loadMoreAnchored(untilShownCount: Self.anchoredInitialConnectionTarget)
+            }
         } catch {
             guard isCurrentAnchoredRequest(generation), !(error is CancellationError) else { return }
             Self.logger.error(
@@ -900,17 +919,37 @@ final class TransportViewModel: ObservableObject {
     private func appendAnchoredPage(_ page: [TrainConnection], generation: Int) {
         guard isCurrentAnchoredRequest(generation) else { return }
         let now = Date()
-        let knownIds = Set(anchoredTrainConnections.map(\.id))
+        anchoredTrainConnections = mergedAnchoredConnections(anchoredTrainConnections, adding: page, now: now)
+        anchoredConnections = .loaded(makeAnchoredDisplayConnections(at: now))
+    }
+
+    /// Adds new future trains by id and collapses true duplicates; it keeps every loaded train so a filter change leaves no gap before the cursor.
+    private func mergedAnchoredConnections(
+        _ existing: [TrainConnection],
+        adding page: [TrainConnection],
+        now: Date
+    ) -> [TrainConnection] {
+        let knownIds = Set(existing.map(\.id))
         let additions = page.filter { $0.departureTime > now && !knownIds.contains($0.id) }
-        let sortedConnections = (anchoredTrainConnections + additions).sorted { $0.departureTime < $1.departureTime }
-        anchoredTrainConnections = Array(sortedConnections.prefix(config.displayMaxConnections))
-        if anchoredTrainConnections.count >= config.displayMaxConnections { anchoredReachedEnd = true }
-        anchoredConnections = .loaded(makeDisplayConnections(from: anchoredTrainConnections, at: now))
+        return ConnectionDeduplicator.deduplicate(
+            existing + additions,
+            context: deduplicationContext(previous: existing)
+        )
+    }
+
+    /// The row cap is checked under the current filter, so a filter change can lift it and let paging go on.
+    private var isAnchoredListAtCap: Bool {
+        filteredByTrainType(anchoredTrainConnections).count >= config.displayMaxConnections
+    }
+
+    /// Caps the shown rows, since the stored list can hold more trains than the cap shows.
+    private func makeAnchoredDisplayConnections(at currentTime: Date) -> [DisplayConnection] {
+        Array(makeDisplayConnections(from: anchoredTrainConnections, at: currentTime).prefix(config.displayMaxConnections))
     }
 
     private func rebuildAnchoredDisplayConnections() {
         guard anchoredConnections.isLoaded else { return }
-        anchoredConnections = .loaded(makeDisplayConnections(from: anchoredTrainConnections, at: Date()))
+        anchoredConnections = .loaded(makeAnchoredDisplayConnections(at: Date()))
     }
 
     private func isCurrentAnchoredRequest(_ generation: Int) -> Bool {
@@ -1079,8 +1118,7 @@ final class TransportViewModel: ObservableObject {
 
     /// Applies the train-type filter and reminder and pin state shared by the live and jumped lists.
     private func makeDisplayConnections(from connections: [TrainConnection], at currentTime: Date) -> [DisplayConnection] {
-        let excluded = config.excludedTrainTypes
-        let filtered = excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
+        let filtered = filteredByTrainType(connections)
         let route = settingsManager.savedCommuteRoute
         return filtered.map { connection in
             let isSelected =
@@ -1091,6 +1129,11 @@ final class TransportViewModel: ObservableObject {
                 isPinned: settingsManager.isPinned(connection.id), currentTime: currentTime
             )
         }
+    }
+
+    private func filteredByTrainType(_ connections: [TrainConnection]) -> [TrainConnection] {
+        let excluded = config.excludedTrainTypes
+        return excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
     }
 
     private func setConnections(_ newConnections: [TrainConnection]) {
@@ -1520,6 +1563,8 @@ final class TransportViewModel: ObservableObject {
             // Past the end of the loaded list a train is unloaded, not missing.
             guard let lastLoadedDeparture, reminder.departureTime <= lastLoadedDeparture else { continue }
             let replacement = bestReplacementConnection(for: reminder, in: liveConnections, now: now)
+            // A reminder saved under an older id still matches its train by line and scheduled minute.
+            if let replacement, isSameScheduledTrain(replacement, as: reminder) { continue }
             let signature = recoverySignature(reminder: reminder, suggestedConnectionId: replacement?.id)
             if dismissedRecoverySignatures.contains(signature) { continue }
 
@@ -1611,6 +1656,15 @@ final class TransportViewModel: ObservableObject {
         }
 
         return futureConnections.min { $0.departureTime < $1.departureTime }
+    }
+
+    /// Both stored and live departures carry the delay, so each side takes its own delay out before the minutes are compared.
+    private func isSameScheduledTrain(_ connection: TrainConnection, as reminder: ScheduledReminder) -> Bool {
+        guard ConnectionIdentity.normalizeLine(connection.lineNumber) == ConnectionIdentity.normalizeLine(reminder.lineNumber)
+        else { return false }
+        let connectionScheduled = connection.departureTime.addingTimeInterval(-TimeInterval(connection.delay * 60))
+        let reminderScheduled = reminder.departureTime.addingTimeInterval(-TimeInterval(reminder.delayMinutes * 60))
+        return ConnectionIdentity.minuteTimestamp(connectionScheduled) == ConnectionIdentity.minuteTimestamp(reminderScheduled)
     }
 
     private func recoverySignature(reminder: ScheduledReminder, suggestedConnectionId: String?) -> String {
@@ -1780,6 +1834,7 @@ final class TransportViewModel: ObservableObject {
         to end: Station,
         seedDateTime: Date,
         pageSize: Int = FetchLimits.connectionBatchSize,
+        cursor: String? = nil,
         timeoutSeconds: TimeInterval = 15
     ) async throws -> ConnectionPage {
         let service = transportService
@@ -1789,7 +1844,7 @@ final class TransportViewModel: ObservableObject {
                 to: end,
                 seedDateTime: seedDateTime,
                 pageSize: pageSize,
-                cursor: nil
+                cursor: cursor
             )
         }
     }

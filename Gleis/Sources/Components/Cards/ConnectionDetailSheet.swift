@@ -4,7 +4,6 @@ import SwiftUI
 
 struct ConnectionDetailSheet: View {
     let connection: TrainConnection
-    private let transportService: TransportService
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var resolvedConnection: TrainConnection
@@ -12,12 +11,8 @@ struct ConnectionDetailSheet: View {
     @State private var hasLoadedDetails = false
     @State private var isShowingSeats = false
 
-    init(
-        connection: TrainConnection,
-        transportService: TransportService = .shared
-    ) {
+    init(connection: TrainConnection) {
         self.connection = connection
-        self.transportService = transportService
         _resolvedConnection = State(initialValue: connection)
     }
 
@@ -231,7 +226,7 @@ struct ConnectionDetailSheet: View {
         }
 
         do {
-            resolvedConnection = try await transportService.enrichConnectionDetails(resolvedConnection)
+            resolvedConnection = try await TransportService.shared.enrichConnectionDetails(resolvedConnection)
         } catch {
             // Keep base connection data if detail endpoint is unavailable for this connection.
         }
