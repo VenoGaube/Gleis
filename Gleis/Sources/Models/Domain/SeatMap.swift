@@ -57,6 +57,7 @@ struct SeatMap: Equatable {
     }
 
     static let firstClass = "1"
+    static let businessClass = "B"
 }
 
 struct LegSeatMap: Identifiable, Equatable {

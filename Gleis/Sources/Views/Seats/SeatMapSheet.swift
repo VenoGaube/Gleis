@@ -244,6 +244,7 @@ private struct LegSeatMapView: View {
         let coaches = seatMap.coaches
         let shownCoachID = selectedCoachID ?? Self.defaultCoachID(in: coaches)
         let index = coaches.firstIndex { $0.id == shownCoachID } ?? 0
+        FirstClassSummary(seatMap: seatMap)
         CoachStrip(coaches: coaches, selectedCoachID: coaches[index].id) { coachID in
             select(coachID)
         }
@@ -436,6 +437,38 @@ private struct CoachDetail: View {
             guard abs(horizontal) > Self.swipeDistance, abs(horizontal) > abs(value.translation.height) else { return }
             if let target = horizontal < 0 ? nextCoachID : previousCoachID { onSelect(target) }
         }
+    }
+}
+
+/// The free 1st class seats on the whole train, plus Business when the train has it.
+private struct FirstClassSummary: View {
+    let seatMap: SeatMap
+
+    private var freeBusinessSeats: Int {
+        seatMap.coaches.reduce(0) { $0 + ($1.freeSeatsByClass[SeatMap.businessClass] ?? 0) }
+    }
+
+    private var hasBusinessClass: Bool {
+        seatMap.coaches.contains { $0.travelClasses.contains(SeatMap.businessClass) }
+    }
+
+    var body: some View {
+        let free = seatMap.freeFirstClassSeats
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "carseat.right.fill").foregroundStyle(free > 0 ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(free == 0 ? "No 1st class seats free" : "\(free) 1st class \(free == 1 ? "seat" : "seats") free")
+                    .font(.headline)
+                if hasBusinessClass {
+                    Text("Business: \(freeBusinessSeats) free").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        .accessibilityElement(children: .combine)
     }
 }
 
