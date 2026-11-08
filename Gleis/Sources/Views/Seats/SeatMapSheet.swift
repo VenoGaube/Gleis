@@ -441,6 +441,13 @@ private struct CoachDetail: View {
 
 // MARK: - Coach layout drawing
 
+// ÖBB grid units: seats sit 18 to 28 apart, but some places are nudged by 1 or 2 units, which must not
+// count as a seat width or the drawing grows tenfold.
+private enum SeatGrid {
+    static let smallestSeatStep: Double = 12
+    static let fallbackSeatStep: Double = 20
+}
+
 private struct CoachLayoutView<Swipe: Gesture>: View {
     let layout: SeatMapCoachLayout
     let coachID: String
@@ -501,17 +508,12 @@ private struct CoachLayoutView<Swipe: Gesture>: View {
         CGPoint(x: (x + cell) * scale, y: (y + cell) * scale)
     }
 
-    // ÖBB grid units: seats sit 18 to 28 apart, but some places are nudged by 1 or 2 units, which must not
-    // count as a seat width or the drawing grows tenfold.
-    private static let smallestSeatStep: Double = 12
-    private static let fallbackSeatStep: Double = 20
-
     // ÖBB coordinates have no seat size, so one seat is the smallest real step between two seat positions.
     private static func cellSize(of layout: SeatMapCoachLayout) -> Double {
         let xs = Set(layout.places.map(\.x)).sorted()
         let ys = Set(layout.places.map(\.y)).sorted()
         let steps = zip(xs, xs.dropFirst()).map { $1 - $0 } + zip(ys, ys.dropFirst()).map { $1 - $0 }
-        return steps.filter { $0 >= smallestSeatStep }.min() ?? fallbackSeatStep
+        return steps.filter { $0 >= SeatGrid.smallestSeatStep }.min() ?? SeatGrid.fallbackSeatStep
     }
 }
 
