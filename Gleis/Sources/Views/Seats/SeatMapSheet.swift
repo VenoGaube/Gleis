@@ -53,11 +53,15 @@ struct SeatMapSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
-        case .failed:
+        case .failed(let debugDetail):
             VStack(spacing: 12) {
                 Text("Couldn't load seats from ÖBB.")
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                #if DEBUG
+                Text(debugDetail).font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                #endif
                 Button("Try Again") { reloadCount += 1 }
                     .buttonStyle(.bordered)
             }
@@ -99,7 +103,7 @@ struct SeatMapSheet: View {
         } catch is CancellationError {
             return
         } catch {
-            loadState = .failed
+            loadState = .failed(error.localizedDescription)
         }
     }
 
@@ -115,7 +119,7 @@ struct SeatMapSheet: View {
 
 private enum SeatMapLoadState {
     case loading
-    case failed
+    case failed(String)
     case loaded([LegSeatMap])
 }
 

@@ -1130,7 +1130,14 @@ actor OebbAPIClient {
             )
         }
 
-        guard (200 ..< 300).contains(http.statusCode) else { throw GleisError.apiError("HTTP \(http.statusCode)") }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            #if DEBUG
+            let bodyPrefix = String(decoding: data.prefix(400), as: UTF8.self)
+            throw GleisError.apiError("HTTP \(http.statusCode) from \(request.url?.path ?? "?"): \(bodyPrefix)")
+            #else
+            throw GleisError.apiError("HTTP \(http.statusCode)")
+            #endif
+        }
         captureRaw?(data)
         return try decoder.decode(T.self, from: data)
     }

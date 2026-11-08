@@ -1,7 +1,16 @@
 import Foundation
+import OSLog
+
+/// Which step of the seat lookup failed, kept so the seat sheet can show it in debug builds.
+struct SeatMapLoadError: LocalizedError {
+    let step: String
+    let underlying: Error
+    var errorDescription: String? { "\(step): \(String(describing: underlying))" }
+}
 
 final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
+    private static let seatLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Seats")
     private static let gateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -345,8 +354,10 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     /// Seat availability per leg, read from the ÖBB shop: timetable, offers, reservation details, then seat maps.
     func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
+        var step = "shop timetable"
         do {
             let shopConnection = try await findShopConnection(for: connection)
+            step = "offers"
             let offers = try await apiClient.fetchOffers(connectionId: shopConnection.id)
             guard !offers.offerError, let offerSections = offers.offerSections, !offerSections.isEmpty else {
                 let trip = "\(connection.lineNumber) from \(connection.departureStation.name)"
@@ -355,6 +366,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             let selections = offerSections.compactMap(Self.reservationSelection(for:))
             guard !selections.isEmpty else { return Self.unreservableLegs(of: connection) }
 
+            step = "reservation details"
             let details = try await apiClient.fetchReservationDetails(
                 connectionId: shopConnection.id, selections: selections
             )
@@ -373,12 +385,16 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 let legIndex = Self.legIndex(matching: lineName, in: connection, excluding: usedLegIndices)
                     ?? connection.legs.count + position
                 usedLegIndices.insert(legIndex)
+                step = "seat map for \(lineName)"
                 legSeatMaps.append(try await legSeatMap(for: section, lineName: lineName, legIndex: legIndex))
             }
             return legSeatMaps
         } catch {
             if isCancellation(error) { throw CancellationError() }
-            throw mapError(error)
+            Self.seatLogger.error(
+                "Seat lookup for \(connection.lineNumber, privacy: .public) failed at \(step, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            throw SeatMapLoadError(step: step, underlying: error)
         }
     }
 
