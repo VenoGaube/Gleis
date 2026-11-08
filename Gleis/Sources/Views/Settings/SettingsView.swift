@@ -70,7 +70,7 @@ struct SettingsView: View {
                 SettingsRow(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", title: "Follow live delays", color: .trainBlue)
             }
         } header: {
-            Text("Leave time").textCase(nil)
+            Text("Leave Time").textCase(nil)
         } footer: {
             if settingsManager.trainCommuteConfig.usesDelayInLeaveTime {
                 Text(
@@ -90,7 +90,7 @@ struct SettingsView: View {
             Button {
                 handleNotificationToggle()
             } label: {
-                settingsValueRow(icon: "bell.fill", title: "Notification permission", color: .orange) {
+                settingsValueRow(icon: "bell.fill", title: "Notification Permission", color: .orange) {
                     HStack(spacing: 4) {
                         Text(isNotificationEnabled ? "Allowed" : "Not allowed").font(.caption).foregroundStyle(.secondary)
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
@@ -117,7 +117,7 @@ struct SettingsView: View {
             } label: {
                 // The message sits under the title so it can wrap in full instead of being cut to one line.
                 VStack(alignment: .leading, spacing: 4) {
-                    SettingsRow(icon: "text.bubble.fill", title: "Reminder message", color: .teal)
+                    SettingsRow(icon: "text.bubble.fill", title: "Reminder Message", color: .teal)
                     Text(settingsManager.trainCommuteConfig.notificationSettings.customMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -250,7 +250,7 @@ struct SettingsView: View {
                     }
                 }
                 if !upcoming.isEmpty {
-                    Text("One-time").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("One-Time").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(upcoming) { reminder in
                         let weekday = Weekday(rawValue: Calendar.current.component(.weekday, from: reminder.departureTime))
                         let departure = reminder.departureTime.formatted(date: .omitted, time: .shortened)
@@ -273,7 +273,7 @@ struct SettingsView: View {
         } header: {
             Text("Reminders").textCase(nil)
         }.onAppear { settingsManager.pruneExpiredReminders() }.confirmationDialog(
-            "Remove repeat journey?",
+            "Remove Repeat Journey?",
             isPresented: Binding(
                 get: { repeatScheduleToRemove != nil }, set: { if !$0 { repeatScheduleToRemove = nil } }
             ),
@@ -405,14 +405,14 @@ struct ReminderMessageEditor: View {
             }
 
             Section {
-                Button("Reset to default") {
+                Button("Reset to Default") {
                     draft = Self.defaultMessage
                     Haptics.selection()
                 }
                 .disabled(draft == Self.defaultMessage)
             }
         }
-        .navigationTitle("Reminder message")
+        .navigationTitle("Reminder Message")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { draft = settingsManager.trainCommuteConfig.notificationSettings.customMessage }
         .onDisappear(perform: persist)

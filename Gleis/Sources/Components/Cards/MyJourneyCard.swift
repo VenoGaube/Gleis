@@ -308,7 +308,7 @@ struct MyJourneyCard: View {
             withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .gleisToggle) { isExpanded.toggle() }
         } label: {
             HStack(spacing: 4) {
-                Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
+                Text(isExpanded ? "Hide Route" : "Show Route").font(.caption.weight(.medium))
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down").font(.caption)
             }.foregroundStyle(.secondary)
         }

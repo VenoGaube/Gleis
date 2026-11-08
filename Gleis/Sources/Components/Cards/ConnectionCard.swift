@@ -53,10 +53,10 @@ struct ConnectionCard: View {
         .accessibilityAction(.default) { openDetailsOrToggleExpansion() }
         .accessibilityActions {
             if isLeaveWindowPassed {
-                Button("Connection details") { onTap() }
+                Button("Connection Details") { onTap() }
             }
             if !isLeaveTimePast || isSelected {
-                Button(isSelected ? "Cancel reminder" : "Remind me") { isSelected ? onCancel() : onSchedule() }
+                Button(isSelected ? "Cancel Reminder" : "Remind Me") { isSelected ? onCancel() : onSchedule() }
             }
             if !hasDeparted || isPinned {
                 Button(isPinned ? "Unpin" : "Pin") { isPinned ? onUnpin() : onPin() }

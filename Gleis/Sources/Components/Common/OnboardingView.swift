@@ -164,10 +164,10 @@ struct OnboardingView: View {
             } label: {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) {
-                        Text(isLastStep ? "Get started" : "Continue")
+                        Text(isLastStep ? "Get Started" : "Continue")
                         Image(systemName: isLastStep ? "checkmark.circle.fill" : "arrow.right")
                     }
-                    Text(isLastStep ? "Get started" : "Continue")
+                    Text(isLastStep ? "Get Started" : "Continue")
                         .multilineTextAlignment(.center)
                 }
                 .font(.headline.weight(.semibold))
@@ -280,11 +280,11 @@ enum OnboardingStep: CaseIterable {
 
     var title: String {
         switch self {
-        case .welcome: "Your trains, live"
-        case .journey: "Pick your daily route"
-        case .timing: "Time to station"
-        case .widget: "See it on your Home Screen"
-        case .notifications: "Know when to leave"
+        case .welcome: "Your Trains, Live"
+        case .journey: "Pick Your Daily Route"
+        case .timing: "Time to Station"
+        case .widget: "See It on Your Home Screen"
+        case .notifications: "Know When to Leave"
         }
     }
 
@@ -692,7 +692,7 @@ struct SetupChecklistCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Setup checklist")
+            Text("Setup Checklist")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
 
@@ -1326,7 +1326,7 @@ struct NotificationStepView: View {
                                     Image(systemName: "bell.badge.fill")
                                 }
 
-                                Text(isRequestingPermission ? "Requesting..." : "Enable notifications")
+                                Text(isRequestingPermission ? "Requesting..." : "Enable Notifications")
                                     .font(.headline.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)

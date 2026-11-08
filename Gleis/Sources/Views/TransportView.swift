@@ -270,7 +270,7 @@ struct TransportView: View {
                 EmptyStateView(
                     icon: "arrow.left.arrow.right", title: "Pick two different stations",
                     message: "Your start and destination stations are the same.",
-                    action: { showEndPicker = true }, actionTitle: "Change destination"
+                    action: { showEndPicker = true }, actionTitle: "Change Destination"
                 ).frame(maxWidth: .infinity).padding(.top, 40).transition(.opacity)
             }
         case .loading:
@@ -295,7 +295,7 @@ struct TransportView: View {
             EmptyStateView(
                 icon: "line.3.horizontal.decrease.circle", title: "All train types are hidden",
                 message: "Turn a train type back on to see departures.",
-                action: { setExcludedTrainTypes([]) }, actionTitle: "Show all"
+                action: { setExcludedTrainTypes([]) }, actionTitle: "Show All"
             )
         } else if viewModel.displayConnections.isEmpty, let error = viewModel.lastRefreshError {
             ErrorView(error: error) { Task { await viewModel.refreshConnections(isUserInitiated: true) } }
@@ -311,7 +311,7 @@ struct TransportView: View {
     @ViewBuilder private func liveRowsContent(_ rows: LiveConnectionRows) -> some View {
         if rows.upcoming.isEmpty, rows.passed.isEmpty, pinnedConnectionId != nil {
             // All connections filtered out because one is pinned
-            Text("Other connections").font(.caption.weight(.medium)).foregroundStyle(.secondary).frame(
+            Text("Other Connections").font(.caption.weight(.medium)).foregroundStyle(.secondary).frame(
                 maxWidth: .infinity, alignment: .leading
             )
         }
@@ -355,7 +355,7 @@ struct TransportView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Text("Leave time passed (\(count))")
+                Text("Leave Time Passed (\(count))")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -382,7 +382,7 @@ struct TransportView: View {
                 EmptyStateView(
                     icon: "clock.badge.questionmark", title: "No connections",
                     message: "No connections after \(RouteHeader.departureChipTitle(for: anchor)) on this route.",
-                    action: returnToNow, actionTitle: "Back to now"
+                    action: returnToNow, actionTitle: "Back to Now"
                 ).frame(maxWidth: .infinity).padding(.top, 24).transition(.opacity)
             } else {
                 ForEach(rows) { displayConnection in
@@ -768,7 +768,7 @@ private struct RefreshErrorBanner: View {
     }
 
     private var retryButton: some View {
-        Button("Try again", action: onRetry)
+        Button("Try Again", action: onRetry)
             .font(.footnote.weight(.semibold))
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -814,7 +814,7 @@ private struct NextLiveTrainBanner: View {
     }
 
     private var backButton: some View {
-        Button("Back to now", action: onBackToNow)
+        Button("Back to Now", action: onBackToNow)
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderedProminent)
             .controlSize(.small)

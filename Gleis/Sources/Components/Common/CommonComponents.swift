@@ -610,7 +610,7 @@ struct ErrorView: View {
                 Haptics.notification(.warning)
                 onRetry()
             } label: {
-                Label("Try again", systemImage: "arrow.clockwise")
+                Label("Try Again", systemImage: "arrow.clockwise")
             }.buttonStyle(.borderedProminent)
         }.padding(32)
     }
@@ -794,7 +794,7 @@ struct RouteHeader: View {
         Button {
             onSetTravelTime(station)
         } label: {
-            Label("Set time to station", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
+            Label("Set Time to Station", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
                 pulseHint ? 0.6 : 1)
         }
         .buttonStyle(.plain)
@@ -804,7 +804,7 @@ struct RouteHeader: View {
         Button {
             onSetBufferTime(station)
         } label: {
-            Label("Set buffer", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.orange).opacity(
+            Label("Set Buffer", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.orange).opacity(
                 pulseHint ? 0.6 : 1)
         }
         .buttonStyle(.plain)
@@ -830,7 +830,7 @@ struct StationButton: View {
                     Text(label).foregroundStyle(.secondary)
                 }.font(.caption)
                 // Wraps rather than truncates, so a long station name is always readable in full.
-                Text(station?.name ?? "Pick a station").font(.subheadline.weight(.medium)).foregroundStyle(
+                Text(station?.name ?? "Pick a Station").font(.subheadline.weight(.medium)).foregroundStyle(
                     station == nil ? .secondary : .primary
                 ).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).padding(12).background(
@@ -999,7 +999,7 @@ struct TravelTimeSheet: View {
                 } footer: {
                     Text("From home or work.")
                 }
-            }.navigationTitle("Time to station").navigationBarTitleDisplayMode(.inline).toolbar {
+            }.navigationTitle("Time to Station").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -1097,8 +1097,8 @@ struct DepartureTimeSheet: View {
 
     private func quickChoices(now: Date, calendar: Calendar = .current) -> [QuickChoice] {
         var choices = [
-            QuickChoice(title: "In 1 hour", date: now.addingTimeInterval(60 * 60)),
-            QuickChoice(title: "In 2 hours", date: now.addingTimeInterval(2 * 60 * 60)),
+            QuickChoice(title: "In 1 Hour", date: now.addingTimeInterval(60 * 60)),
+            QuickChoice(title: "In 2 Hours", date: now.addingTimeInterval(2 * 60 * 60)),
         ]
         let startOfToday = calendar.startOfDay(for: now)
         if let eveningToday = calendar.date(
@@ -1152,7 +1152,7 @@ struct DepartureTimeSheet: View {
                     Button {
                         apply(selectedDate)
                     } label: {
-                        Text("Show trains").font(.headline).multilineTextAlignment(.center)
+                        Text("Show Trains").font(.headline).multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
@@ -1162,14 +1162,14 @@ struct DepartureTimeSheet: View {
                             onBackToNow()
                             dismiss()
                         } label: {
-                            Text("Back to now").font(.headline).multilineTextAlignment(.center)
+                            Text("Back to Now").font(.headline).multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.bordered)
                     }
                 }.padding(20)
             }
-            .navigationTitle("Departure time").navigationBarTitleDisplayMode(.inline).toolbar {
+            .navigationTitle("Departure Time").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }

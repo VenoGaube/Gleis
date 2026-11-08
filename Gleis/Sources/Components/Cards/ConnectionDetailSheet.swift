@@ -52,7 +52,7 @@ struct ConnectionDetailSheet: View {
                 if !stacksForAccessibilitySize { journeyActionBar(leaveTime: leaveTime) }
             }
             .refreshable { await loadConnectionDetailsIfNeeded(force: true) }
-            .navigationTitle("Connection details")
+            .navigationTitle("Connection Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
@@ -211,7 +211,7 @@ struct ConnectionDetailSheet: View {
         if let onRemind {
             Button(action: onRemind) {
                 Label {
-                    Text(isReminderSet ? "Cancel reminder" : "Remind me")
+                    Text(isReminderSet ? "Cancel Reminder" : "Remind Me")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
@@ -250,7 +250,7 @@ struct ConnectionDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                    Text("Service alerts").font(.headline)
+                    Text("Service Alerts").font(.headline)
                 }
                 ForEach(alerts) { alert in
                     VStack(alignment: .leading, spacing: 6) {

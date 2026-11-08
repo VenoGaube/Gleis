@@ -56,7 +56,7 @@ struct CommuteScheduleView: View {
         var title: String {
             switch self {
             case .workweek: "Workweek"
-            case .allDays: "All days"
+            case .allDays: "All Days"
             case .custom: "Custom"
             }
         }
@@ -104,8 +104,8 @@ struct CommuteScheduleView: View {
                     scheduleSection
                         .id(listTopAnchorId)
                     Section {
-                        Button("Reset to defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
-                            "Reset to defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
+                        Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
+                            "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
                         ) {
                             Button("Reset", role: .destructive) { viewModel.resetToDefaults() }
                         } message: {
@@ -201,7 +201,7 @@ struct CommuteScheduleView: View {
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Add both days") {
+                Button("Add Both Days") {
                     guard let direction = weekendActivationPromptDirection else { return }
                     var activeDays = viewModel.route.activeDays(for: direction)
                     activeDays.formUnion(Weekday.weekend)
@@ -209,7 +209,7 @@ struct CommuteScheduleView: View {
                     weekendActivationPromptDirection = nil
                     viewModel.toastManager.show("Saturday and Sunday added to your \(direction.title.lowercased()) journeys", type: .success)
                 }
-                Button("Not now", role: .cancel) {
+                Button("Not Now", role: .cancel) {
                     weekendActivationPromptDirection = nil
                 }
             } message: {
@@ -223,14 +223,14 @@ struct CommuteScheduleView: View {
     private var headerContent: some View {
         VStack(spacing: 20) {
             HStack(alignment: .center) {
-                Text("Repeat journeys").font(.largeTitle.bold())
+                Text("Repeat Journeys").font(.largeTitle.bold())
                 Spacer()
                 Menu {
                     Button {
                         excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
                         showExcludedDatesSheet = true
                     } label: {
-                        Label("Days off", systemImage: "calendar.badge.minus")
+                        Label("Days Off", systemImage: "calendar.badge.minus")
                     }
 
                     if !viewModel.excludedDates.isEmpty {
@@ -238,7 +238,7 @@ struct CommuteScheduleView: View {
                             excludedDateSelection = []
                             viewModel.updateExcludedDates(dates(from: excludedDateSelection))
                         } label: {
-                            Label("Clear days off", systemImage: "trash")
+                            Label("Clear Days Off", systemImage: "trash")
                         }
                     }
                 } label: {
@@ -311,7 +311,7 @@ struct CommuteScheduleView: View {
     private var commuteDaysControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStackFallingBackToVStack(spacing: 8) {
-                Label("Repeat days", systemImage: "calendar")
+                Label("Repeat Days", systemImage: "calendar")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Menu {
@@ -327,7 +327,7 @@ struct CommuteScheduleView: View {
                         applyPreset(.allDays, for: viewModel.selectedDirection)
                     } label: {
                         HStack {
-                            Text("All days")
+                            Text("All Days")
                             if selectedDirectionPreset == .allDays { Image(systemName: "checkmark") }
                         }
                     }
@@ -651,7 +651,7 @@ private struct ExcludedDatesSheet: View {
                 }
                 .padding(.top, 12)
             }
-            .navigationTitle("Days off")
+            .navigationTitle("Days Off")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -816,7 +816,7 @@ struct DayScheduleRow: View {
                     Haptics.selection()
                     onEnableDay()
                 } label: {
-                    Text("Turn on")
+                    Text("Turn On")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
@@ -910,7 +910,7 @@ struct DayScheduleRow: View {
     private var contextMenuContent: some View {
         if schedule != nil {
             Button { Haptics.selection(); onCopy() } label: {
-                Label("Copy to other days", systemImage: "doc.on.doc")
+                Label("Copy to Other Days", systemImage: "doc.on.doc")
             }
             Button { Haptics.selection(); onTap() } label: {
                 Label("Edit", systemImage: "pencil")
@@ -942,11 +942,11 @@ struct DayScheduleRow: View {
                 accessibilityHint: "Saves the suggested train for \(day.fullName)", action: onUseSuggestion
             )
             suggestionButton(
-                title: "Pick another", systemImage: "list.bullet", tint: .orange,
+                title: "Pick Another", systemImage: "list.bullet", tint: .orange,
                 accessibilityHint: "Opens the train list for \(day.fullName)", action: onChooseDifferentSuggestion
             )
             suggestionButton(
-                title: "Hide suggestion", systemImage: "minus.circle.fill", tint: .secondary,
+                title: "Hide Suggestion", systemImage: "minus.circle.fill", tint: .secondary,
                 accessibilityHint: "Hides this suggestion for \(day.fullName)", action: onDismissSuggestion
             )
         }
@@ -1126,7 +1126,7 @@ struct CopyScheduleSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 VStack(spacing: 12) {
-                    Text("Copy \(sourceDay.fullName)'s train").font(.title3.weight(.semibold))
+                    Text("Copy \(sourceDay.fullName)'s Train").font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
                     if let schedule = sourceSchedule {
@@ -1169,7 +1169,7 @@ struct CopyScheduleSheet: View {
                             }.buttonStyle(.plain)
                         }
                     } header: {
-                        Text("Pick days").textCase(nil)
+                        Text("Pick Days").textCase(nil)
                     } footer: {
                         if !selectedDays.isEmpty {
                             Text("Copying to \(selectedDays.count) \(selectedDays.count == 1 ? "day" : "days")")
@@ -1180,7 +1180,7 @@ struct CopyScheduleSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Copy to \(selectedDays.count) \(selectedDays.count == 1 ? "day" : "days")") { copySchedule() }
+                    Button("Copy to \(selectedDays.count) \(selectedDays.count == 1 ? "Day" : "Days")") { copySchedule() }
                         .disabled(selectedDays.isEmpty).fontWeight(.semibold)
                 }
             }
@@ -1298,7 +1298,7 @@ struct DayTrainPicker: View {
                         if isLoadingMore { SkeletonTrainRow() }
                     }.listStyle(.plain)
                 }
-            }.navigationTitle("Pick a train").navigationBarTitleDisplayMode(.inline).toolbar {
+            }.navigationTitle("Pick a Train").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { saveSelection() }.disabled(selectedConnection == nil)
