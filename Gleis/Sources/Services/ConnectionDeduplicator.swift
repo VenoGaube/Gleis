@@ -69,6 +69,18 @@ enum ConnectionIdentity {
         return String(hash, radix: 16)
     }
 
+    #if DEBUG
+    /// One line per trip for the debug trip log, e.g. "15:00 RJ 79 > S 80 to 17:58 [abc-12]".
+    static func debugDescription(_ connection: TrainConnection) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let lines = connection.legs.filter { !$0.isWalking }.map(\.lineNumber).joined(separator: " > ")
+        let departure = formatter.string(from: connection.departureTime)
+        let arrival = formatter.string(from: connection.arrivalTime)
+        return "\(departure) \(lines.isEmpty ? connection.lineNumber : lines) to \(arrival) [\(connection.id)]"
+    }
+    #endif
+
     static func legSignature(_ leg: ConnectionLeg) -> String {
         [
             leg.isWalking ? "W" : "T",

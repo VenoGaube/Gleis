@@ -1133,6 +1133,14 @@ final class TransportViewModel: ObservableObject {
 
     private func filteredByTrainType(_ connections: [TrainConnection]) -> [TrainConnection] {
         let excluded = config.excludedTrainTypes
+        #if DEBUG
+        let hidden = connections.filter { excluded.contains($0.trainType) }
+        if !hidden.isEmpty {
+            Self.logger.info(
+                "Trip list: train-type filter hides \(hidden.map(ConnectionIdentity.debugDescription).joined(separator: " | "), privacy: .public)"
+            )
+        }
+        #endif
         return excluded.isEmpty ? connections : connections.filter { !excluded.contains($0.trainType) }
     }
 
@@ -1143,6 +1151,13 @@ final class TransportViewModel: ObservableObject {
             stabilized,
             context: deduplicationContext(previous: previousConnections)
         )
+        #if DEBUG
+        let resolvedIds = Set(resolved.map(\.id))
+        let merged = stabilized.filter { !resolvedIds.contains($0.id) }
+        Self.logger.info(
+            "Trip list: \(stabilized.count) in, \(resolved.count) kept, merged as duplicates: \(merged.map(ConnectionIdentity.debugDescription).joined(separator: " | "), privacy: .public)"
+        )
+        #endif
         connections = .loaded(resolved)
         settingsManager.syncPinnedJourney(with: resolved)
         rebuildDisplayConnections()

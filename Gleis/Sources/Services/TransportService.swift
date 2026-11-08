@@ -10,6 +10,7 @@ struct SeatMapLoadError: LocalizedError {
 
 final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     static let shared = TransportService()
+    private static let tripLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Trips")
     private static let seatLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Seats")
     private let apiClient: OebbAPIClient
     private let storage: StorageServiceProtocol
@@ -252,9 +253,15 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             )
             // Ids now name the trip, so a repeated id here is the same trip listed twice and safe to drop.
             var seenIds = Set<String>()
-            let connections = page.connections
-                .map { ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station) }
-                .filter { seenIds.insert($0.id).inserted }
+            let mapped = page.connections.map {
+                ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station)
+            }
+            let connections = mapped.filter { seenIds.insert($0.id).inserted }
+            #if DEBUG
+            Self.tripLogger.info(
+                "Trip page \(resolvedFrom.station.name, privacy: .public) to \(resolvedTo.station.name, privacy: .public): ÖBB sent \(page.connections.count), kept \(connections.count): \(connections.map(ConnectionIdentity.debugDescription).joined(separator: " | "), privacy: .public)"
+            )
+            #endif
             return ConnectionPage(
                 connections: connections,
                 forwardCursor: page.forwardCursor,
