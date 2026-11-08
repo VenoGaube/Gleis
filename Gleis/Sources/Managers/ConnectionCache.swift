@@ -34,7 +34,7 @@ actor ConnectionCache {
     }
 
     func load(from: Station, to: Station) -> [TrainConnection]? {
-        // Files written before pages dropped repeated trips can still hold the same id twice.
+        // Files written by older builds can still hold the same id twice.
         guard let connections = resolve(from: from, to: to)?.connections else { return nil }
         var seenIds = Set<String>()
         return connections.filter { seenIds.insert($0.id).inserted }

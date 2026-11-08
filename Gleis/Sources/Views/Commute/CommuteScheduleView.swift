@@ -949,42 +949,44 @@ struct DayScheduleRow: View {
     }
 
     private var suggestionActionRow: some View {
-        HStackFallingBackToVStack(spacing: 8) {
+        HStack {
+            HStack(spacing: 18) {
+                suggestionButton(
+                    systemImage: "checkmark.circle.fill", font: .title3.weight(.semibold), style: .green,
+                    accessibilityLabel: "Use suggested train", action: onUseSuggestion
+                )
+                suggestionButton(
+                    systemImage: "xmark.circle.fill", font: .title3.weight(.semibold), style: .orange,
+                    accessibilityLabel: "Pick another train", action: onChooseDifferentSuggestion
+                )
+            }
+
+            Spacer()
+
             suggestionButton(
-                title: "Use", systemImage: "checkmark.circle.fill", tint: .green,
-                accessibilityHint: "Saves the suggested train for \(day.fullName)", action: onUseSuggestion
-            )
-            suggestionButton(
-                title: "Pick Another", systemImage: "list.bullet", tint: .orange,
-                accessibilityHint: "Opens the train list for \(day.fullName)", action: onChooseDifferentSuggestion
-            )
-            suggestionButton(
-                title: "Hide Suggestion", systemImage: "minus.circle.fill", tint: .secondary,
-                accessibilityHint: "Hides this suggestion for \(day.fullName)", action: onDismissSuggestion
+                systemImage: "minus.circle.fill", font: .title3, style: .secondary,
+                accessibilityLabel: "Hide suggestion", action: onDismissSuggestion
             )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, dynamicTypeSize.isAccessibilitySize ? 0 : dayBadgeSize + badgeToContentSpacing)
+        .padding(.leading, 50)
+        .padding(.top, -6)
     }
 
-    private func suggestionButton(
-        title: String, systemImage: String, tint: Color, accessibilityHint: String, action: @escaping () -> Void
+    private func suggestionButton<S: ShapeStyle>(
+        systemImage: String, font: Font, style: S, accessibilityLabel: String, action: @escaping () -> Void
     ) -> some View {
         Button {
             Haptics.selection()
             action()
         } label: {
-            Label(title, systemImage: systemImage)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(tint)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            Image(systemName: systemImage)
+                .font(font)
+                .foregroundStyle(style)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityHint(accessibilityHint)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

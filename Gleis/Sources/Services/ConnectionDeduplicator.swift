@@ -40,6 +40,30 @@ enum ConnectionIdentity {
         ].joined(separator: "|")
     }
 
+    /// An id that is the same for the same trip on every fetch and different for different trips.
+    /// ÖBB gives one id to several trips that share a main train but use different feeder trains, so the id
+    /// alone would make Gleis drop real trips. Scheduled times keep it stable while delays change.
+    static func tripId(providerId: String, legs: [ConnectionLeg]) -> String {
+        let tripKey = legs.filter { !$0.isWalking }.map { leg in
+            let scheduledDeparture = leg.departureTime.map {
+                $0.addingTimeInterval(-TimeInterval((leg.departureDelayMinutes ?? 0) * 60))
+            }
+            return [normalizeLine(leg.lineNumber), leg.from.id, leg.to.id, minuteTimestamp(scheduledDeparture)]
+                .joined(separator: "~")
+        }.joined(separator: ";")
+        return "\(providerId)-\(stableHash(tripKey))"
+    }
+
+    // FNV-1a, because Swift's Hasher is seeded per launch and the id must survive restarts and the disk cache.
+    private static func stableHash(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 16)
+    }
+
     static func legSignature(_ leg: ConnectionLeg) -> String {
         [
             leg.isWalking ? "W" : "T",

@@ -263,7 +263,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 seedDateTime: seedDateTime,
                 cursor: cursor
             )
-            // The gate can list the same trip twice in one page; every consumer assumes unique ids.
+            // Ids now name the trip, so a repeated id here is the same trip listed twice and safe to drop.
             var seenIds = Set<String>()
             let connections = page.connections
                 .map { ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station) }

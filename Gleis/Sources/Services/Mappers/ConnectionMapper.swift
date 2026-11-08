@@ -66,7 +66,8 @@ enum ConnectionMapper {
         )
 
         return TrainConnection(
-            id: connection.id, lineNumber: lineInfo.number, trainType: lineInfo.trainType,
+            id: ConnectionIdentity.tripId(providerId: connection.id, legs: normalized.legs),
+            lineNumber: lineInfo.number, trainType: lineInfo.trainType,
             lineColors: lineInfo.lineColors,
             departureTime: normalized.departure, arrivalTime: normalized.arrival, departureStation: from, arrivalStation: to,
             platform: platform, delay: delayMinutes, status: status, transfers: transfers,
