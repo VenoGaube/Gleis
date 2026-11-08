@@ -173,7 +173,7 @@ struct SettingsView: View {
     #if DEBUG
     private var widgetDebugSection: some View {
         Section {
-            if let data = AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute) {
+            if let data = AppGroupStorage.loadPrimaryWidgetData() {
                 widgetDebugRow(title: "State", value: data.state.rawValue)
                 widgetDebugRow(title: "Generated", value: Self.debugDateFormatter.string(from: data.generatedAt))
                 widgetDebugRow(title: "Coverage End", value: Self.debugDateFormatter.string(from: data.coverageEnd))

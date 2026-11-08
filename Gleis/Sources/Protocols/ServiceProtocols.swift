@@ -12,9 +12,6 @@ enum FetchLimits {
     /// down and, more importantly, stops `count >= connectionBatchSize` tests from
     /// being permanently false.
     static let connectionBatchSize = 7
-    /// The ceiling the gate enforces on a single response, regardless of `numF`.
-    /// Treat a page of this size as "there is probably more", never as "that is all".
-    static let gateMaxConnectionsPerResponse = 7
     /// Round trips a coverage-driven fetch may spend before giving up. Each page is
     /// a 3-8s server round trip, so this is a latency budget as much as a page count.
     static let maxCoveragePages = 4
@@ -90,14 +87,13 @@ struct ConnectionCoverageResult: Sendable {
 // MARK: - TransportServiceProtocol
 
 protocol TransportServiceProtocol: Sendable {
-    func fetchConnections(from: Station, to: Station, transportType: TransportType) async throws -> [TrainConnection]
+    func fetchConnections(from: Station, to: Station) async throws -> [TrainConnection]
     func fetchConnections(
-        from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
+        from: Station, to: Station, departureTime: Date, count: Int
     ) async throws -> [TrainConnection]
     func fetchConnectionsPage(
         from: Station,
         to: Station,
-        transportType: TransportType,
         seedDateTime: Date,
         pageSize: Int,
         cursor: String?
@@ -105,26 +101,20 @@ protocol TransportServiceProtocol: Sendable {
     func fetchConnectionsCovering(
         from: Station,
         to: Station,
-        transportType: TransportType,
         seedDateTime: Date,
         coverage: ConnectionCoverage,
         onPage: (@Sendable ([TrainConnection]) async -> Void)?
     ) async throws -> ConnectionCoverageResult
-    func fetchMoreConnections(
-        from: Station, to: Station, transportType: TransportType, after lastDeparture: Date
-    ) async throws -> [TrainConnection]
     /// Starts the first connections fetch for a route without waiting for a consumer.
     ///
     /// Called at process launch so the provider's 5-8s round trip overlaps SwiftUI
     /// startup instead of beginning after it.
-    func prewarmConnections(from: Station, to: Station, transportType: TransportType)
+    func prewarmConnections(from: Station, to: Station)
     /// Hands over a prewarmed fetch for this route, awaiting it if still in flight.
     /// Returns nil when there is none, or when it is too old to still be live data.
-    func claimPrewarmedConnections(
-        from: Station, to: Station, transportType: TransportType
-    ) async throws -> PrewarmedConnectionsPage?
-    func fetchStations(for transportType: TransportType) async throws -> [Station]
-    func searchStations(matching query: String, transportType: TransportType) async throws -> [Station]
+    func claimPrewarmedConnections(from: Station, to: Station) async throws -> PrewarmedConnectionsPage?
+    func fetchStations() async throws -> [Station]
+    func searchStations(matching query: String) async throws -> [Station]
 }
 
 // MARK: - NotificationServiceProtocol

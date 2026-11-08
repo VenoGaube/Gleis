@@ -188,24 +188,69 @@ enum Haptics {
 
 // MARK: - SkeletonBox
 
+/// A static placeholder block. Apply `.skeletonShimmer()` to the row or card that holds the boxes.
 struct SkeletonBox: View {
     var width: CGFloat?
     var height: CGFloat = 16
     var cornerRadius: CGFloat = 4
-    @State private var shimmer = false
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.isSkeletonMaskPass) private var isSkeletonMaskPass
+
+    private var fillColor: Color {
+        isSkeletonMaskPass ? .black : Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius).fill(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2)).frame(
-            width: width, height: height
-        ).overlay(
-            GeometryReader { geo in
-                LinearGradient(
-                    colors: [.clear, Color.white.opacity(0.3), .clear], startPoint: .leading, endPoint: .trailing
-                ).frame(width: geo.size.width * 0.6).offset(x: shimmer ? geo.size.width : -geo.size.width * 0.6)
-            }.mask(RoundedRectangle(cornerRadius: cornerRadius))
-        ).onAppear { withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) { shimmer = true } }
+        RoundedRectangle(cornerRadius: cornerRadius).fill(fillColor).frame(width: width, height: height)
     }
+}
+
+private struct SkeletonMaskPassKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    /// True inside the shimmer's mask copy, where boxes fill opaque so the band keeps its full strength.
+    var isSkeletonMaskPass: Bool {
+        get { self[SkeletonMaskPassKey.self] }
+        set { self[SkeletonMaskPassKey.self] = newValue }
+    }
+}
+
+// MARK: - SkeletonShimmer
+
+/// Sweeps one highlight band across every skeleton box in the modified view.
+private struct SkeletonShimmer: ViewModifier {
+    private static let sweepDuration: TimeInterval = 1.5
+    private static let bandWidth: CGFloat = 60
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.overlay {
+                // Phase comes from the clock, so every shimmering view on screen sweeps in step.
+                TimelineView(.animation) { context in
+                    GeometryReader { geo in
+                        let elapsed = context.date.timeIntervalSinceReferenceDate
+                        let phase = elapsed.truncatingRemainder(dividingBy: Self.sweepDuration) / Self.sweepDuration
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.3), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ).frame(width: Self.bandWidth)
+                            .offset(x: -Self.bandWidth + CGFloat(phase) * (geo.size.width + Self.bandWidth))
+                    }
+                }.mask { content.environment(\.isSkeletonMaskPass, true) }.allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+extension View {
+    func skeletonShimmer() -> some View { modifier(SkeletonShimmer()) }
 }
 
 // MARK: - ConnectionsLoadingView
@@ -267,6 +312,7 @@ struct SkeletonConnectionCard: View {
 
     var body: some View {
         skeletonContent
+            .skeletonShimmer()
             .background(skeletonBackgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(skeletonBorder)

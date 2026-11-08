@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - StorageKey
 
@@ -55,6 +56,7 @@ final class LocalStorageService: StorageServiceProtocol, @unchecked Sendable {
     private let defaults = UserDefaults.standard
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "Storage")
 
     private init() {}
 
@@ -62,10 +64,27 @@ final class LocalStorageService: StorageServiceProtocol, @unchecked Sendable {
 
     func load<T: Codable>(forKey key: String) throws -> T? {
         guard let data = defaults.data(forKey: key) else { return nil }
-        return try decoder.decode(T.self, from: data)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            // Diagnostic copy only, since the caller's next save overwrites the key; the session token is never copied.
+            let backupKey = Self.corruptBackupKey(for: key)
+            if key != StorageKey.oebbAuthSession.rawValue, defaults.object(forKey: backupKey) == nil {
+                defaults.set(data, forKey: backupKey)
+            }
+            logger.error(
+                "Failed to decode stored value for key \(key, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            throw error
+        }
     }
 
-    func delete(forKey key: String) throws { defaults.removeObject(forKey: key) }
+    func delete(forKey key: String) throws {
+        defaults.removeObject(forKey: key)
+        defaults.removeObject(forKey: Self.corruptBackupKey(for: key))
+    }
+
+    private static func corruptBackupKey(for key: String) -> String { "\(key).corrupt" }
 }
 
 // MARK: - SettingsManager
@@ -85,19 +104,21 @@ final class SettingsManager: ObservableObject {
 
     private init(storage: StorageServiceProtocol = LocalStorageService.shared) {
         self.storage = storage
-        appSettings = (try? storage.load(forKey: StorageKey.appSettings.rawValue)) ?? AppSettings()
+        let loadedAppSettings: AppSettings = (try? storage.load(forKey: StorageKey.appSettings.rawValue)) ?? AppSettings()
+        appSettings = loadedAppSettings
         trainCommuteConfig =
             (try? storage.load(forKey: StorageKey.trainCommuteConfig.rawValue))
-            ?? RouteConfiguration(transportType: .trainCommute)
+            ?? RouteConfiguration()
         scheduledReminders = (try? storage.load(forKey: StorageKey.scheduledReminders.rawValue)) ?? []
         savedCommuteRoute =
             (try? storage.load(forKey: StorageKey.savedCommuteRoute.rawValue)) ?? SavedCommuteRoute()
         archivedSchedulesByStationPair =
             (try? storage.load(forKey: StorageKey.archivedSchedulesByStationPair.rawValue)) ?? [:]
         pinnedJourney = (try? storage.load(forKey: StorageKey.pinnedJourney.rawValue))
+        if loadedAppSettings.containsLegacyTicketData {
+            try? storage.save(loadedAppSettings, forKey: StorageKey.appSettings.rawValue)
+        }
     }
-
-    func config(for _: TransportType) -> RouteConfiguration { trainCommuteConfig }
 
     func updateConfig(_ config: RouteConfiguration) {
         trainCommuteConfig = config
@@ -123,13 +144,13 @@ final class SettingsManager: ObservableObject {
     }
 
     /// Drops reminders whose leave time has passed. Cheap to call often: it only
-    /// touches storage when something was actually removed.
+    /// publishes and touches storage when something was actually removed.
     @discardableResult
     func pruneExpiredReminders(before date: Date = Date()) -> Int {
-        let countBefore = scheduledReminders.count
-        scheduledReminders.removeAll { $0.leaveTime < date }
-        let removed = countBefore - scheduledReminders.count
+        let remaining = scheduledReminders.filter { $0.leaveTime >= date }
+        let removed = scheduledReminders.count - remaining.count
         guard removed > 0 else { return 0 }
+        scheduledReminders = remaining
         try? storage.save(scheduledReminders, forKey: StorageKey.scheduledReminders.rawValue)
         return removed
     }
@@ -174,26 +195,26 @@ final class SettingsManager: ObservableObject {
 
     // MARK: - Station Favorites & Timing
 
-    func toggleFavoriteStation(_ station: Station, for transportType: TransportType = .trainCommute) {
-        var cfg = config(for: transportType)
+    func toggleFavoriteStation(_ station: Station) {
+        var cfg = trainCommuteConfig
         cfg.toggleFavoriteStation(station)
         updateConfig(cfg)
     }
 
-    func saveTravelTime(_ minutes: Int?, for stationId: String, transportType: TransportType = .trainCommute) {
-        var cfg = config(for: transportType)
+    func saveTravelTime(_ minutes: Int?, for stationId: String) {
+        var cfg = trainCommuteConfig
         cfg.setTravelTime(minutes, for: stationId)
         updateConfig(cfg)
     }
 
-    func saveBufferTime(_ minutes: Int?, for stationId: String, transportType: TransportType = .trainCommute) {
-        var cfg = config(for: transportType)
+    func saveBufferTime(_ minutes: Int?, for stationId: String) {
+        var cfg = trainCommuteConfig
         cfg.setBufferTime(minutes, for: stationId)
         updateConfig(cfg)
     }
 
-    func addRecentStation(_ station: Station, for transportType: TransportType = .trainCommute) {
-        var cfg = config(for: transportType)
+    func addRecentStation(_ station: Station) {
+        var cfg = trainCommuteConfig
         cfg.addRecentStation(station)
         updateConfig(cfg)
     }

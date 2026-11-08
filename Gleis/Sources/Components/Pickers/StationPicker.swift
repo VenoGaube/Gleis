@@ -31,24 +31,17 @@ struct StationPickerSheet: View {
     @State private var searchText = ""
     @State private var searchResults: [Station] = []
     @State private var isSearching = false
-    @State private var searchTask: Task<Void, Never>?
-    @State private var isReady = false
+
+    private static let networkSearchDebounce: Duration = .milliseconds(300)
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isReady {
-                    List { if searchText.isEmpty { stationSections } else { searchResultsSection } }
-                        .searchable(text: $searchText, prompt: "Search stations")
-                } else {
-                    List { Section("Loading") { ForEach(0 ..< 4, id: \.self) { _ in SkeletonStationRow() } } }
+            List { if searchText.isEmpty { stationSections } else { searchResultsSection } }
+                .searchable(text: $searchText, prompt: "Search stations")
+                .navigationTitle(title).navigationBarTitleDisplayMode(.inline).toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 }
-            }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            }
-        }.onChange(of: searchText) { _, query in handleSearch(query) }
-        .onDisappear { searchTask?.cancel() }
-        .task { try? await Task.sleep(nanoseconds: 50_000_000); isReady = true }
+        }.task(id: searchText) { await search(for: searchText) }
     }
 
     @ViewBuilder private var stationSections: some View {
@@ -88,25 +81,29 @@ struct StationPickerSheet: View {
         )
     }
 
-    private func handleSearch(_ query: String) {
-        searchTask?.cancel()
+    /// Shows matches from the stations already in hand at once, then merges in the network results.
+    @MainActor private func search(for query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 1 else {
+        guard !trimmed.isEmpty else {
             searchResults = []
             isSearching = false
             return
         }
-        // Keep showing previous results while typing for better responsiveness
+        let recentAndPopular = StationSearchService.mergeStations(primary: recentStations, secondary: stations)
+        let localPool = StationSearchService.mergeStations(primary: favoriteStations, secondary: recentAndPopular)
+        let localMatches = StationSearchService.rankStations(localPool, query: trimmed)
+        // With no local match, the previous results stay up while the network answers.
+        if !localMatches.isEmpty { searchResults = localMatches }
         isSearching = true
-        searchTask = Task { @MainActor in
-            // Short debounce to avoid excessive API calls while typing
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            guard !Task.isCancelled else { return }
-            let results = await searchHandler(trimmed)
-            guard !Task.isCancelled else { return }
-            searchResults = results
-            isSearching = false
-        }
+
+        // task(id:) cancels this run on the next keystroke, which is the debounce.
+        do { try await Task.sleep(for: Self.networkSearchDebounce) } catch { return }
+        let remote = await searchHandler(trimmed)
+        guard !Task.isCancelled else { return }
+        searchResults = StationSearchService.rankStations(
+            StationSearchService.mergeStations(primary: remote, secondary: localMatches), query: trimmed
+        )
+        isSearching = false
     }
 }
 
@@ -162,6 +159,6 @@ struct SkeletonStationRow: View {
                 SkeletonBox(width: 50, height: 10)
             }
             Spacer()
-        }.padding(.vertical, 6)
+        }.skeletonShimmer().padding(.vertical, 6)
     }
 }

@@ -20,6 +20,8 @@ struct GleisProvider: AppIntentTimelineProvider {
     private static let maximumEntryCount = 150
     /// Seconds before the leave time at which the countdown changes colour.
     private static let urgencyThresholds: [TimeInterval] = [300, 120]
+    /// Reload interval when only the app can bring new data, since the extension never fetches.
+    private static let awaitingAppReloadInterval: TimeInterval = 15 * 60
 
     func placeholder(in _: Context) -> GleisEntry {
         GleisEntry(date: Date(), data: WidgetData.placeholder, configuration: SelectTransportIntent())
@@ -35,7 +37,7 @@ struct GleisProvider: AppIntentTimelineProvider {
         let now = Date()
 
         guard let data else {
-            let isUnreadable = AppGroupStorage.isPrimaryWidgetSnapshotUnreadable(for: .trainCommute)
+            let isUnreadable = AppGroupStorage.isPrimaryWidgetSnapshotUnreadable()
             WidgetSyncDiagnostics.staleDisplay(
                 reason: isUnreadable ? "snapshot_unreadable" : "no_snapshot_available",
                 generatedAt: now,
@@ -98,7 +100,7 @@ struct GleisProvider: AppIntentTimelineProvider {
     }
 
     private func loadData() -> WidgetData? {
-        AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute)
+        AppGroupStorage.loadPrimaryWidgetData()
     }
 
     // MARK: - Entry Scheduling
@@ -174,15 +176,15 @@ struct GleisProvider: AppIntentTimelineProvider {
             return .after(now.addingTimeInterval(10 * 60))
         }
         if data.state == .stale || data.isCoverageExhausted(at: now) {
-            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_stale_or_exhausted_1m")
-            return .after(now.addingTimeInterval(60))
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_stale_or_exhausted_15m")
+            return .after(now.addingTimeInterval(Self.awaitingAppReloadInterval))
         }
 
         let futureCount = data.futureConnections(from: now).count
         let coverageRemaining = data.coverageEnd.timeIntervalSince(now)
         if futureCount == 0 {
-            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_no_future_1m")
-            return .after(now.addingTimeInterval(60))
+            WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_no_future_15m")
+            return .after(now.addingTimeInterval(Self.awaitingAppReloadInterval))
         }
         if futureCount <= 2 || coverageRemaining <= 30 * 60 {
             WidgetSyncDiagnostics.timelineReloadTriggered(reason: "widget_low_coverage_5m")

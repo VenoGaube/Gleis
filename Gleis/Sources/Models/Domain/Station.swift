@@ -2,7 +2,6 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
     let id: String
     let name: String
     let coordinate: Coordinate?
-    let transportTypes: [TransportType]
     let lines: [String]
     let countryCode: String?
 
@@ -12,13 +11,12 @@ struct Station: Identifiable, Codable, Equatable, Hashable {
     }
 
     init(
-        id: String, name: String, coordinate: Coordinate?, transportTypes: [TransportType], lines: [String] = [],
+        id: String, name: String, coordinate: Coordinate?, lines: [String] = [],
         countryCode: String? = nil
     ) {
         self.id = id
         self.name = name
         self.coordinate = coordinate
-        self.transportTypes = transportTypes
         self.lines = lines
         self.countryCode = countryCode
     }

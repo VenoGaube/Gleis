@@ -18,7 +18,6 @@ struct WidgetData: Codable {
     static let currentSchemaVersion = 1
 
     let schemaVersion: Int
-    let transportType: TransportType
     let connections: [WidgetConnection]
     let leaveTimes: [Date]
     let fromStationName: String?
@@ -35,7 +34,6 @@ struct WidgetData: Codable {
 
     init(
         schemaVersion: Int = Self.currentSchemaVersion,
-        transportType: TransportType,
         connections: [WidgetConnection],
         leaveTimes: [Date],
         fromStationName: String? = nil,
@@ -53,7 +51,6 @@ struct WidgetData: Codable {
         let inferredRange = Self.inferredCoverageRange(connections: connections, leaveTimes: leaveTimes, fallback: updatedAt)
 
         self.schemaVersion = schemaVersion
-        self.transportType = transportType
         self.connections = connections
         self.leaveTimes = leaveTimes
         self.fromStationName = fromStationName
@@ -70,7 +67,6 @@ struct WidgetData: Codable {
     }
 
     static let placeholder = WidgetData(
-        transportType: .trainCommute,
         connections: [
             WidgetConnection(
                 id: "placeholder",
@@ -93,7 +89,6 @@ struct WidgetData: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
-        case transportType
         case connections
         case leaveTimes
         case fromStationName
@@ -122,7 +117,6 @@ struct WidgetData: Codable {
 
         self.init(
             schemaVersion: schemaVersion,
-            transportType: try container.decode(TransportType.self, forKey: .transportType),
             connections: try container.decode([WidgetConnection].self, forKey: .connections),
             leaveTimes: try container.decode([Date].self, forKey: .leaveTimes),
             fromStationName: try container.decodeIfPresent(String.self, forKey: .fromStationName),
@@ -165,16 +159,10 @@ struct WidgetData: Codable {
         return now.timeIntervalSince(updatedAt) > 6 * 60 * 60
     }
 
-    var isFallback: Bool { state == .fallback }
-
     var connectionCount: Int { min(connections.count, leaveTimes.count) }
 
     func futureConnections(from date: Date) -> [(connection: WidgetConnection, leaveTime: Date)] {
         scheduledConnections.filter { $0.leaveTime > date }
-    }
-
-    func hasCoverage(at date: Date) -> Bool {
-        coverageStart <= date && coverageEnd >= date
     }
 
     func isCoverageExhausted(at date: Date) -> Bool {
@@ -336,16 +324,9 @@ enum AppGroupStorage {
 
     static var sharedDefaults: UserDefaults? { UserDefaults(suiteName: suiteName) }
 
-    static func normalizedKeyComponent(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "_")
-    }
-
-    static func savePrimaryWidgetData(for type: TransportType, data: WidgetData) {
+    static func savePrimaryWidgetData(_ data: WidgetData) {
         guard let defaults = sharedDefaults, let encoded = try? JSONEncoder().encode(data) else { return }
-        defaults.set(encoded, forKey: primaryStorageKey(for: type))
+        defaults.set(encoded, forKey: primaryStorageKey)
     }
 
     enum SnapshotLoadResult {
@@ -355,31 +336,30 @@ enum AppGroupStorage {
         case missing
     }
 
-    static func loadPrimaryWidgetData(for type: TransportType) -> WidgetData? {
-        if case let .snapshot(data) = loadPrimaryWidgetSnapshot(for: type) { return data }
+    static func loadPrimaryWidgetData() -> WidgetData? {
+        if case let .snapshot(data) = loadPrimaryWidgetSnapshot() { return data }
         return nil
     }
 
     /// Distinguishes "no route configured yet" from "a snapshot is there but this
     /// build can't decode it" — previously both rendered as "set up your commute",
     /// which tells a configured user to redo setup they have already done.
-    static func loadPrimaryWidgetSnapshot(for type: TransportType) -> SnapshotLoadResult {
+    static func loadPrimaryWidgetSnapshot() -> SnapshotLoadResult {
         guard let defaults = sharedDefaults,
-              let primary = defaults.data(forKey: primaryStorageKey(for: type))
+              let primary = defaults.data(forKey: primaryStorageKey)
         else { return .missing }
 
         guard let decoded = try? JSONDecoder().decode(WidgetData.self, from: primary) else { return .unreadable }
         return .snapshot(decoded)
     }
 
-    static func isPrimaryWidgetSnapshotUnreadable(for type: TransportType) -> Bool {
-        if case .unreadable = loadPrimaryWidgetSnapshot(for: type) { return true }
+    static func isPrimaryWidgetSnapshotUnreadable() -> Bool {
+        if case .unreadable = loadPrimaryWidgetSnapshot() { return true }
         return false
     }
 
-    private static func primaryStorageKey(for type: TransportType) -> String {
-        "\(widgetDataKey)_\(normalizedKeyComponent(type.rawValue))"
-    }
+    // The "_train" suffix is the old transport-type key, kept so snapshots already stored still load.
+    private static let primaryStorageKey = "\(widgetDataKey)_train"
 }
 
 // MARK: - WidgetRenderSnapshot
@@ -398,8 +378,6 @@ struct WidgetRenderSnapshot: Codable, Sendable {
     let recoveryAction: WidgetRecoveryAction?
     let connection: WidgetConnection?
     let leaveTime: Date?
-
-    var isFallback: Bool { state == .fallback }
 
     /// The connection to render, paired with its leave time, when one is scheduled.
     var scheduled: (connection: WidgetConnection, leaveTime: Date)? {

@@ -20,8 +20,8 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private let storage: StorageServiceProtocol
     private let stationCacheLock = NSLock()
     private let connectionPrefetchLock = NSLock()
-    private var cachedStationsByTransport: [String: [Station]] = [:]
-    private var stationFetchTasksByTransport: [String: Task<[Station], Error>] = [:]
+    private var browseStationsCache: [Station]?
+    private var browseStationsFetchTask: Task<[Station], Error>?
     private var resolvedStationRefsByStationId: [String: OebbStationRef] = [:]
     private var prewarmedPagesByRoute: [String: PrewarmEntry] = [:]
 
@@ -30,32 +30,21 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         self.storage = storage
     }
 
-    func fetchConnections(from: Station, to: Station, transportType: TransportType) async throws -> [TrainConnection] {
+    func fetchConnections(from: Station, to: Station) async throws -> [TrainConnection] {
         try await fetchConnections(
             from: from,
             to: to,
-            transportType: transportType,
             departureTime: Date(),
             count: FetchLimits.connectionBatchSize
         )
     }
 
-    func fetchMoreConnections(
-        from: Station, to: Station, transportType: TransportType, after lastDeparture: Date
-    ) async throws -> [TrainConnection] {
-        try await fetchConnections(
-            from: from, to: to, transportType: transportType, departureTime: lastDeparture.addingTimeInterval(60),
-            count: FetchLimits.connectionBatchSize
-        )
-    }
-
     func fetchConnections(
-        from: Station, to: Station, transportType: TransportType, departureTime: Date, count: Int
+        from: Station, to: Station, departureTime: Date, count: Int
     ) async throws -> [TrainConnection] {
         try await fetchConnectionsFromAPI(
             from: from,
             to: to,
-            transportType: transportType,
             departureTime: departureTime,
             count: count
         )
@@ -64,7 +53,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     func fetchConnectionsPage(
         from: Station,
         to: Station,
-        transportType: TransportType,
         seedDateTime: Date,
         pageSize: Int,
         cursor: String?
@@ -72,7 +60,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         return try await fetchConnectionsPageFromAPI(
             from: from,
             to: to,
-            transportType: transportType,
             seedDateTime: seedDateTime,
             pageSize: max(1, pageSize),
             cursor: cursor
@@ -90,9 +77,9 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     /// holds are no longer current enough to present as live.
     private static let prewarmFreshnessWindow: TimeInterval = 90
 
-    func prewarmConnections(from: Station, to: Station, transportType: TransportType) {
+    func prewarmConnections(from: Station, to: Station) {
         guard from.id != to.id else { return }
-        let key = routeKey(for: transportType, from: from, to: to)
+        let key = routeKey(from: from, to: to)
 
         let startedAt = Date()
         connectionPrefetchLock.lock()
@@ -116,7 +103,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             let page = try await fetchConnectionsPageFromAPI(
                 from: from,
                 to: to,
-                transportType: transportType,
                 seedDateTime: startedAt,
                 pageSize: FetchLimits.connectionBatchSize,
                 cursor: nil
@@ -134,10 +120,8 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         return prewarmedPagesByRoute.removeValue(forKey: key)
     }
 
-    func claimPrewarmedConnections(
-        from: Station, to: Station, transportType: TransportType
-    ) async throws -> PrewarmedConnectionsPage? {
-        let key = routeKey(for: transportType, from: from, to: to)
+    func claimPrewarmedConnections(from: Station, to: Station) async throws -> PrewarmedConnectionsPage? {
+        let key = routeKey(from: from, to: to)
         guard let entry = takePrewarmEntry(forKey: key) else { return nil }
         // Age is measured from when the request started, not from when it finished, so a
         // slow response cannot be presented as fresher than the timetable it describes.
@@ -168,7 +152,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     func fetchConnectionsCovering(
         from: Station,
         to: Station,
-        transportType: TransportType,
         seedDateTime: Date,
         coverage: ConnectionCoverage,
         onPage: (@Sendable ([TrainConnection]) async -> Void)? = nil
@@ -195,7 +178,6 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             let page = try await fetchConnectionsPageFromAPI(
                 from: from,
                 to: to,
-                transportType: transportType,
                 seedDateTime: seedDateTime,
                 pageSize: FetchLimits.connectionBatchSize,
                 cursor: cursor
@@ -241,14 +223,12 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private func fetchConnectionsFromAPI(
         from: Station,
         to: Station,
-        transportType: TransportType,
         departureTime: Date,
         count: Int
     ) async throws -> [TrainConnection] {
         let page = try await fetchConnectionsPageFromAPI(
             from: from,
             to: to,
-            transportType: transportType,
             seedDateTime: departureTime,
             pageSize: count,
             cursor: nil
@@ -259,14 +239,13 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private func fetchConnectionsPageFromAPI(
         from: Station,
         to: Station,
-        transportType: TransportType,
         seedDateTime: Date,
         pageSize: Int,
         cursor: String?
     ) async throws -> ConnectionPage {
         do {
-            async let resolvedFromTask = resolveStation(from, transportType: transportType)
-            async let resolvedToTask = resolveStation(to, transportType: transportType)
+            async let resolvedFromTask = resolveStation(from)
+            async let resolvedToTask = resolveStation(to)
             let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
             let page = try await apiClient.fetchConnectionsPage(
                 from: resolvedFrom.ref,
@@ -276,9 +255,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 cursor: cursor
             )
             let connections = page.connections.map {
-                ConnectionMapper.map(
-                    $0, from: resolvedFrom.station, to: resolvedTo.station, transportType: transportType
-                )
+                ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station)
             }
             return ConnectionPage(
                 connections: connections,
@@ -304,40 +281,43 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func fetchStations(for transportType: TransportType) async throws -> [Station] {
-        if let cached = cachedStations(for: transportType) { return cached }
-        if let persisted = persistedStations(for: transportType) {
-            cacheStations(persisted, for: transportType)
+    func fetchStations() async throws -> [Station] {
+        if let cached = cachedStations() { return cached }
+        if let persisted = persistedStations(), !persisted.isEmpty {
+            cacheStations(persisted)
             return persisted
         }
-        if let fetchTask = stationFetchTask(for: transportType) {
+        if let fetchTask = stationFetchTask() {
             return try await fetchTask.value
         }
 
         let fetchTask = Task<[Station], Error> { [apiClient] in
             try await apiClient.searchStations(query: "", count: FetchLimits.stationBrowseCount).map {
-                ConnectionMapper.mapStation($0, transportType: transportType)
+                ConnectionMapper.mapStation($0)
             }
         }
-        setStationFetchTask(fetchTask, for: transportType)
+        setStationFetchTask(fetchTask)
 
         do {
             let stations = try await fetchTask.value
-            cacheStations(stations, for: transportType)
-            persistStations(stations, for: transportType)
-            clearStationFetchTask(for: transportType)
+            // An empty browse result is a provider hiccup; keeping it would block every later fetch.
+            if !stations.isEmpty {
+                cacheStations(stations)
+                persistStations(stations)
+            }
+            setStationFetchTask(nil)
             return stations
         } catch {
-            clearStationFetchTask(for: transportType)
+            setStationFetchTask(nil)
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
         }
     }
 
-    func searchStations(matching query: String, transportType: TransportType) async throws -> [Station] {
+    func searchStations(matching query: String) async throws -> [Station] {
         do {
             return try await apiClient.searchStations(query: query, count: FetchLimits.stationSearchCount).map {
-                ConnectionMapper.mapStation($0, transportType: transportType)
+                ConnectionMapper.mapStation($0)
             }
         } catch {
             if isCancellation(error) { throw CancellationError() }
@@ -352,7 +332,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         let ref: OebbStationRef
     }
 
-    private func resolveStation(_ station: Station, transportType: TransportType) async throws -> ResolvedStation {
+    private func resolveStation(_ station: Station) async throws -> ResolvedStation {
         if let cachedRef = cachedResolvedStationRef(forStationId: station.id) {
             return ResolvedStation(station: station, ref: cachedRef)
         }
@@ -365,7 +345,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             count: FetchLimits.stationResolveCandidateCount
         )
         guard let first = candidates.first else { throw GleisError.stationNotFound }
-        let mapped = ConnectionMapper.mapStation(first, transportType: transportType)
+        let mapped = ConnectionMapper.mapStation(first)
         guard let ref = makeStationRef(for: mapped) else { throw GleisError.stationNotFound }
         cacheResolvedStationRef(ref, forStationId: station.id)
         cacheResolvedStationRef(ref, forStationId: mapped.id)
@@ -422,33 +402,27 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    private func cachedStations(for transportType: TransportType) -> [Station]? {
+    private func cachedStations() -> [Station]? {
         stationCacheLock.lock()
         defer { stationCacheLock.unlock() }
-        return cachedStationsByTransport[transportType.rawValue]
+        return browseStationsCache
     }
 
-    private func cacheStations(_ stations: [Station], for transportType: TransportType) {
+    private func cacheStations(_ stations: [Station]) {
         stationCacheLock.lock()
-        cachedStationsByTransport[transportType.rawValue] = stations
+        browseStationsCache = stations
         stationCacheLock.unlock()
     }
 
-    private func stationFetchTask(for transportType: TransportType) -> Task<[Station], Error>? {
+    private func stationFetchTask() -> Task<[Station], Error>? {
         stationCacheLock.lock()
         defer { stationCacheLock.unlock() }
-        return stationFetchTasksByTransport[transportType.rawValue]
+        return browseStationsFetchTask
     }
 
-    private func setStationFetchTask(_ task: Task<[Station], Error>, for transportType: TransportType) {
+    private func setStationFetchTask(_ task: Task<[Station], Error>?) {
         stationCacheLock.lock()
-        stationFetchTasksByTransport[transportType.rawValue] = task
-        stationCacheLock.unlock()
-    }
-
-    private func clearStationFetchTask(for transportType: TransportType) {
-        stationCacheLock.lock()
-        stationFetchTasksByTransport.removeValue(forKey: transportType.rawValue)
+        browseStationsFetchTask = task
         stationCacheLock.unlock()
     }
 
@@ -464,21 +438,24 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         stationCacheLock.unlock()
     }
 
-    private func persistedStations(for transportType: TransportType) -> [Station]? {
+    // Stations are stored in a dictionary under the old transport-type key so caches already on disk still load.
+    private static let persistedStationsKey = "Train"
+
+    private func persistedStations() -> [Station]? {
         guard
             let stored: [String: [Station]] = try? storage.load(forKey: StorageKey.cachedStations.rawValue)
         else { return nil }
-        return stored[transportType.rawValue]
+        return stored[Self.persistedStationsKey]
     }
 
-    private func persistStations(_ stations: [Station], for transportType: TransportType) {
+    private func persistStations(_ stations: [Station]) {
         var stored: [String: [Station]] = (try? storage.load(forKey: StorageKey.cachedStations.rawValue)) ?? [:]
-        stored[transportType.rawValue] = stations
+        stored[Self.persistedStationsKey] = stations
         try? storage.save(stored, forKey: StorageKey.cachedStations.rawValue)
     }
 
-    private func routeKey(for transportType: TransportType, from: Station, to: Station) -> String {
-        "\(transportType.rawValue)|\(from.id)|\(to.id)"
+    private func routeKey(from: Station, to: Station) -> String {
+        "\(from.id)|\(to.id)"
     }
 
 }

@@ -13,8 +13,6 @@ struct WidgetSnapshotCandidate {
 enum WidgetSnapshotBuilder {
     // Hard cap to keep payload size predictable and avoid storing unnecessary horizon data.
     static let maxStoredConnectionLimit = 60
-    // Minimum expected overnight coverage count (30% of the cap).
-    static let overnightConnectionFloor = 18 // 30% of 60
 
     static func routeSignature(startStationId: String?, endStationId: String?) -> String {
         // Route identity used to invalidate stale snapshots after station changes.

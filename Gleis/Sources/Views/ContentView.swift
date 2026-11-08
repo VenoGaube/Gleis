@@ -4,7 +4,7 @@ struct ContentView: View {
     @Binding var selectedTab: Int
     @Binding var deepLinkConnectionId: String?
     @StateObject private var settingsManager = SettingsManager.shared
-    @StateObject private var commuteViewModel = CommuteScheduleViewModel(transportType: .trainCommute)
+    @StateObject private var commuteViewModel = CommuteScheduleViewModel()
     @State private var showOnboarding = false
     @State private var didPrewarmRepeatTab = false
     @State private var trainPath = NavigationPath()
@@ -31,7 +31,7 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 NavigationStack(path: $trainPath) {
                     TransportView(
-                        transportType: .trainCommute, highlightConnectionId: deepLinkConnectionId,
+                        highlightConnectionId: deepLinkConnectionId,
                         scrollToTopTrigger: trainScrollToTopTrigger
                     )
                 }

@@ -55,7 +55,7 @@ private final class AppLaunchBootstrapper: ObservableObject {
         hasBootstrapped = true
 
         backgroundPreloadTask = Task.detached(priority: .utility) {
-            _ = try? await TransportService.shared.fetchStations(for: .trainCommute)
+            _ = try? await TransportService.shared.fetchStations()
         }
 
         widgetForegroundReconcileTask?.cancel()
@@ -81,7 +81,8 @@ private final class AppLaunchBootstrapper: ObservableObject {
             return
         }
         lastWidgetForegroundReconcileAt = now
-        _ = await WidgetSnapshotReconciler.reconcile(referenceDate: now, allowNetworkFallback: true)
+        // Cache only: the view model's refresh on the same launch or foreground owns the network fetch.
+        _ = await WidgetSnapshotReconciler.reconcile(referenceDate: now, allowNetworkFallback: false)
     }
 
     deinit {
@@ -109,7 +110,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // this same in-flight task rather than issuing a second one.
         let config = SettingsManager.shared.trainCommuteConfig
         if let start = config.startStation, let end = config.endStation, start.id != end.id {
-            TransportService.shared.prewarmConnections(from: start, to: end, transportType: .trainCommute)
+            TransportService.shared.prewarmConnections(from: start, to: end)
         }
 
         return true

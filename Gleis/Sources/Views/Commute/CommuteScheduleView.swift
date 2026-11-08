@@ -19,6 +19,7 @@ struct CommuteScheduleView: View {
     @State private var suggestionLookupGeneration = 0
     @State private var weekendActivationPromptDirection: CommuteDirection?
     @State private var weekendPromptShownDirections: Set<CommuteDirection> = []
+    private static let maxConcurrentSuggestionLookups = 3
     @Environment(\.colorScheme) var colorScheme
     let scrollToTopTrigger: Int
 
@@ -64,8 +65,8 @@ struct CommuteScheduleView: View {
         return .custom
     }
 
-    init(transportType: TransportType = .trainCommute, scrollToTopTrigger: Int = 0) {
-        _viewModel = StateObject(wrappedValue: CommuteScheduleViewModel(transportType: transportType))
+    init(scrollToTopTrigger: Int = 0) {
+        _viewModel = StateObject(wrappedValue: CommuteScheduleViewModel())
         self.scrollToTopTrigger = scrollToTopTrigger
     }
 
@@ -203,7 +204,7 @@ struct CommuteScheduleView: View {
                 if let from = viewModel.currentFromStation, let to = viewModel.currentToStation {
                     DayTrainPicker(
                         day: day, from: from, to: to, direction: viewModel.selectedDirection,
-                        transportType: viewModel.transportType, route: $viewModel.route,
+                        route: $viewModel.route,
                         onSave: { viewModel.save() },
                         onScheduleSaved: handleScheduleSaved
                     ) {
@@ -442,26 +443,38 @@ struct CommuteScheduleView: View {
         }
         suggestionLoadingDays[direction] = Set(candidates)
 
+        let viewModel = viewModel
         suggestionLookupTask = Task(priority: .utility) {
-            for candidateDay in candidates {
-                if Task.isCancelled { return }
+            await withTaskGroup(of: (Weekday, DaySchedule?).self) { group in
+                var remainingDays = candidates.makeIterator()
+                func startNextLookup() {
+                    guard let candidateDay = remainingDays.next() else { return }
+                    group.addTask {
+                        let matchedSchedule = await viewModel.findSuggestedSchedule(
+                            for: candidateDay,
+                            basedOn: schedule,
+                            direction: direction
+                        )
+                        return (candidateDay, matchedSchedule)
+                    }
+                }
+                // A small cap keeps the provider from answering 429 to a burst of trip searches.
+                for _ in 0 ..< Self.maxConcurrentSuggestionLookups { startNextLookup() }
 
-                let matchedSchedule = await viewModel.findSuggestedSchedule(
-                    for: candidateDay,
-                    basedOn: schedule,
-                    direction: direction
-                )
-                if Task.isCancelled { return }
+                while let (candidateDay, matchedSchedule) = await group.next() {
+                    if Task.isCancelled { return }
 
-                await MainActor.run {
-                    guard suggestionLookupGeneration == lookupGeneration else { return }
-                    suggestionLoadingDays[direction]?.remove(candidateDay)
+                    await MainActor.run {
+                        guard suggestionLookupGeneration == lookupGeneration else { return }
+                        suggestionLoadingDays[direction]?.remove(candidateDay)
 
-                    guard let matchedSchedule else { return }
-                    guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
-                    guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
+                        guard let matchedSchedule else { return }
+                        guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
+                        guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
 
-                    suggestions[direction, default: [:]][candidateDay] = matchedSchedule
+                        suggestions[direction, default: [:]][candidateDay] = matchedSchedule
+                    }
+                    startNextLookup()
                 }
             }
 
@@ -757,6 +770,7 @@ struct DayScheduleRow: View {
             SkeletonBox(width: 96, height: 18, cornerRadius: 8)
             Spacer()
         }
+        .skeletonShimmer()
         .scaleEffect(animateSuggestionLoading ? 1.0 : 0.985)
         .opacity(animateSuggestionLoading ? 1.0 : 0.78)
         .offset(y: animateSuggestionLoading ? 0 : 1)
@@ -1127,7 +1141,6 @@ struct DayTrainPicker: View {
     let from: Station
     let to: Station
     let direction: CommuteDirection
-    let transportType: TransportType
     @Binding var route: SavedCommuteRoute
     let onSave: () -> Void
     let onScheduleSaved: ((Weekday, DaySchedule, CommuteDirection) -> Void)?
@@ -1158,7 +1171,6 @@ struct DayTrainPicker: View {
 
     init(
         day: Weekday, from: Station, to: Station, direction: CommuteDirection,
-        transportType: TransportType = .trainCommute,
         transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
         route: Binding<SavedCommuteRoute>,
@@ -1170,7 +1182,6 @@ struct DayTrainPicker: View {
         self.from = from
         self.to = to
         self.direction = direction
-        self.transportType = transportType
         self.transportService = transportService
         self.notificationService = notificationService
         _route = route
@@ -1231,7 +1242,6 @@ struct DayTrainPicker: View {
         let result = try? await transportService.fetchConnectionsCovering(
             from: from,
             to: to,
-            transportType: transportType,
             seedDateTime: paginationSeedDateTime,
             coverage: ConnectionCoverage(
                 minimumCount: Self.initialConnectionTarget,
@@ -1287,7 +1297,6 @@ struct DayTrainPicker: View {
                   let page = try? await transportService.fetchConnectionsPage(
                       from: from,
                       to: to,
-                      transportType: transportType,
                       seedDateTime: paginationSeedDateTime,
                       pageSize: FetchLimits.connectionBatchSize,
                       cursor: cursor
@@ -1376,7 +1385,7 @@ struct SkeletonTrainRow: View {
                 }
             }
             Spacer()
-        }.padding(.vertical, 10).frame(minHeight: 76)
+        }.skeletonShimmer().padding(.vertical, 10).frame(minHeight: 76)
     }
 }
 
@@ -1431,6 +1440,6 @@ struct TrainSelectionRow: View {
 }
 
 #Preview {
-    CommuteScheduleView(transportType: .trainCommute)
+    CommuteScheduleView()
         .environmentObject(SettingsManager.shared)
 }

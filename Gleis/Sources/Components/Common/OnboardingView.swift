@@ -474,12 +474,12 @@ struct ExactTrainViewPreviewCard: View {
 
     private var previewOrigin: Station {
         settingsManager.trainCommuteConfig.startStation
-            ?? Station(id: "onboarding-origin", name: "Wien Mitte", coordinate: nil, transportTypes: [.trainCommute])
+            ?? Station(id: "onboarding-origin", name: "Wien Mitte", coordinate: nil)
     }
 
     private var previewDestination: Station {
         settingsManager.trainCommuteConfig.endStation
-            ?? Station(id: "onboarding-destination", name: "Flughafen Wien", coordinate: nil, transportTypes: [.trainCommute])
+            ?? Station(id: "onboarding-destination", name: "Flughafen Wien", coordinate: nil)
     }
 
     private var reusablePinnedJourney: PinnedJourney? {
@@ -896,7 +896,7 @@ struct JourneySetupStepView: View {
     private func loadPopularStationsIfNeeded() async {
         guard popularStations.isEmpty else { return }
         do {
-            let stations = try await TransportService.shared.fetchStations(for: .trainCommute)
+            let stations = try await TransportService.shared.fetchStations()
             await MainActor.run { popularStations = Array(stations.prefix(40)) }
         } catch {
             await MainActor.run { popularStations = [] }
@@ -923,8 +923,7 @@ struct JourneySetupStepView: View {
                 let fetched = try await withTimeout(seconds: 7) {
                     try await TransportService.shared.fetchConnections(
                         from: originStation,
-                        to: destinationStation,
-                        transportType: .trainCommute
+                        to: destinationStation
                     )
                 }
 
@@ -947,75 +946,13 @@ struct JourneySetupStepView: View {
         if trimmed.isEmpty { return popularStations }
 
         do {
-            let remote = try await TransportService.shared.searchStations(
-                matching: trimmed,
-                transportType: .trainCommute
+            let remote = try await TransportService.shared.searchStations(matching: trimmed)
+            return StationSearchService.rankStations(
+                StationSearchService.mergeStations(primary: remote, secondary: popularStations), query: trimmed
             )
-            return rankStationsForQuery(mergeStations(primary: remote, secondary: popularStations), query: trimmed)
         } catch {
             return []
         }
-    }
-
-    private func rankStationsForQuery(_ stations: [Station], query: String) -> [Station] {
-        let normalizedQuery = normalize(query)
-        let queryTokens = normalizedQuery.split(separator: " ").map(String.init).filter { !$0.isEmpty }
-
-        let scored: [(station: Station, score: Int)] = stations.compactMap { station in
-            let name = normalize(station.name)
-            let words = name.split(separator: " ").map(String.init)
-            guard let score = matchScore(name: name, words: words, query: normalizedQuery, queryTokens: queryTokens)
-            else { return nil }
-            return (station, score)
-        }
-
-        return scored
-            .sorted { lhs, rhs in
-                if lhs.score != rhs.score { return lhs.score < rhs.score }
-                return lhs.station.name.localizedCaseInsensitiveCompare(rhs.station.name) == .orderedAscending
-            }
-            .map(\.station)
-    }
-
-    private func matchScore(
-        name: String,
-        words: [String],
-        query: String,
-        queryTokens: [String]
-    ) -> Int? {
-        if name == query { return 0 }
-        if name.hasPrefix(query) { return 1 }
-        if words.contains(where: { $0.hasPrefix(query) }) { return 2 }
-        if name.contains(query) { return 3 }
-
-        guard !queryTokens.isEmpty else { return nil }
-
-        let allTokensPrefix = queryTokens.allSatisfy { token in words.contains(where: { $0.hasPrefix(token) }) }
-        if allTokensPrefix { return 4 }
-
-        let allTokensContained = queryTokens.allSatisfy { token in name.contains(token) }
-        if allTokensContained { return 5 }
-
-        if queryTokens.contains(where: { token in words.contains(where: { $0.hasPrefix(token) }) }) { return 6 }
-        if queryTokens.contains(where: { token in name.contains(token) }) { return 7 }
-
-        return nil
-    }
-
-    private func normalize(_ value: String) -> String {
-        value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
-        var merged = primary
-        var seen = Set(primary.map(\.id))
-        for station in secondary where seen.insert(station.id).inserted {
-            merged.append(station)
-        }
-        return merged
     }
 
     private func sampleConnections(from origin: Station, to destination: Station) -> [TrainConnection] {
@@ -1150,7 +1087,6 @@ struct WidgetStepView: View {
             )
             let leaveTime = max(referenceDate.addingTimeInterval(20), pinnedJourney.departureTime.addingTimeInterval(-5 * 60))
             return WidgetData(
-                transportType: .trainCommute,
                 connections: [connection],
                 leaveTimes: [leaveTime],
                 fromStationName: pinnedJourney.departureStation.name,
@@ -1175,7 +1111,6 @@ struct WidgetStepView: View {
             isPinned: false
         )
         return WidgetData(
-            transportType: .trainCommute,
             connections: [fallback],
             leaveTimes: [referenceDate.addingTimeInterval(7 * 60)],
             fromStationName: "Wien Mitte",
@@ -1208,12 +1143,12 @@ struct NotificationStepView: View {
 
     private var previewOrigin: Station {
         settingsManager.trainCommuteConfig.startStation
-            ?? Station(id: "onboarding-notification-origin", name: "Wien Mitte", coordinate: nil, transportTypes: [.trainCommute])
+            ?? Station(id: "onboarding-notification-origin", name: "Wien Mitte", coordinate: nil)
     }
 
     private var previewDestination: Station {
         settingsManager.trainCommuteConfig.endStation
-            ?? Station(id: "onboarding-notification-destination", name: "Flughafen Wien", coordinate: nil, transportTypes: [.trainCommute])
+            ?? Station(id: "onboarding-notification-destination", name: "Flughafen Wien", coordinate: nil)
     }
 
     private var previewConnection: TrainConnection {

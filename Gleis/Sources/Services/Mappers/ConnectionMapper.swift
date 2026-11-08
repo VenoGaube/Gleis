@@ -14,9 +14,7 @@ enum ConnectionMapper {
 
     private static let parseDateLock = NSLock()
 
-    static func map(
-        _ connection: OebbConnection, from: Station, to: Station, transportType: TransportType
-    ) -> TrainConnection {
+    static func map(_ connection: OebbConnection, from: Station, to: Station) -> TrainConnection {
         let sections = connection.sections ?? []
         let scheduledDeparture =
             parseDate(connection.from.departure)
@@ -57,7 +55,7 @@ enum ConnectionMapper {
         let transferSections = sections.filter { $0.category != nil && !isWalkingCategory($0.category) }
         let transfers = connection.switches ?? max(0, transferSections.count - 1)
         let mappedLegs = mapLegs(
-            sections, transportType: transportType, fallbackFrom: from, fallbackTo: to,
+            sections, fallbackFrom: from, fallbackTo: to,
             fallbackLineNumber: lineInfo.number, fallbackLineColors: lineInfo.lineColors,
             fallbackPlatform: platform, fallbackDeparture: departureTime, fallbackArrival: arrivalTime
         )
@@ -77,7 +75,7 @@ enum ConnectionMapper {
         )
     }
 
-    static func mapStation(_ station: OebbStation, transportType: TransportType) -> Station {
+    static func mapStation(_ station: OebbStation) -> Station {
         let name =
             station.name?.isEmpty == false
                 ? station.name! : (station.meta?.isEmpty == false ? station.meta! : "Unknown Station")
@@ -94,7 +92,7 @@ enum ConnectionMapper {
             }
 
         return Station(
-            id: String(station.number), name: name, coordinate: coordinate, transportTypes: [transportType], lines: []
+            id: String(station.number), name: name, coordinate: coordinate, lines: []
         )
     }
 
@@ -185,7 +183,7 @@ enum ConnectionMapper {
     }
 
     private static func mapLegs(
-        _ sections: [OebbSection], transportType: TransportType, fallbackFrom: Station, fallbackTo: Station,
+        _ sections: [OebbSection], fallbackFrom: Station, fallbackTo: Station,
         fallbackLineNumber: String, fallbackLineColors: TrainLineColors?, fallbackPlatform: String?,
         fallbackDeparture: Date?, fallbackArrival: Date?
     ) -> [ConnectionLeg] {
@@ -201,8 +199,8 @@ enum ConnectionMapper {
             ]
         }
         return sections.map { section in
-            let fromStation = mapStop(section.from, fallbackName: fallbackFrom.name, transportType: transportType)
-            let toStation = mapStop(section.to, fallbackName: fallbackTo.name, transportType: transportType)
+            let fromStation = mapStop(section.from, fallbackName: fallbackFrom.name)
+            let toStation = mapStop(section.to, fallbackName: fallbackTo.name)
             let departurePlatform = section.from.departurePlatformDeviation ?? section.from.departurePlatform
             let arrivalPlatform = section.to.arrivalPlatformDeviation ?? section.to.arrivalPlatform
             let info = lineInfo(for: section.category)
@@ -484,12 +482,10 @@ enum ConnectionMapper {
         return rideShortName == "W" || rideShortName == "WALK"
     }
 
-    private static func mapStop(
-        _ stop: OebbConnectionStop, fallbackName: String, transportType: TransportType
-    ) -> Station {
+    private static func mapStop(_ stop: OebbConnectionStop, fallbackName: String) -> Station {
         let name = stop.name?.isEmpty == false ? stop.name! : fallbackName
         let id = stop.esn.map(String.init) ?? fallbackName.lowercased().replacingOccurrences(of: " ", with: "_")
-        return Station(id: id, name: name, coordinate: nil, transportTypes: [transportType], lines: [])
+        return Station(id: id, name: name, coordinate: nil, lines: [])
     }
 
     private static func connectionCancelled(_ connection: OebbConnection) -> Bool {

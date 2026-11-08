@@ -72,11 +72,4 @@ extension Color {
         guard let value = Int(rgb, radix: 16) else { return nil }
         return (red: (value >> 16) & 0xFF, green: (value >> 8) & 0xFF, blue: value & 0xFF)
     }
-
-    // Dark mode adaptive colors
-    static let cardBackground = Color("CardBackground")
-}
-
-extension View {
-    func accentTheme(for _: TransportType) -> some View { tint(.trainBlue) }
 }

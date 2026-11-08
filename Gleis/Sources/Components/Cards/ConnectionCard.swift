@@ -16,9 +16,6 @@ struct ConnectionCard: View {
     // Convenience accessors
     private var connection: TrainConnection { displayConnection.connection }
     private var leaveTime: Date { displayConnection.leaveTime }
-    private var timeRemaining: TimeInterval { displayConnection.timeRemaining }
-    private var urgencyColor: Color { displayConnection.urgencyColor }
-    private var progress: Double { displayConnection.progress }
     private var isLeaveWindowPassed: Bool { displayConnection.isLeaveWindowPassed }
     private var hasDeparted: Bool { displayConnection.hasDeparted }
     private var isSelected: Bool { displayConnection.isSelected }
@@ -208,7 +205,6 @@ struct ConnectionCard: View {
                                 : "\(connection.transfers) transfers"
                         )
                     }
-
                 }
                 .frame(minWidth: 64, maxWidth: .infinity)
 
@@ -239,7 +235,6 @@ struct ConnectionCard: View {
                 }
                 .frame(minWidth: 66, alignment: .center)
                 .layoutPriority(2)
-
             }.frame(maxWidth: .infinity)
             Divider().frame(height: 40).padding(2)
             VStack(spacing: 2) {
@@ -259,8 +254,18 @@ struct ConnectionCard: View {
         }.padding(.horizontal, 16).padding(.vertical, 12)
     }
 
+    // Only this section reads the clock, so the per-second tick redraws it and not the whole list.
     private var leaveTimeSection: some View {
-        HStack(spacing: 16) {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            leaveTimeContent(now: context.date)
+        }
+    }
+
+    private func leaveTimeContent(now: Date) -> some View {
+        let timeRemaining = displayConnection.timeRemaining(at: now)
+        let urgencyColor = displayConnection.urgencyColor(at: now)
+        let progress = displayConnection.progress(at: now)
+        return HStack(spacing: 16) {
             ZStack {
                 Circle().stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2), lineWidth: 4)
                 Circle().trim(from: 0, to: progress).stroke(
@@ -282,7 +287,7 @@ struct ConnectionCard: View {
                         Text("to leave").font(.system(size: 8)).foregroundStyle(.secondary)
                     }
                 }
-            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel)
+            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel(timeRemaining))
             VStack(alignment: .leading, spacing: 2) {
                 Text("Leave at").font(.caption).foregroundStyle(.secondary)
                 Text(leaveTime, style: .time).font(.headline.monospacedDigit()).foregroundStyle(urgencyColor)
@@ -316,11 +321,10 @@ struct ConnectionCard: View {
                 isSelected ? "Cancel reminder" : "Set reminder"
             ).accessibilityHint(
                 isSelected ? "Removes the departure notification" : "Notifies you when it's time to leave")
-
         }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
     }
 
-    private var countdownAccessibilityLabel: String {
+    private func countdownAccessibilityLabel(_ timeRemaining: TimeInterval) -> String {
         if timeRemaining <= 0 { return "Time to leave now" }
         let minutes = Int(timeRemaining) / 60
         let seconds = Int(timeRemaining) % 60
@@ -436,14 +440,12 @@ struct PinBadge: View {
         id: "wien-meidling",
         name: "Wien Meidling",
         coordinate: nil,
-        transportTypes: [.trainCommute],
         lines: []
     )
     let to = Station(
         id: "wien-hbf",
         name: "Wien Hbf",
         coordinate: nil,
-        transportTypes: [.trainCommute],
         lines: []
     )
 

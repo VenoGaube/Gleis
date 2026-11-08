@@ -27,8 +27,8 @@ final class TransportViewModel: ObservableObject {
     @Published var connections: LoadingState<[TrainConnection]> = .idle {
         didSet {
             // Anchor the wait here rather than in the loading view. That view sits inside a
-            // switch that the display timer re-evaluates every second, which kept resetting
-            // its own `@State` start time and froze the elapsed count at zero.
+            // switch that re-evaluates on every model change, which kept resetting its own
+            // `@State` start time and froze the elapsed count at zero.
             if case .loading = connections {
                 if loadingStartedAt == nil { loadingStartedAt = Date() }
             } else {
@@ -39,7 +39,9 @@ final class TransportViewModel: ObservableObject {
 
     /// When the current no-data wait began, for the loading view's elapsed-time copy.
     @Published private(set) var loadingStartedAt: Date?
-    @Published var displayConnections: [DisplayConnection] = []
+    @Published var displayConnections: [DisplayConnection] = [] {
+        didSet { schedulePhaseUpdate() }
+    }
     @Published var stations: [Station] = []
     @Published var selectedConnection: TrainConnection?
     @Published var errorMessage: String?
@@ -54,7 +56,6 @@ final class TransportViewModel: ObservableObject {
     @Published var availableTrainTypes: [TrainType] = []
     @Published var connectionRecovery: ConnectionRecoveryState?
 
-    let transportType: TransportType
     let toastManager = ToastManager()
 
     private let transportService: TransportServiceProtocol
@@ -64,12 +65,14 @@ final class TransportViewModel: ObservableObject {
     private let connectionCache = ConnectionCache.shared
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
-    private var displayTimer: Timer?
-    private var currentFetchTask: Task<Void, Never>?
+    private var phaseUpdateTimer: Timer?
+    private var lastPhaseUpdateAt = Date()
+    private var isAutoRefreshRunning = false
+    private var inFlightRefresh: InFlightRefresh?
+    private var inFlightRefreshShowsFeedback = false
+    private var inFlightRefreshIsUserInitiated = false
     private var lastFetchedRouteKey: String?
     private var lastInitializedFilterRouteKey: String?
-    private var isFetching = false
-    private var pendingRefreshRequest: (showFeedback: Bool, isUserInitiated: Bool)?
     private var isLoadingStations = false
     private var lastWidgetSnapshotSignature: String?
     private var widgetCoverageTopUpTask: Task<Void, Never>?
@@ -80,6 +83,10 @@ final class TransportViewModel: ObservableObject {
     private var dismissedRecoverySignatures = Set<String>()
     private var reminderResyncSignatures = Set<String>()
     private let minimumLiveRefreshInterval: TimeInterval = 45
+    private static let nearDepartureRefreshInterval: TimeInterval = 60
+    private static let farDepartureRefreshInterval: TimeInterval = 5 * 60
+    /// A departure closer than this keeps the foreground refresh at the near interval.
+    private static let nearDepartureWindow: TimeInterval = 30 * 60
     /// Request budgets sized against measured provider latency rather than optimism.
     private static let userInitiatedFetchTimeout: TimeInterval = 20
     private static let backgroundFetchTimeout: TimeInterval = 25
@@ -93,14 +100,23 @@ final class TransportViewModel: ObservableObject {
     /// Wall-clock ceiling for one background coverage top-up run.
     private static let widgetTopUpBudget: TimeInterval = 60
 
-    var config: RouteConfiguration { settingsManager.config(for: transportType) }
+    var config: RouteConfiguration { settingsManager.trainCommuteConfig }
+
+    private struct InFlightRefresh {
+        let routeKey: String?
+        let task: Task<Void, Never>
+    }
+
+    private var configuredRouteKey: String? {
+        guard let start = config.startStation, let end = config.endStation, start.id != end.id else { return nil }
+        return "\(start.id)-\(end.id)"
+    }
 
     init(
-        transportType: TransportType, transportService: TransportServiceProtocol = TransportService.shared,
+        transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
         settingsManager: SettingsManager? = nil
     ) {
-        self.transportType = transportType
         self.transportService = transportService
         self.notificationService = notificationService
         self.settingsManager = settingsManager ?? SettingsManager.shared
@@ -128,8 +144,7 @@ final class TransportViewModel: ObservableObject {
                 // while the new route fetch is still in progress.
                 resetWidgetSyncStateForRouteChange()
                 updateWidget(with: [])
-                currentFetchTask?.cancel()
-                currentFetchTask = Task { await self.refreshConnections(isUserInitiated: false) }
+                Task { await self.refreshConnections(isUserInitiated: false) }
             }
             .store(in: &cancellables)
 
@@ -180,45 +195,46 @@ final class TransportViewModel: ObservableObject {
         isLoadingStations = true
         defer { isLoadingStations = false }
         do {
-            stations = try await transportService.fetchStations(for: transportType)
+            stations = try await transportService.fetchStations()
         } catch {
             if !(error is CancellationError) { handleError(error) }
         }
     }
 
     func searchStations(_ query: String) async -> [Station] {
-        await searchService.searchStations(query, transportType: transportType)
+        await searchService.searchStations(query)
     }
 
+    /// Runs one refresh per route at a time: a trigger for the same route awaits the one in flight,
+    /// and a trigger for another route cancels it and waits for it to unwind before starting.
     func refreshConnections(showFeedback: Bool = false, isUserInitiated: Bool = false) async {
         await reconcileCommuteNotificationsIfNeeded()
 
-        guard !isFetching else {
-            if let pending = pendingRefreshRequest {
-                pendingRefreshRequest = (
-                    showFeedback: pending.showFeedback || showFeedback,
-                    isUserInitiated: pending.isUserInitiated || isUserInitiated
-                )
-            } else {
-                pendingRefreshRequest = (showFeedback: showFeedback, isUserInitiated: isUserInitiated)
+        while let inFlight = inFlightRefresh {
+            if inFlight.routeKey == configuredRouteKey, !inFlight.task.isCancelled {
+                if showFeedback { inFlightRefreshShowsFeedback = true }
+                if isUserInitiated { inFlightRefreshIsUserInitiated = true }
+                await inFlight.task.value
+                return
             }
-            return
+            inFlight.task.cancel()
+            await inFlight.task.value
         }
-        isFetching = true
+
+        inFlightRefreshShowsFeedback = showFeedback
+        inFlightRefreshIsUserInitiated = isUserInitiated
+        let task = Task { @MainActor [weak self] in
+            await self?.performRefresh()
+            self?.inFlightRefresh = nil
+        }
+        inFlightRefresh = InFlightRefresh(routeKey: configuredRouteKey, task: task)
+        await task.value
+    }
+
+    /// Reads the in-flight flags at each decision, so a user trigger that joins mid-run still gets user semantics.
+    private func performRefresh() async {
         isRefreshingConnections = true
-        defer {
-            isFetching = false
-            isRefreshingConnections = false
-            if let pending = pendingRefreshRequest {
-                pendingRefreshRequest = nil
-                currentFetchTask = Task { @MainActor [weak self] in
-                    await self?.refreshConnections(
-                        showFeedback: pending.showFeedback,
-                        isUserInitiated: pending.isUserInitiated
-                    )
-                }
-            }
-        }
+        defer { isRefreshingConnections = false }
 
         let currentConfig = config
         guard let start = currentConfig.startStation, let end = currentConfig.endStation, start.id != end.id else {
@@ -249,7 +265,7 @@ final class TransportViewModel: ObservableObject {
             resetWidgetSyncStateForRouteChange()
         }
 
-        if !isUserInitiated,
+        if !inFlightRefreshIsUserInitiated,
            let backoffUntil = automaticRefreshBackoffUntil,
            Date() < backoffUntil,
            !isRouteChange,
@@ -264,7 +280,7 @@ final class TransportViewModel: ObservableObject {
 
         // Skip fetch if route unchanged, already loaded, and not user-initiated
         // But still filter out past connections from existing state
-        if !isUserInitiated, !isRouteChange, connections.isLoaded, !isShowingCachedData {
+        if !inFlightRefreshIsUserInitiated, !isRouteChange, connections.isLoaded, !isShowingCachedData {
             if let existing = connections.value {
                 let now = Date()
                 let pinnedId = settingsManager.pinnedJourney?.connectionId
@@ -295,7 +311,7 @@ final class TransportViewModel: ObservableObject {
         // Showing another route's data was the real worry, and the cache is keyed by
         // route, so it cannot do that; the stale in-memory state is already cleared above.
         if existingConnections == nil,
-           let cached = await connectionCache.load(for: transportType, from: start, to: end)
+           let cached = await connectionCache.load(from: start, to: end)
         {
             let futureCached = cached.filter { $0.departureTime > Date() }
             if !futureCached.isEmpty {
@@ -304,7 +320,7 @@ final class TransportViewModel: ObservableObject {
                 setConnections(futureCached)
                 evaluateReminderReliability(with: futureCached)
                 isShowingCachedData = true
-                lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
+                lastUpdated = await connectionCache.lastUpdateTime(from: start, to: end)
                 updateWidgetIfNeeded(with: futureCached)
                 existingConnections = futureCached
             }
@@ -312,7 +328,7 @@ final class TransportViewModel: ObservableObject {
 
         // Offline: use cached data
         if !NetworkMonitor.shared.isConnected,
-           let cached = await connectionCache.load(for: transportType, from: start, to: end)
+           let cached = await connectionCache.load(from: start, to: end)
         {
             let futureConnections = cached.filter { $0.departureTime > Date() }
             guard !futureConnections.isEmpty else {
@@ -325,7 +341,7 @@ final class TransportViewModel: ObservableObject {
             evaluateReminderReliability(with: futureConnections)
             isShowingCachedData = true
             clearServiceDegradedState()
-            lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
+            lastUpdated = await connectionCache.lastUpdateTime(from: start, to: end)
             updateWidgetIfNeeded(with: futureConnections)
             return
         }
@@ -343,7 +359,7 @@ final class TransportViewModel: ObservableObject {
             // gate-then-shop fallback chain adds an auth round trip on top. An 8s budget
             // raced the server and lost, which is what surfaced as "Update failed,
             // showing previous data" on pull-to-refresh.
-            let timeout = isUserInitiated ? Self.userInitiatedFetchTimeout : Self.backgroundFetchTimeout
+            let timeout = inFlightRefreshIsUserInitiated ? Self.userInitiatedFetchTimeout : Self.backgroundFetchTimeout
 
             // Launch starts this route's first fetch before any view exists. Claiming it
             // here inherits a request that is already seconds along, rather than starting
@@ -368,13 +384,12 @@ final class TransportViewModel: ObservableObject {
             }
             let result = page.connections
             guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
-            await connectionCache.save(result, for: transportType, from: start, to: end)
 
             let now = Date()
             let futureResult = result.filter { $0.departureTime > now }
 
             let merged: [TrainConnection]
-            if let existing = existingConnections, !isRouteChange, !isUserInitiated {
+            if let existing = existingConnections, !isRouteChange, !inFlightRefreshIsUserInitiated {
                 let stillValid = existing.filter { $0.departureTime > now }
                 let newIds = Set(futureResult.map(\.id))
                 let kept = stillValid.filter { !newIds.contains($0.id) }
@@ -391,14 +406,18 @@ final class TransportViewModel: ObservableObject {
             evaluateReminderReliability(with: merged)
             lastUpdated = Date()
             isShowingCachedData = false
-            if showFeedback { toastManager.show("Updated", type: .success) }
+            if inFlightRefreshShowsFeedback { toastManager.show("Updated", type: .success) }
             updateWidgetIfNeeded(with: merged)
             consecutiveAutomaticFetchFailures = 0
             automaticRefreshBackoffUntil = nil
             clearServiceDegradedState()
+            // Written after the list is shown so the disk write does not delay the first paint.
+            await connectionCache.save(result, from: start, to: end)
         } catch {
+            // A superseded fetch was cancelled on purpose: no error state, and the backoff stays as it was.
+            if Task.isCancelled { return }
             guard config.startStation?.id == start.id, config.endStation?.id == end.id else { return }
-            scheduleAutomaticRefreshBackoffIfNeeded(for: error, isUserInitiated: isUserInitiated)
+            scheduleAutomaticRefreshBackoffIfNeeded(for: error, isUserInitiated: inFlightRefreshIsUserInitiated)
             if let existing = existingConnections, !existing.isEmpty {
                 if !(error is CancellationError) {
                     toastManager.show("Update failed, showing previous data", type: .info)
@@ -407,7 +426,7 @@ final class TransportViewModel: ObservableObject {
                 updateWidgetIfNeeded(with: existing)
                 return
             }
-            if let cached = await connectionCache.load(for: transportType, from: start, to: end) {
+            if let cached = await connectionCache.load(from: start, to: end) {
                 let futureConnections = cached.filter { $0.departureTime > Date() }
                 guard !futureConnections.isEmpty else {
                     connections = .error(.noConnectionsAvailable)
@@ -419,7 +438,7 @@ final class TransportViewModel: ObservableObject {
                 setConnections(futureConnections)
                 evaluateReminderReliability(with: futureConnections)
                 isShowingCachedData = true
-                lastUpdated = await connectionCache.lastUpdateTime(for: transportType, from: start, to: end)
+                lastUpdated = await connectionCache.lastUpdateTime(from: start, to: end)
                 updateWidgetIfNeeded(with: futureConnections)
             } else {
                 connections = .error(GleisError.from(error))
@@ -460,7 +479,7 @@ final class TransportViewModel: ObservableObject {
                     settingsManager.scheduledReminders.first(where: { $0.id == id })?.createdAt
                 } ?? Date()
             let reminder = ScheduledReminder(
-                id: connection.id, transportType: transportType, lineNumber: connection.lineNumber,
+                id: connection.id, lineNumber: connection.lineNumber,
                 destination: connection.arrivalStation.name, platform: connection.platform,
                 departureTime: config.effectiveDepartureTime(for: connection),
                 leaveTime: calculateLeaveTime(for: connection), delayMinutes: connection.delay,
@@ -581,12 +600,12 @@ final class TransportViewModel: ObservableObject {
     }
 
     func addRecentStation(_ station: Station) {
-        settingsManager.addRecentStation(station, for: transportType)
+        settingsManager.addRecentStation(station)
     }
 
     func loadMoreConnections() async {
         guard case let .loaded(current) = connections, let last = current.last else { return }
-        guard !isLoadingMore, !isFetching else { return }
+        guard !isLoadingMore, inFlightRefresh == nil else { return }
         guard let start = config.startStation, let end = config.endStation else { return }
 
         isLoadingMore = true
@@ -616,7 +635,6 @@ final class TransportViewModel: ObservableObject {
                     let page = try await transportService.fetchConnectionsPage(
                         from: start,
                         to: end,
-                        transportType: transportType,
                         seedDateTime: seedDateTime,
                         pageSize: pageSize,
                         cursor: cursorToken
@@ -654,7 +672,6 @@ final class TransportViewModel: ObservableObject {
                     let more = try await transportService.fetchConnections(
                         from: start,
                         to: end,
-                        transportType: transportType,
                         departureTime: departureCursor,
                         count: pageSize
                     )
@@ -685,28 +702,45 @@ final class TransportViewModel: ObservableObject {
         } catch { if !(error is CancellationError) { toastManager.show("Failed to load more", type: .error) } }
     }
 
-    func startAutoRefresh(interval: TimeInterval = 60) {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.settingsManager.checkAndClearExpiredPin()
-                self?.currentFetchTask?.cancel()
-                self?.currentFetchTask = Task { await self?.refreshConnections() }
-            }
-        }
-        startDisplayTimer()
+    func startAutoRefresh() {
+        isAutoRefreshRunning = true
+        scheduleNextAutoRefresh()
+        updateDisplayConnectionPhases()
     }
 
     func stopAutoRefresh() {
+        isAutoRefreshRunning = false
         refreshTimer?.invalidate()
         refreshTimer = nil
-        stopDisplayTimer()
+        phaseUpdateTimer?.invalidate()
+        phaseUpdateTimer = nil
     }
 
     func cancelCurrentFetch() {
-        currentFetchTask?.cancel()
-        currentFetchTask = nil
-        pendingRefreshRequest = nil
+        inFlightRefresh?.task.cancel()
+    }
+
+    private func scheduleNextAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: nextAutoRefreshInterval(), repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.runAutoRefresh() }
+        }
+    }
+
+    private func runAutoRefresh() async {
+        settingsManager.checkAndClearExpiredPin()
+        await refreshConnections()
+        guard isAutoRefreshRunning else { return }
+        scheduleNextAutoRefresh()
+    }
+
+    private func nextAutoRefreshInterval() -> TimeInterval {
+        let now = Date()
+        let nextDeparture = displayConnections.map(\.connection.departureTime).filter { $0 > now }.min()
+        guard let nextDeparture else { return Self.farDepartureRefreshInterval }
+        return nextDeparture.timeIntervalSince(now) > Self.nearDepartureWindow
+            ? Self.farDepartureRefreshInterval
+            : Self.nearDepartureRefreshInterval
     }
 
     func setImmediateRouteTransitionState(start: Station?, end: Station?) {
@@ -726,29 +760,40 @@ final class TransportViewModel: ObservableObject {
 
     deinit {
         refreshTimer?.invalidate()
-        displayTimer?.invalidate()
-        currentFetchTask?.cancel()
+        phaseUpdateTimer?.invalidate()
+        inFlightRefresh?.task.cancel()
         widgetCoverageTopUpTask?.cancel()
     }
 
     // MARK: - Display Connection Management
 
-    private func startDisplayTimer() {
-        displayTimer?.invalidate()
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateDisplayConnectionTimes() }
+    /// Arms a one-shot timer for the soonest phase boundary across the rows; cards draw the countdown themselves.
+    private func schedulePhaseUpdate() {
+        phaseUpdateTimer?.invalidate()
+        phaseUpdateTimer = nil
+        guard isAutoRefreshRunning else { return }
+        let now = Date()
+        guard let nextBoundary = displayConnections.compactMap({ $0.nextPhaseBoundary(after: now) }).min() else { return }
+        let timer = Timer(fire: nextBoundary, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateDisplayConnectionPhases() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        phaseUpdateTimer = timer
     }
 
-    private func stopDisplayTimer() {
-        displayTimer?.invalidate()
-        displayTimer = nil
-    }
-
-    private func updateDisplayConnectionTimes() {
-        let currentTime = Date()
-        for i in 0 ..< displayConnections.count {
-            displayConnections[i].updateTime(currentTime: currentTime)
+    private func updateDisplayConnectionPhases() {
+        let now = Date()
+        var updated = displayConnections
+        var didChangePhase = false
+        for i in updated.indices {
+            updated[i].playThresholdHaptic(from: lastPhaseUpdateAt, to: now)
+            if updated[i].updatePhase(at: now) { didChangePhase = true }
+        }
+        lastPhaseUpdateAt = now
+        if didChangePhase {
+            displayConnections = updated
+        } else {
+            schedulePhaseUpdate()
         }
     }
 
@@ -780,6 +825,7 @@ final class TransportViewModel: ObservableObject {
         let route = settingsManager.savedCommuteRoute
 
         let currentTime = Date()
+        lastPhaseUpdateAt = currentTime
         displayConnections = filtered.compactMap { connection in
             let leaveTime = calculateLeaveTime(for: connection)
             let isSelected =
@@ -891,7 +937,6 @@ final class TransportViewModel: ObservableObject {
         let action: WidgetRecoveryAction = isRouteConfigured ? .openLiveRoute : .openSetup
 
         let widgetData = WidgetData(
-            transportType: transportType,
             connections: storedConnections,
             leaveTimes: leaveTimes,
             fromStationName: config.startStation?.name,
@@ -907,7 +952,7 @@ final class TransportViewModel: ObservableObject {
             recoveryAction: action
         )
         lastWidgetSnapshotSignature = computedSnapshotSignature
-        AppGroupStorage.savePrimaryWidgetData(for: transportType, data: widgetData)
+        AppGroupStorage.savePrimaryWidgetData(widgetData)
         WidgetSyncDiagnostics.snapshotWriteApplied(
             reason: "transport_view_model",
             routeSignature: routeSignature,
@@ -962,7 +1007,7 @@ final class TransportViewModel: ObservableObject {
         guard hoursUntilWindowEnd > 0, hoursUntilWindowEnd <= 12 * 60 * 60 else { return }
 
         let routeSignature = widgetRouteSignature()
-        if let stored = AppGroupStorage.loadPrimaryWidgetData(for: transportType),
+        if let stored = AppGroupStorage.loadPrimaryWidgetData(),
            stored.routeSignature == routeSignature,
            !stored.needsTopUp(referenceDate: referenceDate, targetEnd: morningWindow.end)
         {
@@ -979,7 +1024,6 @@ final class TransportViewModel: ObservableObject {
         let candidates = widgetSnapshotCandidates(from: sourceConnections, at: referenceDate)
         let baselineCoverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: referenceDate)
         let baselineWidgetData = WidgetData(
-            transportType: transportType,
             connections: candidates.map(WidgetSnapshotBuilder.makeWidgetConnection),
             leaveTimes: candidates.map(\.leaveTime),
             fromStationName: config.startStation?.name,
@@ -1082,7 +1126,6 @@ final class TransportViewModel: ObservableObject {
                     let page = try await transportService.fetchConnectionsPage(
                         from: fromStation,
                         to: toStation,
-                        transportType: transportType,
                         seedDateTime: cursorSeedDateTime,
                         pageSize: widgetTopUpBatchSize,
                         cursor: token
@@ -1097,7 +1140,6 @@ final class TransportViewModel: ObservableObject {
                     pageConnections = try await transportService.fetchConnections(
                         from: fromStation,
                         to: toStation,
-                        transportType: transportType,
                         departureTime: departureCursor,
                         count: widgetTopUpBatchSize
                     )
@@ -1186,8 +1228,7 @@ final class TransportViewModel: ObservableObject {
         settingsManager.pruneExpiredReminders(before: now)
         let relevantReminders = settingsManager.scheduledReminders
             .filter { reminder in
-                reminder.transportType == transportType
-                    && reminder.departureTime > now.addingTimeInterval(-15 * 60)
+                reminder.departureTime > now.addingTimeInterval(-15 * 60)
             }
             .sorted { $0.departureTime < $1.departureTime }
 
@@ -1385,7 +1426,6 @@ final class TransportViewModel: ObservableObject {
 
                 let updatedReminder = ScheduledReminder(
                     id: liveConnection.id,
-                    transportType: transportType,
                     lineNumber: liveConnection.lineNumber,
                     destination: liveConnection.arrivalStation.name,
                     platform: liveConnection.platform,
@@ -1449,9 +1489,8 @@ final class TransportViewModel: ObservableObject {
         timeoutSeconds: TimeInterval
     ) async throws -> PrewarmedConnectionsPage? {
         let service = transportService
-        let type = transportType
         return try? await withTimeout(seconds: timeoutSeconds) {
-            try await service.claimPrewarmedConnections(from: start, to: end, transportType: type)
+            try await service.claimPrewarmedConnections(from: start, to: end)
         }
     }
 
@@ -1488,12 +1527,10 @@ final class TransportViewModel: ObservableObject {
         timeoutSeconds: TimeInterval = 15
     ) async throws -> ConnectionPage {
         let service = transportService
-        let type = transportType
         return try await withTimeout(seconds: timeoutSeconds) {
             try await service.fetchConnectionsPage(
                 from: start,
                 to: end,
-                transportType: type,
                 seedDateTime: seedDateTime,
                 pageSize: pageSize,
                 cursor: nil

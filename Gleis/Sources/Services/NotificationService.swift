@@ -22,7 +22,6 @@ final class NotificationService: NotificationServiceProtocol, @unchecked Sendabl
         content.title = preview.title
         content.body = preview.body
         content.sound = config.notificationSettings.soundEnabled ? .default : nil
-        content.categoryIdentifier = config.transportType.rawValue
         content.interruptionLevel = preview.interruptionLevel
         content.userInfo[NotificationPayload.deepLinkKey] = NotificationPayload.connectionDeepLink(id: connection.id)
         content.targetContentIdentifier = connection.id

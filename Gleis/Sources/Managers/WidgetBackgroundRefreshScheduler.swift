@@ -1,9 +1,11 @@
 import BackgroundTasks
 import Foundation
+import OSLog
 import WidgetKit
 
 enum WidgetBackgroundRefreshScheduler {
     static let taskIdentifier = "com.veno.gleis.widget.refresh"
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.veno.gleis", category: "BackgroundRefresh")
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
@@ -57,8 +59,7 @@ enum WidgetBackgroundRefreshScheduler {
     }
 
     /// Raises disruption alerts for reminded journeys without needing the app open.
-    /// The widget reconcile immediately before this has already refreshed the
-    /// connection cache, so this reads what it wrote rather than fetching again.
+    /// Fetches live departures so alerts do not depend on how old the app's cache is.
     private static func deliverServiceAlerts() async {
         struct Context {
             let reminders: [ScheduledReminder]
@@ -71,15 +72,27 @@ enum WidgetBackgroundRefreshScheduler {
             settings.pruneExpiredReminders()
             let config = settings.trainCommuteConfig
             return Context(
-                reminders: settings.scheduledReminders.filter { $0.transportType == .trainCommute },
+                reminders: settings.scheduledReminders,
                 start: config.startStation,
                 end: config.endStation
             )
         }
 
         guard !context.reminders.isEmpty, let start = context.start, let end = context.end else { return }
-        let connections = await ConnectionCache.shared.load(for: .trainCommute, from: start, to: end) ?? []
-        guard !connections.isEmpty else { return }
+        var live: [TrainConnection] = []
+        do {
+            live = try await TransportService.shared.fetchConnections(from: start, to: end)
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.error(
+                "Background alert fetch failed for \(start.id, privacy: .public) to \(end.id, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+        }
+        let liveIds = Set(live.map(\.id))
+        let cached = await ConnectionCache.shared.load(from: start, to: end) ?? []
+        let connections = live + cached.filter { !liveIds.contains($0.id) }
+        guard !connections.isEmpty, !Task.isCancelled else { return }
 
         await ServiceAlertNotifier.deliverAlerts(for: context.reminders, in: connections)
     }

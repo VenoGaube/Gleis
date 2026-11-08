@@ -28,7 +28,6 @@ Build a robust widget update system that:
   - `snapshotSignature`
 - [x] Use strict decoding for current schema version only.
 - [x] Add helper validations:
-  - `hasCoverage(at:)`
   - `isCoverageExhausted(at:)`
   - `needsTopUp(referenceDate:targetEnd:)`
 - [x] Add deterministic signature helpers for stored payloads.
@@ -37,7 +36,7 @@ Build a robust widget update system that:
 - [x] Mirror all `WidgetData` and metadata fields from app target.
 - [x] Use strict decoding for current schema version only.
 - [x] Keep App Group storage API aligned with app model exactly.
-- [x] Add shared helper parity used by provider (`hasCoverage`, `needsTopUp`, etc.).
+- [x] Add shared helper parity used by provider (`isCoverageExhausted`, `needsTopUp`, etc.).
 
 ## Phase 2: App-Side Snapshot Production
 

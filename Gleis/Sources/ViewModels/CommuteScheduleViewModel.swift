@@ -14,7 +14,6 @@ final class CommuteScheduleViewModel: ObservableObject {
 
     // MARK: - Dependencies
 
-    let transportType: TransportType
     private let transportService: TransportServiceProtocol
     private let notificationService: NotificationServiceProtocol
     private let settingsManager: SettingsManager
@@ -34,16 +33,14 @@ final class CommuteScheduleViewModel: ObservableObject {
     // MARK: - Init
 
     init(
-        transportType: TransportType = .trainCommute,
         transportService: TransportServiceProtocol = TransportService.shared,
         notificationService: NotificationServiceProtocol = NotificationService.shared,
         settingsManager: SettingsManager? = nil
     ) {
-        self.transportType = transportType
         self.transportService = transportService
         self.notificationService = notificationService
         self.settingsManager = settingsManager ?? SettingsManager.shared
-        config = self.settingsManager.config(for: transportType)
+        config = self.settingsManager.trainCommuteConfig
         searchService = StationSearchService(transportService: transportService)
         observeConfigChanges()
     }
@@ -60,7 +57,7 @@ final class CommuteScheduleViewModel: ObservableObject {
         defer { isLoadingStations = false }
 
         do {
-            stations = try await transportService.fetchStations(for: transportType)
+            stations = try await transportService.fetchStations()
             hasLoadedStations = true
         } catch {
             return
@@ -70,24 +67,24 @@ final class CommuteScheduleViewModel: ObservableObject {
     // MARK: - Station Search
 
     func searchStations(_ query: String) async -> [Station] {
-        await searchService.searchStations(query, transportType: transportType)
+        await searchService.searchStations(query)
     }
 
     // MARK: - Favorites
 
     func toggleFavorite(_ station: Station) {
-        settingsManager.toggleFavoriteStation(station, for: transportType)
+        settingsManager.toggleFavoriteStation(station)
     }
 
     // MARK: - Timing
 
     func saveTravelTime(_ minutes: Int?, for station: Station) {
-        settingsManager.saveTravelTime(minutes, for: station.id, transportType: transportType)
+        settingsManager.saveTravelTime(minutes, for: station.id)
         rescheduleAllNotifications()
     }
 
     func saveBufferTime(_ minutes: Int?, for station: Station) {
-        settingsManager.saveBufferTime(minutes, for: station.id, transportType: transportType)
+        settingsManager.saveBufferTime(minutes, for: station.id)
         rescheduleAllNotifications()
     }
 
@@ -183,7 +180,6 @@ final class CommuteScheduleViewModel: ObservableObject {
         guard let connections = try? await transportService.fetchConnections(
             from: from,
             to: to,
-            transportType: transportType,
             departureTime: departure,
             count: FetchLimits.commuteSuggestionConnectionCount
         ) else { return nil }

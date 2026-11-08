@@ -18,6 +18,10 @@ actor OebbAPIClient {
     /// Let the provider apply its own station-specific minimum change times. `-1`
     /// disabled them, producing transfers that cannot physically be made.
     private static let gateMinimumChangeTime: String? = nil
+    private static let secondsPerDay: TimeInterval = 86_400
+    private static let gateMidnightRolloverThreshold: TimeInterval = 12 * 60 * 60
+    // Idle timeout on the shared auth call, so a server that goes silent fails before the 20 s user fetch budget.
+    private static let authRequestTimeout: TimeInterval = 10
 
     private let baseURL = URL(string: "https://shop.oebbtickets.at")!
     private let fahrplanBaseURL = URL(string: "https://fahrplan.oebb.at")!
@@ -26,6 +30,7 @@ actor OebbAPIClient {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private var authSession: OebbAuthSession?
+    private var authTask: Task<OebbAuthSession, Error>?
     private var lastGateSnapshotPruneAt: Date?
 
     private lazy var dateFormatter: DateFormatter = {
@@ -42,6 +47,12 @@ actor OebbAPIClient {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyyMMdd"
         return f
+    }()
+
+    private lazy var gateCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar
     }()
 
     private lazy var gateTimeFormatter: DateFormatter = {
@@ -121,18 +132,6 @@ actor OebbAPIClient {
             pageSize: normalizedPageSize,
             seedDateTime: seedDateTime
         )
-    }
-
-    func fetchTimetable(
-        from: OebbStationRef, to: OebbStationRef, count: Int, departure: Date
-    ) async throws -> OebbTimetableResponse {
-        let page = try await fetchConnectionsPage(
-            from: from,
-            to: to,
-            pageSize: count,
-            seedDateTime: departure
-        )
-        return OebbTimetableResponse(connections: page.connections)
     }
 
     private func fetchTimetableViaShop(
@@ -701,8 +700,9 @@ actor OebbAPIClient {
         }
 
         var normalizedRealtime = realtime
-        if normalizedRealtime < scheduled {
-            normalizedRealtime = normalizedRealtime.addingTimeInterval(86_400)
+        // Only a gap this large means midnight was crossed without a day offset; a smaller one is early running.
+        if normalizedRealtime.timeIntervalSince(scheduled) < -Self.gateMidnightRolloverThreshold {
+            normalizedRealtime = normalizedRealtime.addingTimeInterval(Self.secondsPerDay)
         }
         return max(0, Int(normalizedRealtime.timeIntervalSince(scheduled) / 60))
     }
@@ -714,13 +714,14 @@ actor OebbAPIClient {
 
         let secondsPart = String(digits.suffix(2))
         let minutesPart = String(digits.dropLast(2).suffix(2))
-        let hoursPart = String(digits.dropLast(4))
+        let hoursPart = String(digits.dropLast(4).suffix(2))
+        let days = Int(digits.dropLast(6)) ?? 0
 
         guard let seconds = Int(secondsPart), let minutes = Int(minutesPart), let hours = Int(hoursPart) else {
             return nil
         }
 
-        return ((hours * 3600) + (minutes * 60) + seconds) * 1000
+        return ((days * Int(Self.secondsPerDay)) + (hours * 3600) + (minutes * 60) + seconds) * 1000
     }
 
     private func gateDurationFromStops(departure: String?, arrival: String?) -> Int? {
@@ -739,17 +740,28 @@ actor OebbAPIClient {
 
     private func gateIsoTimestamp(date: String?, time: String?) -> String? {
         guard let date, let time else { return nil }
-        let dateDigits = date.filter(\.isNumber)
+        var dateDigits = date.filter(\.isNumber)
         let timeDigits = time.filter(\.isNumber)
         guard dateDigits.count == 8, timeDigits.count >= 6 else { return nil }
+
+        // HAFAS writes a time past the service day's midnight as DDHHMMSS, DD being a day offset.
+        let dayOffset = Int(timeDigits.dropLast(6)) ?? 0
+        if dayOffset != 0 {
+            guard
+                let serviceDay = gateDateFormatter.date(from: dateDigits),
+                let shiftedDay = gateCalendar.date(byAdding: .day, value: dayOffset, to: serviceDay)
+            else { return nil }
+            dateDigits = gateDateFormatter.string(from: shiftedDay)
+        }
 
         let year = dateDigits.prefix(4)
         let month = dateDigits.dropFirst(4).prefix(2)
         let day = dateDigits.suffix(2)
 
-        let hour = timeDigits.prefix(2)
-        let minute = timeDigits.dropFirst(2).prefix(2)
-        let second = timeDigits.dropFirst(4).prefix(2)
+        let clockDigits = timeDigits.suffix(6)
+        let hour = clockDigits.prefix(2)
+        let minute = clockDigits.dropFirst(2).prefix(2)
+        let second = clockDigits.dropFirst(4).prefix(2)
 
         return "\(year)-\(month)-\(day)T\(hour):\(minute):\(second).000"
     }
@@ -1010,8 +1022,11 @@ actor OebbAPIClient {
 
         if [401, 403, 440].contains(http.statusCode) {
             if retryAuth {
-                authSession = nil
-                try? storage.delete(forKey: StorageKey.oebbAuthSession.rawValue)
+                // Another call may already have replaced the session this request was sent with.
+                if authSession?.accessToken == request.value(forHTTPHeaderField: "AccessToken") {
+                    authSession = nil
+                    try? storage.delete(forKey: StorageKey.oebbAuthSession.rawValue)
+                }
                 return try await perform(
                     try await applyAuth(to: request),
                     decode: decode,
@@ -1041,8 +1056,13 @@ actor OebbAPIClient {
 
     private func ensureAuthSession() async throws -> OebbAuthSession {
         if let session = authSession, !session.isExpired { return session }
+        // Callers arriving while an init is in flight share it instead of starting their own.
+        if let authTask { return try await authTask.value }
         let userId = authSession?.userId ?? makeUserId()
-        let session = try await authenticate(userId: userId)
+        let task = Task { try await self.authenticate(userId: userId) }
+        authTask = task
+        defer { authTask = nil }
+        let session = try await task.value
         authSession = session
         try? storage.save(session, forKey: StorageKey.oebbAuthSession.rawValue)
         return session
@@ -1057,6 +1077,7 @@ actor OebbAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = Self.authRequestTimeout
         request.setValue("inet", forHTTPHeaderField: "Channel")
 
         let (data, response) = try await urlSession.data(for: request)

@@ -15,7 +15,7 @@ enum WidgetSnapshotReconciler {
     static func reconcile(referenceDate: Date = Date(), allowNetworkFallback: Bool) async -> Bool {
         let now = referenceDate
         let context = await MainActor.run { snapshotContext() }
-        let existing = AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute)
+        let existing = AppGroupStorage.loadPrimaryWidgetData()
 
         guard
             let start = context.config.startStation,
@@ -39,7 +39,8 @@ enum WidgetSnapshotReconciler {
             return false
         }
 
-        let cachedConnections = await ConnectionCache.shared.load(for: .trainCommute, from: start, to: end) ?? []
+        let cachedConnections = await ConnectionCache.shared.load(from: start, to: end) ?? []
+        let cacheUpdatedAt = await ConnectionCache.shared.lastUpdateTime(from: start, to: end)
         var mergedConnections = cachedConnections
         var candidates = makeCandidates(from: mergedConnections, context: context, referenceDate: now)
         var coverage = WidgetSnapshotBuilder.coverageRange(for: candidates, fallback: now)
@@ -57,18 +58,25 @@ enum WidgetSnapshotReconciler {
             futureCount: candidates.count
         )
 
+        var didFetchFromNetwork = false
+        var didNetworkFetchFail = false
         if allowNetworkFallback, !cacheSufficient {
             let fetchStart = max(
                 now,
                 (mergedConnections.map(\.departureTime).max() ?? now).addingTimeInterval(1)
             )
-            if let fetched = await fetchConnectionsCoveringHorizon(
+            let fetched = await fetchConnectionsCoveringHorizon(
                 from: start,
                 to: end,
                 startDate: fetchStart,
                 targetEnd: targetWindow.end,
                 targetCount: WidgetSnapshotBuilder.maxStoredConnectionLimit
-            ), !fetched.isEmpty {
+            )
+            // A cancelled fetch also comes back nil, and is not an outage to report.
+            if Task.isCancelled { return false }
+            didNetworkFetchFail = fetched == nil
+            if let fetched, !fetched.isEmpty {
+                didFetchFromNetwork = true
                 let deduped = WidgetSnapshotBuilder.deduplicatedByConnectionID(mergedConnections + fetched)
                 mergedConnections = deduped.sorted { lhs, rhs in
                     if lhs.departureTime != rhs.departureTime {
@@ -88,9 +96,11 @@ enum WidgetSnapshotReconciler {
             }
         }
 
+        // Same rule as TransportViewModel.updateWidget: cached departures after a failed fetch are fallback.
+        let state: WidgetDataState = didNetworkFetchFail && !candidates.isEmpty ? .fallback : .fresh
         let snapshotSignature = WidgetSnapshotBuilder.snapshotSignature(
             routeSignature: routeSignature,
-            stateSignature: "fresh",
+            stateSignature: state.rawValue,
             candidates: candidates,
             coverageRange: coverage
         )
@@ -104,22 +114,23 @@ enum WidgetSnapshotReconciler {
         }
 
         let widgetData = WidgetData(
-            transportType: .trainCommute,
             connections: candidates.map(WidgetSnapshotBuilder.makeWidgetConnection),
             leaveTimes: candidates.map(\.leaveTime),
             fromStationName: start.name,
             toStationName: end.name,
-            updatedAt: now,
+            updatedAt: didFetchFromNetwork ? now : (cacheUpdatedAt ?? now),
             generatedAt: now,
             coverageStart: coverage.start,
             coverageEnd: coverage.end,
             routeSignature: routeSignature,
             snapshotSignature: snapshotSignature,
-            state: .fresh,
-            stateMessage: candidates.isEmpty ? "No upcoming departures." : nil,
+            state: state,
+            stateMessage: candidates.isEmpty
+                ? "No upcoming departures."
+                : (state == .fallback ? "Live data delayed. Showing cached departures." : nil),
             recoveryAction: .openLiveRoute
         )
-        AppGroupStorage.savePrimaryWidgetData(for: .trainCommute, data: widgetData)
+        AppGroupStorage.savePrimaryWidgetData(widgetData)
         WidgetSyncDiagnostics.snapshotWriteApplied(
             reason: "foreground_reconcile",
             routeSignature: routeSignature,
@@ -181,7 +192,6 @@ enum WidgetSnapshotReconciler {
         }
 
         let setupData = WidgetData(
-            transportType: .trainCommute,
             connections: [],
             leaveTimes: [],
             updatedAt: referenceDate,
@@ -194,7 +204,7 @@ enum WidgetSnapshotReconciler {
             stateMessage: "Set up your route to see departures.",
             recoveryAction: .openSetup
         )
-        AppGroupStorage.savePrimaryWidgetData(for: .trainCommute, data: setupData)
+        AppGroupStorage.savePrimaryWidgetData(setupData)
         WidgetSyncDiagnostics.snapshotWriteApplied(
             reason: "setup_state",
             routeSignature: routeSignature,
@@ -231,7 +241,6 @@ enum WidgetSnapshotReconciler {
                     let page = try await TransportService.shared.fetchConnectionsPage(
                         from: start,
                         to: end,
-                        transportType: .trainCommute,
                         seedDateTime: startDate,
                         pageSize: fetchPageSize,
                         cursor: cursorToken
@@ -246,7 +255,6 @@ enum WidgetSnapshotReconciler {
                     pageConnections = try await TransportService.shared.fetchConnections(
                         from: start,
                         to: end,
-                        transportType: .trainCommute,
                         departureTime: departureCursor,
                         count: fetchPageSize
                     )

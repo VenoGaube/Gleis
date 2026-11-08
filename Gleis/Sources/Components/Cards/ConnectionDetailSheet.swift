@@ -128,7 +128,6 @@ struct ConnectionDetailSheet: View {
                             stationName: leg.to.name,
                             transferMinutes: ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
                             nextLineNumber: transition.targetLeg.lineNumber,
-                            nextLineColors: transition.targetLeg.lineColors,
                             currentPlatform: leg.arrivalPlatform.trimmedNonEmpty ?? leg.platform.trimmedNonEmpty,
                             nextPlatform: transition.targetLeg.platform.trimmedNonEmpty,
                             nextDepartureTime: transition.targetLeg.departureTime,
@@ -434,7 +433,6 @@ struct TransferRow: View {
     let stationName: String
     let transferMinutes: Int?
     let nextLineNumber: String
-    let nextLineColors: TrainLineColors?
     let currentPlatform: String?
     let nextPlatform: String?
     let nextDepartureTime: Date?

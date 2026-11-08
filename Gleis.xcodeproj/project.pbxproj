@@ -24,7 +24,6 @@
 		B016 /* OebbRequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016 /* OebbRequestModels.swift */; };
 		B017 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017 /* Station.swift */; };
 		B018 /* TrainConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018 /* TrainConnection.swift */; };
-		B019 /* TransportType.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019 /* TransportType.swift */; };
 		B020 /* RouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020 /* RouteConfiguration.swift */; };
 		B021 /* CommuteSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021 /* CommuteSchedule.swift */; };
 		B022 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022 /* AppSettings.swift */; };
@@ -36,7 +35,6 @@
 		B027 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* OnboardingView.swift */; };
 		B028 /* StationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028 /* StationPicker.swift */; };
 		B029 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029 /* SettingsView.swift */; };
-		B031 /* TicketWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F031 /* TicketWalletView.swift */; };
 		B032 /* CommuteScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F032 /* CommuteScheduleView.swift */; };
 		B034 /* PinnedJourney.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034 /* PinnedJourney.swift */; };
 		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035 /* MyJourneyCard.swift */; };
@@ -44,7 +42,6 @@
 		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041 /* ToastManager.swift */; };
 		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043 /* StationSearchService.swift */; };
 		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044 /* CommuteScheduleViewModel.swift */; };
-		B046 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046 /* CameraService.swift */; };
 		B047 /* WidgetSyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047 /* WidgetSyncDiagnostics.swift */; };
 		B049 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F049 /* DeepLinkRouter.swift */; };
 		B050 /* WidgetSnapshotReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F050 /* WidgetSnapshotReconciler.swift */; };
@@ -61,6 +58,8 @@
 		W005 /* GleisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = WF00 /* GleisWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		W007 /* WidgetSyncDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047 /* WidgetSyncDiagnostics.swift */; };
 		W008 /* WidgetContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = F048 /* WidgetContract.swift */; };
+		9A1C0E4F2B7D3E5A6C8F0B11 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9A1C0E4F2B7D3E5A6C8F0B12 /* PrivacyInfo.xcprivacy */; };
+		9A1C0E4F2B7D3E5A6C8F0B13 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9A1C0E4F2B7D3E5A6C8F0B14 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,7 +105,6 @@
 		F016 /* OebbRequestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbRequestModels.swift; sourceTree = "<group>"; };
 		F017 /* Station.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Station.swift; sourceTree = "<group>"; };
 		F018 /* TrainConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainConnection.swift; sourceTree = "<group>"; };
-		F019 /* TransportType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportType.swift; sourceTree = "<group>"; };
 		F020 /* RouteConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteConfiguration.swift; sourceTree = "<group>"; };
 		F021 /* CommuteSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteSchedule.swift; sourceTree = "<group>"; };
 		F022 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
@@ -118,7 +116,6 @@
 		F027 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F028 /* StationPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationPicker.swift; sourceTree = "<group>"; };
 		F029 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		F031 /* TicketWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketWalletView.swift; sourceTree = "<group>"; };
 		F032 /* CommuteScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleView.swift; sourceTree = "<group>"; };
 		F034 /* PinnedJourney.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedJourney.swift; sourceTree = "<group>"; };
 		F035 /* MyJourneyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyJourneyCard.swift; sourceTree = "<group>"; };
@@ -126,7 +123,6 @@
 		F041 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
 		F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
 		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
-		F046 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		F047 /* WidgetSyncDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSyncDiagnostics.swift; sourceTree = "<group>"; };
 		F056 /* SerialQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SerialQueue.swift; sourceTree = "<group>"; };
 		F055 /* ServiceAlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceAlertNotifier.swift; sourceTree = "<group>"; };
@@ -145,6 +141,8 @@
 		WF04 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		WF05 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		WF06 /* GleisWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GleisWidget.entitlements; sourceTree = "<group>"; };
+		9A1C0E4F2B7D3E5A6C8F0B12 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9A1C0E4F2B7D3E5A6C8F0B14 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -183,6 +181,7 @@
 				F001 /* GleisApp.swift */,
 				F100 /* Info.plist */,
 				F101 /* Gleis.entitlements */,
+				9A1C0E4F2B7D3E5A6C8F0B12 /* PrivacyInfo.xcprivacy */,
 				G003 /* Sources */,
 			);
 			path = Gleis;
@@ -236,7 +235,6 @@
 			children = (
 				F017 /* Station.swift */,
 				F018 /* TrainConnection.swift */,
-				F019 /* TransportType.swift */,
 				F020 /* RouteConfiguration.swift */,
 				F021 /* CommuteSchedule.swift */,
 				F022 /* AppSettings.swift */,
@@ -270,7 +268,6 @@
 			isa = PBXGroup;
 			children = (
 				F029 /* SettingsView.swift */,
-				F031 /* TicketWalletView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -300,7 +297,6 @@
 				F006 /* StorageService.swift */,
 				F008 /* NotificationService.swift */,
 				F009 /* TransportService.swift */,
-				F046 /* CameraService.swift */,
 				F043 /* StationSearchService.swift */,
 				F052 /* ConnectionDeduplicator.swift */,
 				F053 /* ServiceAlertStabilizer.swift */,
@@ -401,6 +397,7 @@
 				WF02 /* SharedWidgetModels.swift */,
 				WF05 /* Info.plist */,
 				WF06 /* GleisWidget.entitlements */,
+				9A1C0E4F2B7D3E5A6C8F0B14 /* PrivacyInfo.xcprivacy */,
 			);
 			path = GleisWidget;
 			sourceTree = "<group>";
@@ -495,6 +492,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A1C0E4F2B7D3E5A6C8F0B11 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,6 +500,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A1C0E4F2B7D3E5A6C8F0B13 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -520,7 +519,6 @@
 				B006 /* StorageService.swift in Sources */,
 				B008 /* NotificationService.swift in Sources */,
 				B009 /* TransportService.swift in Sources */,
-				B046 /* CameraService.swift in Sources */,
 				B010 /* OebbAPIClient.swift in Sources */,
 				B011 /* ConnectionMapper.swift in Sources */,
 				B012 /* ColorExtensions.swift in Sources */,
@@ -530,7 +528,6 @@
 				B016 /* OebbRequestModels.swift in Sources */,
 				B017 /* Station.swift in Sources */,
 				B018 /* TrainConnection.swift in Sources */,
-				B019 /* TransportType.swift in Sources */,
 				B020 /* RouteConfiguration.swift in Sources */,
 				B021 /* CommuteSchedule.swift in Sources */,
 				B022 /* AppSettings.swift in Sources */,
@@ -542,7 +539,6 @@
 				B027 /* OnboardingView.swift in Sources */,
 				B028 /* StationPicker.swift in Sources */,
 				B029 /* SettingsView.swift in Sources */,
-				B031 /* TicketWalletView.swift in Sources */,
 				B032 /* CommuteScheduleView.swift in Sources */,
 				B034 /* PinnedJourney.swift in Sources */,
 				B035 /* MyJourneyCard.swift in Sources */,
@@ -700,7 +696,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Gleis/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Gleis uses the camera to scan ticket cards.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -727,7 +722,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Gleis/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Gleis uses the camera to scan ticket cards.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

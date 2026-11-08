@@ -4,7 +4,6 @@ import Foundation
 
 struct RouteConfiguration: Identifiable, Codable, Equatable {
     let id: UUID
-    var transportType: TransportType
     var startStation: Station?
     var endStation: Station?
     var walkingTimeMinutes: Int
@@ -19,14 +18,13 @@ struct RouteConfiguration: Identifiable, Codable, Equatable {
     var stationBufferTimes: [String: Int]
     var excludedTrainTypes: Set<TrainType>
 
-    init(transportType: TransportType) {
+    init() {
         id = UUID()
-        self.transportType = transportType
         walkingTimeMinutes = 0
         bufferTimeMinutes = 0
         useDelayInLeaveTime = false
         maxConnections = 25
-        notificationSettings = NotificationSettings(transportType: transportType)
+        notificationSettings = NotificationSettings()
         activeDays = Set(Weekday.allCases)
         recentStations = []
         favoriteStations = []
@@ -120,9 +118,9 @@ struct NotificationSettings: Codable, Equatable {
     var customMessage: String
     var soundEnabled: Bool
 
-    init(transportType: TransportType) {
+    init() {
         soundEnabled = true
-        customMessage = transportType == .trainCommute ? "🚂 Time to catch your train!" : "🚇 Time to go!"
+        customMessage = "🚂 Time to catch your train!"
     }
 }
 
@@ -155,5 +153,27 @@ enum Weekday: Int, CaseIterable, Codable, Identifiable {
         let referenceWeekday = calendar.component(.weekday, from: startOfReference)
         let offset = (rawValue - referenceWeekday + 7) % 7
         return calendar.date(byAdding: .day, value: offset, to: startOfReference) ?? startOfReference
+    }
+}
+
+extension RouteConfiguration {
+    /// Decodes field by field so one unreadable or newly added field does not reset the whole route.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
+        startStation = try? container.decodeIfPresent(Station.self, forKey: .startStation)
+        endStation = try? container.decodeIfPresent(Station.self, forKey: .endStation)
+        walkingTimeMinutes = (try? container.decode(Int.self, forKey: .walkingTimeMinutes)) ?? 0
+        bufferTimeMinutes = (try? container.decode(Int.self, forKey: .bufferTimeMinutes)) ?? 0
+        useDelayInLeaveTime = try? container.decodeIfPresent(Bool.self, forKey: .useDelayInLeaveTime)
+        maxConnections = try? container.decodeIfPresent(Int.self, forKey: .maxConnections)
+        notificationSettings =
+            (try? container.decode(NotificationSettings.self, forKey: .notificationSettings)) ?? NotificationSettings()
+        activeDays = (try? container.decode(Set<Weekday>.self, forKey: .activeDays)) ?? Set(Weekday.allCases)
+        recentStations = (try? container.decode([Station].self, forKey: .recentStations)) ?? []
+        favoriteStations = (try? container.decode([Station].self, forKey: .favoriteStations)) ?? []
+        stationTravelTimes = (try? container.decode([String: Int].self, forKey: .stationTravelTimes)) ?? [:]
+        stationBufferTimes = (try? container.decode([String: Int].self, forKey: .stationBufferTimes)) ?? [:]
+        excludedTrainTypes = (try? container.decode(Set<TrainType>.self, forKey: .excludedTrainTypes)) ?? []
     }
 }

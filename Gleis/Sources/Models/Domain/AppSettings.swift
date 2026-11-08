@@ -4,13 +4,16 @@ import Foundation
 
 struct AppSettings: Codable {
     var hasCompletedOnboarding: Bool = false
-    var ticketCards: [TicketCard] = []
-    var selectedTicketId: UUID?
+    /// True when the stored blob still carries the removed ticket wallet, so it should be rewritten without it.
+    private(set) var containsLegacyTicketData = false
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
         case hasCompletedOnboarding
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
         case ticketCards
         case selectedTicketId
     }
@@ -18,25 +21,8 @@ struct AppSettings: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
-        ticketCards = try container.decodeIfPresent([TicketCard].self, forKey: .ticketCards) ?? []
-        selectedTicketId = try container.decodeIfPresent(UUID.self, forKey: .selectedTicketId)
-    }
-}
-
-// MARK: - TicketCard
-
-struct TicketCard: Identifiable, Codable, Equatable {
-    let id: UUID
-    var name: String
-    var frontImageData: Data?
-    var backImageData: Data?
-    var createdAt: Date
-
-    init(id: UUID = UUID(), name: String, frontImageData: Data? = nil, backImageData: Data? = nil) {
-        self.id = id
-        self.name = name
-        self.frontImageData = frontImageData
-        self.backImageData = backImageData
-        createdAt = Date()
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        containsLegacyTicketData =
+            legacyContainer.contains(.ticketCards) || legacyContainer.contains(.selectedTicketId)
     }
 }

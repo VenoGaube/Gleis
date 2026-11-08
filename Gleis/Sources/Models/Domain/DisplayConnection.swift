@@ -8,13 +8,9 @@ struct DisplayConnection: Identifiable {
     let isSelected: Bool
     let isPinned: Bool
 
-    // Time-based properties (updated by centralized timer)
-    var timeRemaining: TimeInterval
-    var isLeaveWindowPassed: Bool
-    var hasDeparted: Bool
-    var urgencyColor: Color
-    var progress: Double
-    var isMissed: Bool { isLeaveWindowPassed }
+    // Phase flags, moved forward by the view model at each phase boundary rather than every second
+    private(set) var isLeaveWindowPassed: Bool
+    private(set) var hasDeparted: Bool
 
     var id: String { connection.id }
 
@@ -23,7 +19,6 @@ struct DisplayConnection: Identifiable {
         self.leaveTime = leaveTime
         self.isSelected = isSelected
         self.isPinned = isPinned
-        timeRemaining = leaveTime.timeIntervalSince(currentTime)
         let phase = Self.connectionPhase(
             leaveTime: leaveTime,
             departureTime: connection.departureTime,
@@ -31,51 +26,66 @@ struct DisplayConnection: Identifiable {
         )
         isLeaveWindowPassed = phase.isLeaveWindowPassed
         hasDeparted = phase.hasDeparted
-        urgencyColor = Self.calculateUrgencyColor(timeRemaining: timeRemaining)
-        progress = Self.calculateProgress(timeRemaining: timeRemaining)
     }
 
-    /// Update time-based properties with current time (called by centralized timer)
-    mutating func updateTime(currentTime: Date) {
-        let newRemaining = leaveTime.timeIntervalSince(currentTime)
+    func timeRemaining(at date: Date) -> TimeInterval {
+        leaveTime.timeIntervalSince(date)
+    }
 
+    func urgencyColor(at date: Date) -> Color {
+        Color.urgency(for: timeRemaining(at: date))
+    }
+
+    func progress(at date: Date) -> Double {
+        max(0, min(1, timeRemaining(at: date) / 1800))
+    }
+
+    /// Recomputes the phase flags at `currentTime` and returns whether either one changed.
+    mutating func updatePhase(at currentTime: Date) -> Bool {
+        let phase = Self.connectionPhase(
+            leaveTime: leaveTime,
+            departureTime: connection.departureTime,
+            currentTime: currentTime
+        )
+        guard phase.isLeaveWindowPassed != isLeaveWindowPassed || phase.hasDeparted != hasDeparted else { return false }
+        isLeaveWindowPassed = phase.isLeaveWindowPassed
+        hasDeparted = phase.hasDeparted
+        return true
+    }
+
+    /// Plays the 5-min, 2-min or leave-now haptic if the countdown crossed one between the two times.
+    func playThresholdHaptic(from previousTime: Date, to currentTime: Date) {
         // Haptics only for a journey the user committed to. Firing them for every
         // visible connection meant a buzz each time any of ~25 rows crossed a
         // threshold, for trains the user is not taking.
-        if isSelected || isPinned {
-            if timeRemaining >= 300, newRemaining < 300 {
-                Haptics.notification(.warning)
-            } else if timeRemaining >= 120, newRemaining < 120 {
-                Haptics.notification(.error)
-            } else if timeRemaining >= 0, newRemaining < 0 {
-                Haptics.notification(.error)
-            }
+        guard isSelected || isPinned else { return }
+        let previousRemaining = timeRemaining(at: previousTime)
+        let newRemaining = timeRemaining(at: currentTime)
+        if previousRemaining >= Self.warningHapticLeadTime, newRemaining < Self.warningHapticLeadTime {
+            Haptics.notification(.warning)
+        } else if previousRemaining >= Self.finalHapticLeadTime, newRemaining < Self.finalHapticLeadTime {
+            Haptics.notification(.error)
+        } else if previousRemaining >= 0, newRemaining < 0 {
+            Haptics.notification(.error)
         }
+    }
 
-        timeRemaining = newRemaining
-        let phase = Self.connectionPhase(
-            leaveTime: leaveTime,
-            departureTime: connection.departureTime,
-            currentTime: currentTime
-        )
-        isLeaveWindowPassed = phase.isLeaveWindowPassed
-        hasDeparted = phase.hasDeparted
-        urgencyColor = Self.calculateUrgencyColor(timeRemaining: newRemaining)
-        progress = Self.calculateProgress(timeRemaining: newRemaining)
+    /// The next time after `date` at which a phase flag flips or a threshold haptic is due.
+    func nextPhaseBoundary(after date: Date) -> Date? {
+        var boundaries = [leaveTime, connection.departureTime]
+        if isSelected || isPinned {
+            boundaries += [
+                leaveTime.addingTimeInterval(-Self.warningHapticLeadTime),
+                leaveTime.addingTimeInterval(-Self.finalHapticLeadTime),
+            ]
+        }
+        return boundaries.filter { $0 > date }.min()
     }
 
     // MARK: - Static Helpers
 
-    private static func calculateUrgencyColor(timeRemaining: TimeInterval) -> Color {
-        if timeRemaining <= 0 { return .secondary }
-        if timeRemaining < 120 { return .urgencyRed }
-        if timeRemaining < 300 { return .urgencyOrange }
-        return .urgencyGreen
-    }
-
-    private static func calculateProgress(timeRemaining: TimeInterval) -> Double {
-        max(0, min(1, timeRemaining / 1800))
-    }
+    private static let warningHapticLeadTime: TimeInterval = 300
+    private static let finalHapticLeadTime: TimeInterval = 120
 
     private static func connectionPhase(
         leaveTime: Date,

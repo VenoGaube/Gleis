@@ -130,7 +130,6 @@ struct MyJourneyCard: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .layoutPriority(2)
 
-
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text("MY JOURNEY")
@@ -149,7 +148,6 @@ struct MyJourneyCard: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .fixedSize(horizontal: true, vertical: false)
-
                     }.frame(maxWidth: .infinity, alignment: .leading)
 
                     Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)").font(
@@ -157,7 +155,6 @@ struct MyJourneyCard: View {
                     )
                     .lineLimit(1)
                     .scalableText(minimumScale: 0.8)
-
                 }.layoutPriority(1)
 
                 Spacer()
@@ -242,7 +239,6 @@ struct MyJourneyCard: View {
 
                     Spacer(minLength: 0)
                 }
-
             }
 
             // Expand/collapse button
@@ -283,7 +279,6 @@ struct MyJourneyCard: View {
                             stationName: leg.to.name,
                             transferMinutes: transferMinutes,
                             nextLineNumber: transition.targetLeg.lineNumber,
-                            nextLineColors: transition.targetLeg.lineColors,
                             currentPlatform: leg.arrivalPlatform ?? leg.platform,
                             nextPlatform: transition.targetLeg.platform,
                             nextDepartureTime: transition.targetLeg.departureTime,
@@ -551,19 +546,19 @@ private extension AnyTransition {
                 connectionId: "test", lineNumber: "S1", departureTime: Date().addingTimeInterval(-1800),
                 arrivalTime: Date().addingTimeInterval(3600),
                 departureStation: Station(
-                    id: "1", name: "Maribor", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "1", name: "Maribor", coordinate: nil, lines: []
                 ),
                 arrivalStation: Station(
-                    id: "2", name: "Graz Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "2", name: "Graz Hbf", coordinate: nil, lines: []
                 ),
                 platform: "3", delay: 5, pinnedAt: Date(),
                 legs: [
                     ConnectionLeg(
                         from: Station(
-                            id: "1", name: "Maribor", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "1", name: "Maribor", coordinate: nil, lines: []
                         ),
                         to: Station(
-                            id: "2", name: "Graz Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "2", name: "Graz Hbf", coordinate: nil, lines: []
                         ),
                         departureTime: Date().addingTimeInterval(-1800), arrivalTime: Date().addingTimeInterval(3600),
                         platform: "3", lineNumber: "S1", isWalking: false, duration: 5400,
@@ -599,19 +594,19 @@ private extension AnyTransition {
                 connectionId: "test-transfer", lineNumber: "S1", departureTime: Date().addingTimeInterval(-1800),
                 arrivalTime: Date().addingTimeInterval(7200),
                 departureStation: Station(
-                    id: "1", name: "Maribor", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "1", name: "Maribor", coordinate: nil, lines: []
                 ),
                 arrivalStation: Station(
-                    id: "3", name: "Wien Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "3", name: "Wien Hbf", coordinate: nil, lines: []
                 ),
                 platform: "3", delay: 0, pinnedAt: Date(),
                 legs: [
                     ConnectionLeg(
                         from: Station(
-                            id: "1", name: "Maribor", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "1", name: "Maribor", coordinate: nil, lines: []
                         ),
                         to: Station(
-                            id: "2", name: "Graz Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "2", name: "Graz Hbf", coordinate: nil, lines: []
                         ),
                         departureTime: Date().addingTimeInterval(-1800), arrivalTime: Date().addingTimeInterval(1800),
                         platform: "3", lineNumber: "S1", isWalking: false, duration: 3600,
@@ -628,10 +623,10 @@ private extension AnyTransition {
                     ),
                     ConnectionLeg(
                         from: Station(
-                            id: "2", name: "Graz Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "2", name: "Graz Hbf", coordinate: nil, lines: []
                         ),
                         to: Station(
-                            id: "3", name: "Wien Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "3", name: "Wien Hbf", coordinate: nil, lines: []
                         ),
                         departureTime: Date().addingTimeInterval(2400), arrivalTime: Date().addingTimeInterval(7200),
                         platform: "5", lineNumber: "RJX 160", isWalking: false, duration: 4800,
@@ -663,29 +658,29 @@ private extension AnyTransition {
                 connectionId: "test-tight", lineNumber: "IC 515", departureTime: Date().addingTimeInterval(600),
                 arrivalTime: Date().addingTimeInterval(7200),
                 departureStation: Station(
-                    id: "1", name: "Ljubljana", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "1", name: "Ljubljana", coordinate: nil, lines: []
                 ),
                 arrivalStation: Station(
-                    id: "3", name: "München Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                    id: "3", name: "München Hbf", coordinate: nil, lines: []
                 ),
                 platform: "1", delay: 0, pinnedAt: Date(),
                 legs: [
                     ConnectionLeg(
                         from: Station(
-                            id: "1", name: "Ljubljana", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "1", name: "Ljubljana", coordinate: nil, lines: []
                         ),
                         to: Station(
-                            id: "2", name: "Villach Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "2", name: "Villach Hbf", coordinate: nil, lines: []
                         ),
                         departureTime: Date().addingTimeInterval(600), arrivalTime: Date().addingTimeInterval(3000),
                         platform: "1", lineNumber: "IC 515", isWalking: false, duration: 2400, intermediateStops: []
                     ),
                     ConnectionLeg(
                         from: Station(
-                            id: "2", name: "Villach Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "2", name: "Villach Hbf", coordinate: nil, lines: []
                         ),
                         to: Station(
-                            id: "3", name: "München Hbf", coordinate: nil, transportTypes: [.trainCommute], lines: []
+                            id: "3", name: "München Hbf", coordinate: nil, lines: []
                         ),
                         departureTime: Date().addingTimeInterval(3180), // Only 3 minutes transfer!
                         arrivalTime: Date().addingTimeInterval(7200), platform: "4", lineNumber: "EC 112",
@@ -709,14 +704,12 @@ private extension AnyTransition {
                     id: "graz",
                     name: "Graz",
                     coordinate: nil,
-                    transportTypes: [.trainCommute],
                     lines: []
                 ),
                 arrivalStation: Station(
                     id: "stadlau",
                     name: "Stadlau (Wien)",
                     coordinate: nil,
-                    transportTypes: [.trainCommute],
                     lines: []
                 ),
                 platform: "3",
@@ -724,12 +717,11 @@ private extension AnyTransition {
                 pinnedAt: Date(),
                 legs: [
                     ConnectionLeg(
-                        from: Station(id: "graz", name: "Graz", coordinate: nil, transportTypes: [.trainCommute], lines: []),
+                        from: Station(id: "graz", name: "Graz", coordinate: nil, lines: []),
                         to: Station(
                             id: "stadlau",
                             name: "Stadlau (Wien)",
                             coordinate: nil,
-                            transportTypes: [.trainCommute],
                             lines: []
                         ),
                         departureTime: Date().addingTimeInterval(4 * 60),

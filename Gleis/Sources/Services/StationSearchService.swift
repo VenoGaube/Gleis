@@ -8,28 +8,18 @@ final class StationSearchService {
         self.transportService = transportService
     }
 
-    func searchStations(_ query: String, transportType: TransportType) async -> [Station] {
+    func searchStations(_ query: String) async -> [Station] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        do {
-            var candidates = try await transportService.searchStations(matching: trimmed, transportType: transportType)
-
-            // Add cached popular stations as a fallback pool when API results are sparse.
-            if candidates.count < 8 {
-                let cached = (try? await transportService.fetchStations(for: transportType)) ?? []
-                candidates = mergeStations(primary: candidates, secondary: cached)
-            }
-
-            let ranked = rankStations(candidates, query: trimmed)
-            return ranked
-        } catch {
-            if !(error is CancellationError) { /* logged silently */ }
-            return []
-        }
+        // The picker merges the cached station list itself, so this is the network side only.
+        guard let remote = try? await transportService.searchStations(matching: trimmed)
+        else { return [] }
+        return Self.rankStations(remote, query: trimmed)
     }
 
-    private func rankStations(_ stations: [Station], query: String) -> [Station] {
+    /// Orders stations by how well their name matches the query and drops the ones that do not match.
+    nonisolated static func rankStations(_ stations: [Station], query: String) -> [Station] {
         let normalizedQuery = normalize(query)
         let queryTokens = normalizedQuery.split(separator: " ").map(String.init).filter { !$0.isEmpty }
 
@@ -52,7 +42,7 @@ final class StationSearchService {
             .map(\.station)
     }
 
-    private func matchScore(
+    private nonisolated static func matchScore(
         name: String,
         words: [String],
         query: String,
@@ -77,14 +67,14 @@ final class StationSearchService {
         return nil
     }
 
-    private func normalize(_ value: String) -> String {
+    private nonisolated static func normalize(_ value: String) -> String {
         value
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
+    nonisolated static func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {
         var merged = primary
         var seen = Set(primary.map(\.id))
         for station in secondary where seen.insert(station.id).inserted {

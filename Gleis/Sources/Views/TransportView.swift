@@ -20,8 +20,8 @@ struct TransportView: View {
     let highlightConnectionId: String?
     let scrollToTopTrigger: Int
 
-    init(transportType: TransportType, highlightConnectionId: String? = nil, scrollToTopTrigger: Int = 0) {
-        _viewModel = StateObject(wrappedValue: TransportViewModel(transportType: transportType))
+    init(highlightConnectionId: String? = nil, scrollToTopTrigger: Int = 0) {
+        _viewModel = StateObject(wrappedValue: TransportViewModel())
         self.highlightConnectionId = highlightConnectionId
         self.scrollToTopTrigger = scrollToTopTrigger
     }
@@ -33,14 +33,13 @@ struct TransportView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     HStack(alignment: .center) {
-                        Text(viewModel.transportType.navigationTitle).font(.largeTitle.bold())
+                        Text("Train").font(.largeTitle.bold())
                         Spacer()
                         if viewModel.connections.isLoaded {
                             DataFreshnessBadge(
                                 isStale: viewModel.isShowingCachedData || viewModel.isServiceDegraded
                             )
                         }
-                        QuickTicketButton().font(.title2).padding(.trailing, 4)
                     }.id(topAnchorId)
 
                     if !networkMonitor.isConnected {
@@ -84,23 +83,12 @@ struct TransportView: View {
 
                     // My Journey section - shown separately when pinned
                     if let pinnedJourney = settingsManager.pinnedJourney, !pinnedJourney.shouldAutoUnpin() {
-                        let travel = viewModel.config.travelTime(for: pinnedJourney.departureStation.id)
-                            ?? viewModel.config.walkingTimeMinutes
-                        let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
-                            ?? viewModel.config.bufferTimeMinutes
-                        let effectiveDeparture = viewModel.config.effectiveDepartureTime(
-                            baseDepartureTime: pinnedJourney.departureTime,
-                            delayMinutes: pinnedJourney.delay,
-                            realtimeDepartureHint: pinnedJourney.legs.first(where: { !$0.isWalking })?.departureTime
-                        )
-                        let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
-                        MyJourneyCard(
-                            journey: pinnedJourney,
-                            onUnpin: {
-                                viewModel.unpinJourney()
-                            },
-                            leaveTime: pinnedLeaveTime
-                        )
+                        // MyJourneyCard reads the clock in its body, and the view model no longer ticks every second.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            if !pinnedJourney.shouldAutoUnpin(currentDate: context.date) {
+                                myJourneyCard(for: pinnedJourney)
+                            }
+                        }
                     }
 
                     connectionsSection
@@ -113,7 +101,6 @@ struct TransportView: View {
             Color.screenBackground(colorScheme).ignoresSafeArea(
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).refreshable {
-            viewModel.cancelCurrentFetch()
             await viewModel.refreshConnections(showFeedback: true, isUserInitiated: true)
         }.onAppear {
             loadSavedStations()
@@ -121,13 +108,11 @@ struct TransportView: View {
             // Only fetch on first appearance; subsequent appears (tab switches) preserve state
             guard !hasAppearedOnce else { return }
             hasAppearedOnce = true
-            viewModel.cancelCurrentFetch()
             Task { await viewModel.refreshConnections(isUserInitiated: true) }
         }
         .onDisappear { viewModel.stopAutoRefresh() }.onChange(of: scenePhase) { oldPhase, newPhase in
                 // When app becomes active after being in background, refresh to drop departed connections
                 if oldPhase != .active, newPhase == .active, hasAppearedOnce {
-                    viewModel.cancelCurrentFetch()
                     Task { await viewModel.refreshConnections(isUserInitiated: false) }
                 }
             }.onChange(of: startStation) { _, newValue in
@@ -146,11 +131,11 @@ struct TransportView: View {
                 switch sheet {
                 case let .travel(station):
                     TravelTimeSheet(station: station, currentValue: viewModel.config.travelTime(for: station.id)) { time in
-                        settingsManager.saveTravelTime(time, for: station.id, transportType: viewModel.transportType)
+                        settingsManager.saveTravelTime(time, for: station.id)
                     }
                 case let .buffer(station):
                     BufferTimeSheet(station: station, currentValue: viewModel.config.bufferTime(for: station.id)) { time in
-                        settingsManager.saveBufferTime(time, for: station.id, transportType: viewModel.transportType)
+                        settingsManager.saveBufferTime(time, for: station.id)
                     }
                 }
             }.toastOverlay(viewModel.toastManager).alert(
@@ -159,7 +144,7 @@ struct TransportView: View {
                 Button("OK") { viewModel.showError = false }
             } message: {
                 Text(viewModel.errorMessage ?? "Unknown error")
-            }.accentTheme(for: viewModel.transportType)
+            }.tint(.trainBlue)
     }
 
     @ViewBuilder private var connectionsSection: some View {
@@ -167,7 +152,7 @@ struct TransportView: View {
         case .idle:
             if startStation == nil || endStation == nil {
                 EmptyStateView(
-                    icon: viewModel.transportType.icon, title: "Select Your Route",
+                    icon: "tram.fill", title: "Select Your Route",
                     message: "Tap the stations above to choose your start and destination"
                 ).frame(maxWidth: .infinity).padding(.top, 40)
             }
@@ -279,12 +264,32 @@ struct TransportView: View {
         )
     }
 
+    private func myJourneyCard(for pinnedJourney: PinnedJourney) -> some View {
+        let travel = viewModel.config.travelTime(for: pinnedJourney.departureStation.id)
+            ?? viewModel.config.walkingTimeMinutes
+        let buffer = viewModel.config.bufferTime(for: pinnedJourney.departureStation.id)
+            ?? viewModel.config.bufferTimeMinutes
+        let effectiveDeparture = viewModel.config.effectiveDepartureTime(
+            baseDepartureTime: pinnedJourney.departureTime,
+            delayMinutes: pinnedJourney.delay,
+            realtimeDepartureHint: pinnedJourney.legs.first(where: { !$0.isWalking })?.departureTime
+        )
+        let pinnedLeaveTime = effectiveDeparture.addingTimeInterval(-TimeInterval((travel + buffer) * 60))
+        return MyJourneyCard(
+            journey: pinnedJourney,
+            onUnpin: {
+                viewModel.unpinJourney()
+            },
+            leaveTime: pinnedLeaveTime
+        )
+    }
+
     private func stationPicker(title: String, selection: Binding<Station?>) -> some View {
         StationPickerSheet(
             title: title, stations: viewModel.stations, recentStations: viewModel.config.recentStations,
             favoriteStations: viewModel.config.favoriteStations,
             searchHandler: { await viewModel.searchStations($0) },
-            onToggleFavorite: { settingsManager.toggleFavoriteStation($0, for: viewModel.transportType) },
+            onToggleFavorite: { settingsManager.toggleFavoriteStation($0) },
             selection: selection
         )
     }
@@ -395,6 +400,6 @@ private struct ReminderRecoveryBanner: View {
 
 #Preview {
     NavigationStack {
-        TransportView(transportType: .trainCommute).environmentObject(SettingsManager.shared)
+        TransportView().environmentObject(SettingsManager.shared)
     }
 }

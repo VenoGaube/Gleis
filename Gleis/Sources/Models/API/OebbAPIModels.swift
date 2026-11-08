@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - OebbAuthSession
 
-struct OebbAuthSession: Codable {
+struct OebbAuthSession: Codable, Sendable {
     let userId: String
     let accessToken: String
     let sessionId: String
@@ -463,15 +463,6 @@ struct OebbGateServicePayload: Decodable {
 struct OebbGateLocation: Decodable {
     let extId: String?
     let name: String?
-    let crd: OebbGateCoordinate?
-    let dist: Int?
-    let dur: Int?
-    let countryCodeL: [String]?
-}
-
-struct OebbGateCoordinate: Decodable {
-    let x: Int?
-    let y: Int?
 }
 
 struct OebbGateTripCommon: Decodable {
@@ -719,7 +710,6 @@ struct OebbGateTripProduct: Decodable {
 
 struct OebbGateTripProductContext: Decodable {
     let catIn: String?
-    let catOut: String?
     let catOutL: String?
     let catOutS: String?
     let num: String?

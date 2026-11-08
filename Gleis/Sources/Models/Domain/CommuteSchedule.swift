@@ -122,18 +122,6 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         }
     }
 
-    mutating func setDayActive(_ day: Weekday, isActive: Bool, direction: CommuteDirection) {
-        var days = activeDays(for: direction)
-        if isActive {
-            days.insert(day)
-        } else {
-            let hasSchedule = schedule(for: day, direction: direction) != nil
-            if hasSchedule || days.count <= 1 { return }
-            days.remove(day)
-        }
-        setActiveDays(days, for: direction)
-    }
-
     func matchesSchedule(_ connection: TrainConnection) -> CommuteDirection? {
         let calendar = Calendar.current
         guard let weekday = Weekday(rawValue: calendar.component(.weekday, from: connection.departureTime)) else {
@@ -180,11 +168,6 @@ struct SavedCommuteRoute: Identifiable, Codable, Equatable {
         let connectionDay = calendar.startOfDay(for: connection.departureTime)
         if skippedDates.contains(where: { calendar.isDate($0, inSameDayAs: connectionDay) }) { return false }
         return !isOccurrenceSkipped(on: connectionDay, direction: direction)
-    }
-
-    mutating func skipDate(_ date: Date) {
-        let day = Calendar.current.startOfDay(for: date)
-        if !skippedDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: day) }) { skippedDates.append(day) }
     }
 
     mutating func skipOccurrence(on date: Date, direction: CommuteDirection) {
@@ -247,7 +230,6 @@ enum CommuteDirection: String, Codable, CaseIterable {
 
 struct ScheduledReminder: Identifiable, Codable, Equatable {
     let id: String
-    let transportType: TransportType
     let lineNumber: String
     let destination: String
     let platform: String?

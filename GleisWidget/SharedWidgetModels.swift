@@ -2,10 +2,6 @@ import Foundation
 
 // Widget target keeps lightweight copies of app-domain-only types
 // required by the shared widget contract.
-enum TransportType: String, Codable {
-    case trainCommute = "Train"
-}
-
 struct TrainLineColors: Codable, Equatable, Hashable {
     let backgroundHex: String?
     let foregroundHex: String?
@@ -14,7 +10,6 @@ struct TrainLineColors: Codable, Equatable, Hashable {
 
 extension WidgetData {
     static let delayedPlaceholder = WidgetData(
-        transportType: .trainCommute,
         connections: [
             WidgetConnection(
                 id: "delayed",

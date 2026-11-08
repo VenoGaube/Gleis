@@ -55,54 +55,6 @@ struct OebbTimetableRequest: Encodable {
     }
 }
 
-struct OebbGateRequest: Encodable {
-    let id: String
-    let ver: String
-    let lang: String
-    let auth: Auth
-    let client: Client
-    let formatted: Bool
-    let ext: String
-    let svcReqL: [ServiceRequest]
-
-    struct Auth: Encodable {
-        let type: String
-        let aid: String
-    }
-
-    struct Client: Encodable {
-        let id: String
-        let type: String
-        let name: String
-        let l: String
-        let v: Int
-        let pos: Position
-    }
-
-    struct Position: Encodable {
-        let x: Int
-        let y: Int
-        let acc: Int
-    }
-
-    struct ServiceRequest: Encodable {
-        let meth: String
-        let req: LocGeoPosRequest
-    }
-
-    struct LocGeoPosRequest: Encodable {
-        let centerCrd: Coordinate
-        let getPOIs: Bool
-        let getStops: Bool
-        let maxLoc: Int
-    }
-
-    struct Coordinate: Encodable {
-        let y: Int
-        let x: Int
-    }
-}
-
 struct OebbGateTripSearchRequest: Encodable {
     let id: String
     let ver: String
