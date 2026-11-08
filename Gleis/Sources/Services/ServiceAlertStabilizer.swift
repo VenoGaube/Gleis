@@ -112,7 +112,8 @@ extension TrainConnection {
             status: status,
             transfers: transfers,
             legs: legs,
-            serviceAlerts: alerts
+            serviceAlerts: alerts,
+            providerConnectionId: providerConnectionId
         )
     }
 }

@@ -32,6 +32,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private var browseStationsCache: [Station]?
     private var browseStationsFetchTask: Task<[Station], Error>?
     private var resolvedStationRefsByStationId: [String: OebbStationRef] = [:]
+    private var resolvedStationRefsByName: [String: OebbStationRef] = [:]
     private var prewarmedPagesByRoute: [String: PrewarmEntry] = [:]
 
     init(apiClient: OebbAPIClient = .shared, storage: StorageServiceProtocol = LocalStorageService.shared) {
@@ -284,7 +285,9 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     func enrichConnectionDetails(_ connection: TrainConnection) async throws -> TrainConnection {
         do {
-            let detail = try await apiClient.fetchConnectionDetails(connectionId: connection.id)
+            let detail = try await apiClient.fetchConnectionDetails(
+                connectionId: connection.providerConnectionId ?? connection.id
+            )
             return ConnectionMapper.enrichConnection(connection, detail: detail)
         } catch {
             if isCancellation(error) { throw CancellationError() }
@@ -327,9 +330,14 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     func searchStations(matching query: String) async throws -> [Station] {
         do {
-            return try await apiClient.searchStations(query: query, count: FetchLimits.stationSearchCount).map {
-                ConnectionMapper.mapStation($0)
+            // ÖBB can answer "Graz Hbf (U)" or "Graz Hauptbahnhof" with nothing, so shorter forms of the name follow.
+            for searchQuery in Self.stationSearchQueries(for: query) {
+                let stations = try await apiClient.searchStations(
+                    query: searchQuery, count: FetchLimits.stationSearchCount
+                ).map(ConnectionMapper.mapStation)
+                if !stations.isEmpty { return stations }
             }
+            return []
         } catch {
             if isCancellation(error) { throw CancellationError() }
             throw mapError(error)
@@ -338,8 +346,12 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
     // MARK: - Seat Maps
 
-    /// How far apart the shop's departure and the app's may be and still be the same trip.
-    private static let seatMapDepartureTolerance: TimeInterval = 60
+    /// How long before the scheduled departure the shop search starts.
+    private static let seatMapSearchLeadTime: TimeInterval = 60
+    /// How far a shop section's departure may be from the app's and still be the same train.
+    private static let seatMapMatchTolerance: TimeInterval = 180
+    /// Marks a station id made up from a city name, so it never parses as a station number.
+    private static let cityStationIdPrefix = "city:"
     /// Shop timetable entries asked for when looking the trip up, starting just before it leaves.
     private static let seatMapShopSearchCount = 5
     private static let shopJourneySectionType = "journey"
@@ -408,41 +420,97 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private func findShopConnection(
         for connection: TrainConnection, passenger: OebbTimetableRequest.Passenger
     ) async throws -> (connection: OebbConnection, searchDate: Date) {
-        // Search from the stations the trains use: a trip from a combined stop such as "Wien Hbf (U)" starts
-        // with a walk, and ÖBB returns no seat offers for it.
         let trainLegs = connection.legs.filter { !$0.isWalking }
-        async let resolvedFromTask = resolveStation(trainLegs.first?.from ?? connection.departureStation)
-        async let resolvedToTask = resolveStation(trainLegs.last?.to ?? connection.arrivalStation)
-        let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
-        Self.seatLogger.debug(
-            "Seat lookup searches the shop from \(resolvedFrom.station.name, privacy: .public) (\(resolvedFrom.station.id, privacy: .public)) to \(resolvedTo.station.name, privacy: .public)"
-        )
-        let trainDeparture = trainLegs.first?.departureTime ?? connection.departureTime
-        let scheduledDeparture = trainDeparture.addingTimeInterval(-TimeInterval(connection.delay * 60))
-        let searchDate = scheduledDeparture.addingTimeInterval(-Self.seatMapDepartureTolerance)
-        let shopConnections = try await apiClient.searchShopConnectionsForSeats(
-            from: resolvedFrom.ref, to: resolvedTo.ref, departure: searchDate, count: Self.seatMapShopSearchCount,
-            passenger: passenger
-        )
-        if let sameId = shopConnections.first(where: { $0.id == connection.id }) { return (sameId, searchDate) }
+        let firstTrainLeg = trainLegs.first
+        let trainDeparture = firstTrainLeg?.departureTime ?? connection.departureTime
+        let delayMinutes = firstTrainLeg?.departureDelayMinutes ?? connection.delay
+        let scheduledDeparture = trainDeparture.addingTimeInterval(-TimeInterval(delayMinutes * 60))
+        let searchDate = scheduledDeparture.addingTimeInterval(-Self.seatMapSearchLeadTime)
+        let lineName = Self.normalizedLineName(firstTrainLeg?.lineNumber ?? connection.lineNumber)
 
-        let firstLineNumber = connection.legs.first { !$0.isWalking }?.lineNumber ?? connection.lineNumber
-        let lineName = Self.normalizedLineName(firstLineNumber)
-        let match = shopConnections.first { shop in
-            let shopSection = shop.sections?.first { $0.category.map { !Self.isWalkingCategory($0) } ?? false }
-            let departureText = shop.from.departure ?? shopSection?.from.departure
-            guard let category = shopSection?.category,
-                  Self.normalizedLineName(Self.shopLineName(category)) == lineName,
-                  let departure = departureText.flatMap(Self.shopDateFormatter.date)
-            else { return false }
-            return abs(departure.timeIntervalSince(scheduledDeparture)) <= Self.seatMapDepartureTolerance
-                || abs(departure.timeIntervalSince(trainDeparture)) <= Self.seatMapDepartureTolerance
+        var searchedRefNumbers = Set<[Int]>()
+        var searchedRoutes: [String] = []
+        var shopAnswered = false
+        var lastError: Error?
+        for route in Self.shopSearchRoutes(for: connection, trainLegs: trainLegs) {
+            do {
+                async let resolvedFromTask = resolveStation(route.from)
+                async let resolvedToTask = resolveStation(route.to)
+                let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
+                guard searchedRefNumbers.insert([resolvedFrom.ref.number, resolvedTo.ref.number]).inserted else {
+                    continue
+                }
+                searchedRoutes.append("\(resolvedFrom.ref.name) (\(resolvedFrom.ref.number)) to \(resolvedTo.ref.name)")
+                Self.seatLogger.debug(
+                    "Seat lookup searches the shop from \(resolvedFrom.ref.name, privacy: .public) (\(resolvedFrom.ref.number)) to \(resolvedTo.ref.name, privacy: .public)"
+                )
+                let shopConnections = try await apiClient.searchShopConnectionsForSeats(
+                    from: resolvedFrom.ref, to: resolvedTo.ref, departure: searchDate,
+                    count: Self.seatMapShopSearchCount, passenger: passenger
+                )
+                shopAnswered = true
+                if let match = Self.shopConnection(
+                    in: shopConnections, providerConnectionId: connection.providerConnectionId,
+                    lineName: lineName, departures: [scheduledDeparture, trainDeparture]
+                ) {
+                    return (match, searchDate)
+                }
+            } catch {
+                if isCancellation(error) { throw CancellationError() }
+                searchedRoutes.append("\(route.from.name) to \(route.to.name) failed: \(error)")
+                lastError = error
+            }
         }
-        guard let match else {
-            let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
-            throw GleisError.apiError("The ÖBB shop does not list \(trip), so its seats cannot be shown.")
+        // No shop answer at all is a station or network problem, not a missing trip.
+        if !shopAnswered, let lastError { throw lastError }
+        let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
+        throw GleisError.apiError(
+            "The ÖBB shop does not list \(trip), so its seats cannot be shown. Searched: \(searchedRoutes.joined(separator: "; "))."
+        )
+    }
+
+    private struct ShopSearchRoute {
+        let from: Station
+        let to: Station
+    }
+
+    /// The train legs' own stations first: a trip from a meta stop such as "Wien Hbf (U)" starts with a walk and
+    /// ÖBB returns no seat offers for it. Then the stations the user picked, then the city stop for each name.
+    private static func shopSearchRoutes(
+        for connection: TrainConnection, trainLegs: [ConnectionLeg]
+    ) -> [ShopSearchRoute] {
+        let trainRoute = ShopSearchRoute(
+            from: trainLegs.first?.from ?? connection.departureStation,
+            to: trainLegs.last?.to ?? connection.arrivalStation
+        )
+        let pickedRoute = ShopSearchRoute(from: connection.departureStation, to: connection.arrivalStation)
+        let cityRoute = { (route: ShopSearchRoute) in
+            ShopSearchRoute(from: cityStation(of: route.from), to: cityStation(of: route.to))
         }
-        return (match, searchDate)
+        return [trainRoute, pickedRoute, cityRoute(trainRoute), cityRoute(pickedRoute)]
+    }
+
+    /// A station known only by its city name, which the name search resolves to the city's meta stop.
+    private static func cityStation(of station: Station) -> Station {
+        let city = Station.cityName(station.name)
+        return Station(id: cityStationIdPrefix + Station.comparableName(city), name: city, coordinate: nil)
+    }
+
+    /// A shop trip with a train section on the same line leaving at one of `departures`, preferring the app's
+    /// id. ÖBB shares one id across feeder variants, so the id alone never picks the trip.
+    private static func shopConnection(
+        in shopConnections: [OebbConnection], providerConnectionId: String?, lineName: String, departures: [Date]
+    ) -> OebbConnection? {
+        let sameTrain = shopConnections.filter { shop in
+            (shop.sections ?? []).contains { section in
+                guard let category = section.category, !isWalkingCategory(category),
+                      normalizedLineName(shopLineName(category)) == lineName,
+                      let departure = section.from.departure.flatMap(shopDateFormatter.date)
+                else { return false }
+                return departures.contains { abs(departure.timeIntervalSince($0)) <= seatMapMatchTolerance }
+            }
+        }
+        return sameTrain.first { $0.id == providerConnectionId } ?? sameTrain.first
     }
 
     private func legSeatMap(
@@ -537,16 +605,66 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             cacheResolvedStationRef(ref, forStationId: station.id)
             return ResolvedStation(station: station, ref: ref)
         }
-        let candidates = try await apiClient.searchStations(
-            query: station.name,
-            count: FetchLimits.stationResolveCandidateCount
-        )
-        guard let first = candidates.first else { throw GleisError.stationNotFound }
-        let mapped = ConnectionMapper.mapStation(first)
-        guard let ref = makeStationRef(for: mapped) else { throw GleisError.stationNotFound }
-        cacheResolvedStationRef(ref, forStationId: station.id)
-        cacheResolvedStationRef(ref, forStationId: mapped.id)
-        return ResolvedStation(station: mapped, ref: ref)
+        let knownStations = cachedStations() ?? persistedStations() ?? []
+        if let known = knownStations.first(where: { $0.id == station.id }), let ref = makeStationRef(for: known) {
+            cacheResolvedStationRef(ref, forStationId: station.id)
+            return ResolvedStation(station: known, ref: ref)
+        }
+        let nameKey = Station.comparableName(station.name)
+        if let cachedRef = cachedResolvedStationRef(forStationName: nameKey) {
+            cacheResolvedStationRef(cachedRef, forStationId: station.id)
+            return ResolvedStation(station: station, ref: cachedRef)
+        }
+        // Leg names carry platform suffixes such as "Wien Hbf (Bahnsteige 3-12)" that the name search may not match.
+        let number = stationNumber(for: station)
+        var nearestGuess: ResolvedStation?
+        var foundOwnEntry = false
+        for query in Self.stationSearchQueries(for: station.name) {
+            let candidates = try await apiClient.searchStations(
+                query: query,
+                count: FetchLimits.stationResolveCandidateCount
+            ).map(ConnectionMapper.mapStation)
+            let located = candidates.compactMap { candidate in
+                makeStationRef(for: candidate).map { ResolvedStation(station: candidate, ref: $0) }
+            }
+            if let resolved = matchingCandidate(for: station, among: located) {
+                cacheResolvedStationRef(resolved.ref, forStationId: station.id)
+                cacheResolvedStationRef(resolved.ref, forStationId: resolved.station.id)
+                cacheResolvedStationRef(resolved.ref, forStationName: nameKey)
+                return resolved
+            }
+            foundOwnEntry = foundOwnEntry || candidates.contains { number != nil && stationNumber(for: $0) == number }
+            nearestGuess = nearestGuess ?? located.first
+        }
+        // The station's own entry without coordinates means any other hit would be a different station.
+        if !foundOwnEntry, let nearestGuess {
+            Self.seatLogger.notice(
+                "No exact ÖBB station for \(station.name, privacy: .public) (\(station.id, privacy: .public)), using \(nearestGuess.ref.name, privacy: .public) (\(nearestGuess.ref.number))"
+            )
+            cacheResolvedStationRef(nearestGuess.ref, forStationId: station.id)
+            return nearestGuess
+        }
+        Self.seatLogger.error("No ÖBB station found for \(station.name, privacy: .public) (\(station.id, privacy: .public))")
+        throw GleisError.stationNotFound
+    }
+
+    /// The candidate with the station's number, else the same name, else the same name without brackets.
+    private func matchingCandidate(for station: Station, among located: [ResolvedStation]) -> ResolvedStation? {
+        let number = stationNumber(for: station)
+        let name = Station.comparableName(station.name)
+        let bareName = Station.comparableName(Station.nameWithoutBrackets(station.name))
+        return located.first { number != nil && $0.ref.number == number }
+            ?? located.first { Station.comparableName($0.station.name) == name }
+            ?? located.first { Station.comparableName(Station.nameWithoutBrackets($0.station.name)) == bareName }
+    }
+
+    /// The name as given, without a trailing bracketed part, then the city alone: "Graz Hbf (U)", "Graz Hbf", "Graz".
+    private static func stationSearchQueries(for name: String) -> [String] {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var seen = Set<String>()
+        return [trimmed, Station.nameWithoutBrackets(trimmed), Station.cityName(trimmed)].filter {
+            !$0.isEmpty && seen.insert($0).inserted
+        }
     }
 
     private func makeStationRef(for station: Station) -> OebbStationRef? {
@@ -632,6 +750,18 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private func cacheResolvedStationRef(_ ref: OebbStationRef, forStationId stationId: String) {
         stationCacheLock.lock()
         resolvedStationRefsByStationId[stationId] = ref
+        stationCacheLock.unlock()
+    }
+
+    private func cachedResolvedStationRef(forStationName comparableName: String) -> OebbStationRef? {
+        stationCacheLock.lock()
+        defer { stationCacheLock.unlock() }
+        return resolvedStationRefsByName[comparableName]
+    }
+
+    private func cacheResolvedStationRef(_ ref: OebbStationRef, forStationName comparableName: String) {
+        stationCacheLock.lock()
+        resolvedStationRefsByName[comparableName] = ref
         stationCacheLock.unlock()
     }
 

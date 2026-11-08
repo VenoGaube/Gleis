@@ -68,10 +68,7 @@ final class StationSearchService {
     }
 
     private nonisolated static func normalize(_ value: String) -> String {
-        value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        Station.comparableName(value)
     }
 
     nonisolated static func mergeStations(primary: [Station], secondary: [Station]) -> [Station] {

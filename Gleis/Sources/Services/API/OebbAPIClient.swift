@@ -621,8 +621,12 @@ actor OebbAPIClient {
 
         let scheduledDeparture = gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeS)
         let scheduledArrival = gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeS)
-        let realtimeDeparture = gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeR)
-        let realtimeArrival = gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeR)
+        let realtimeDeparture = gateRealtimeDateTime(
+            date: serviceDay, scheduledTime: stopRef.dTimeS, realtimeTime: stopRef.dTimeR
+        ).map { dateFormatter.string(from: $0) } ?? gateIsoTimestamp(date: serviceDay, time: stopRef.dTimeR)
+        let realtimeArrival = gateRealtimeDateTime(
+            date: serviceDay, scheduledTime: stopRef.aTimeS, realtimeTime: stopRef.aTimeR
+        ).map { dateFormatter.string(from: $0) } ?? gateIsoTimestamp(date: serviceDay, time: stopRef.aTimeR)
 
         let normalizedDeparturePlatform = gatePlatformText(stopRef.dPltfS) ?? gatePlatformText(stopRef.dPltfR)
         let normalizedArrivalPlatform = gatePlatformText(stopRef.aPltfS) ?? gatePlatformText(stopRef.aPltfR)
@@ -856,17 +860,26 @@ actor OebbAPIClient {
     private func gateDelayMinutes(date: String?, scheduledTime: String?, realtimeTime: String?) -> Int? {
         guard
             let scheduled = gateDateTime(date: date, time: scheduledTime),
+            let realtime = gateRealtimeDateTime(date: date, scheduledTime: scheduledTime, realtimeTime: realtimeTime)
+        else {
+            return nil
+        }
+        return max(0, Int(realtime.timeIntervalSince(scheduled) / 60))
+    }
+
+    /// The realtime moment, moved to the next day when HAFAS crossed midnight without writing a day offset.
+    private func gateRealtimeDateTime(date: String?, scheduledTime: String?, realtimeTime: String?) -> Date? {
+        guard
+            let scheduled = gateDateTime(date: date, time: scheduledTime),
             let realtime = gateDateTime(date: date, time: realtimeTime)
         else {
             return nil
         }
-
-        var normalizedRealtime = realtime
         // Only a gap this large means midnight was crossed without a day offset; a smaller one is early running.
-        if normalizedRealtime.timeIntervalSince(scheduled) < -Self.gateMidnightRolloverThreshold {
-            normalizedRealtime = normalizedRealtime.addingTimeInterval(Self.secondsPerDay)
+        if realtime.timeIntervalSince(scheduled) < -Self.gateMidnightRolloverThreshold {
+            return realtime.addingTimeInterval(Self.secondsPerDay)
         }
-        return max(0, Int(normalizedRealtime.timeIntervalSince(scheduled) / 60))
+        return realtime
     }
 
     private func gateDurationMillis(_ rawValue: String?) -> Int? {

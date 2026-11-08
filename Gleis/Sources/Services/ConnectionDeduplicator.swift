@@ -40,15 +40,20 @@ enum ConnectionIdentity {
         ].joined(separator: "|")
     }
 
+    /// One train leg as the provider scheduled it, before realtime data or day-rollover fixes touch it.
+    struct ScheduledLeg {
+        let lineNumber: String
+        let fromStationId: String
+        let toStationId: String
+        let scheduledDeparture: Date?
+    }
+
     /// An id that is the same for the same trip on every fetch and different for different trips.
     /// ÖBB gives one id to several trips that share a main train but use different feeder trains, so the id
-    /// alone would make Gleis drop real trips. Scheduled times keep it stable while delays change.
-    static func tripId(providerId: String, legs: [ConnectionLeg]) -> String {
-        let tripKey = legs.filter { !$0.isWalking }.map { leg in
-            let scheduledDeparture = leg.departureTime.map {
-                $0.addingTimeInterval(-TimeInterval((leg.departureDelayMinutes ?? 0) * 60))
-            }
-            return [normalizeLine(leg.lineNumber), leg.from.id, leg.to.id, minuteTimestamp(scheduledDeparture)]
+    /// alone would make Gleis drop real trips. Only scheduled times go in, so delays never change it.
+    static func tripId(providerId: String, scheduledLegs: [ScheduledLeg]) -> String {
+        let tripKey = scheduledLegs.map { leg in
+            [normalizeLine(leg.lineNumber), leg.fromStationId, leg.toStationId, minuteTimestamp(leg.scheduledDeparture)]
                 .joined(separator: "~")
         }.joined(separator: ";")
         return "\(providerId)-\(stableHash(tripKey))"

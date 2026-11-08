@@ -205,6 +205,8 @@ struct TrainConnection: Identifiable, Codable, Equatable {
     let transfers: Int
     let legs: [ConnectionLeg]
     var serviceAlerts: [ServiceAlert]? = nil
+    /// The id ÖBB issued for this trip, which its detail and shop endpoints accept. `id` is Gleis's own trip id.
+    var providerConnectionId: String? = nil
 
     var isDelayed: Bool { delay > 0 }
     /// The operator has cancelled this service. Parsed from the feed since the first

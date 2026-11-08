@@ -66,13 +66,20 @@ enum ConnectionMapper {
         )
 
         return TrainConnection(
-            id: ConnectionIdentity.tripId(providerId: connection.id, legs: normalized.legs),
+            id: ConnectionIdentity.tripId(
+                providerId: connection.id,
+                scheduledLegs: scheduledTrainLegs(
+                    sections, from: from, to: to,
+                    fallbackLineNumber: lineInfo.number, fallbackDeparture: scheduledDeparture
+                )
+            ),
             lineNumber: lineInfo.number, trainType: lineInfo.trainType,
             lineColors: lineInfo.lineColors,
             departureTime: normalized.departure, arrivalTime: normalized.arrival, departureStation: from, arrivalStation: to,
             platform: platform, delay: delayMinutes, status: status, transfers: transfers,
             legs: normalized.legs,
-            serviceAlerts: mapServiceAlerts(connection.serviceAlerts)
+            serviceAlerts: mapServiceAlerts(connection.serviceAlerts),
+            providerConnectionId: connection.id
         )
     }
 
@@ -102,15 +109,13 @@ enum ConnectionMapper {
 
         var enrichedLegs = connection.legs
         var usedDetailIndices = Set<Int>()
-        var fallbackDetailCursor = 0
 
         for legIndex in enrichedLegs.indices where !enrichedLegs[legIndex].isWalking {
             let leg = enrichedLegs[legIndex]
             guard let detailIndex = findMatchingDetailSectionIndex(
                 for: leg,
                 detailSections: detail.sections,
-                usedDetailIndices: &usedDetailIndices,
-                fallbackCursor: &fallbackDetailCursor
+                usedDetailIndices: &usedDetailIndices
             ) else { continue }
 
             let detailSection = detail.sections[detailIndex]
@@ -148,7 +153,8 @@ enum ConnectionMapper {
             departureStation: connection.departureStation, arrivalStation: connection.arrivalStation,
             platform: connection.platform, delay: connection.delay, status: connection.status,
             transfers: connection.transfers, legs: enrichedLegs,
-            serviceAlerts: connection.serviceAlerts
+            serviceAlerts: connection.serviceAlerts,
+            providerConnectionId: connection.providerConnectionId
         )
     }
 
@@ -181,6 +187,29 @@ enum ConnectionMapper {
         guard let category else { return false }
         let name = (category.shortName ?? category.displayName ?? category.name ?? "").uppercased()
         return name == "W" || name == "WALK"
+    }
+
+    /// The train legs as ÖBB scheduled them, read before chronology normalisation can move a leg by a day.
+    private static func scheduledTrainLegs(
+        _ sections: [OebbSection], from: Station, to: Station,
+        fallbackLineNumber: String, fallbackDeparture: Date?
+    ) -> [ConnectionIdentity.ScheduledLeg] {
+        guard !sections.isEmpty else {
+            return [
+                ConnectionIdentity.ScheduledLeg(
+                    lineNumber: fallbackLineNumber, fromStationId: from.id, toStationId: to.id,
+                    scheduledDeparture: fallbackDeparture
+                ),
+            ]
+        }
+        return sections.filter { !isWalkingCategory($0.category) }.map { section in
+            ConnectionIdentity.ScheduledLeg(
+                lineNumber: lineInfo(for: section.category).number,
+                fromStationId: mapStop(section.from, fallbackName: from.name).id,
+                toStationId: mapStop(section.to, fallbackName: to.name).id,
+                scheduledDeparture: parseDate(section.from.departure)
+            )
+        }
     }
 
     private static func mapLegs(
@@ -427,45 +456,21 @@ enum ConnectionMapper {
         return token.isEmpty ? "na" : token
     }
 
+    /// The unused train section running between the leg's own stations. ÖBB shares one detail id across feeder
+    /// variants, so a section matching only one end can belong to another trip.
     private static func findMatchingDetailSectionIndex(
-        for leg: ConnectionLeg, detailSections: [OebbConnectionDetailSection], usedDetailIndices: inout Set<Int>,
-        fallbackCursor: inout Int
+        for leg: ConnectionLeg, detailSections: [OebbConnectionDetailSection], usedDetailIndices: inout Set<Int>
     ) -> Int? {
-        let normalizedFrom = normalizeStationName(leg.from.name)
-        let normalizedTo = normalizeStationName(leg.to.name)
-
-        var bestIndex: Int?
-        var bestScore = 0
-
-        for index in detailSections.indices where !usedDetailIndices.contains(index) {
+        guard let normalizedFrom = normalizeStationName(leg.from.name),
+              let normalizedTo = normalizeStationName(leg.to.name) else { return nil }
+        let match = detailSections.indices.first { index in
             let section = detailSections[index]
-            guard !isWalkingDetailSection(section) else { continue }
-            let fromScore =
-                normalizeStationName(section.from?.name).map { $0 == normalizedFrom ? 1 : 0 } ?? 0
-            let toScore =
-                normalizeStationName(section.to?.name).map { $0 == normalizedTo ? 1 : 0 } ?? 0
-            let score = fromScore + toScore
-            if score > bestScore {
-                bestScore = score
-                bestIndex = index
-                if score == 2 { break }
-            }
+            return !usedDetailIndices.contains(index) && !isWalkingDetailSection(section)
+                && normalizeStationName(section.from?.name) == normalizedFrom
+                && normalizeStationName(section.to?.name) == normalizedTo
         }
-
-        if let bestIndex {
-            usedDetailIndices.insert(bestIndex)
-            return bestIndex
-        }
-
-        while fallbackCursor < detailSections.count {
-            let index = fallbackCursor
-            fallbackCursor += 1
-            if usedDetailIndices.contains(index) { continue }
-            if isWalkingDetailSection(detailSections[index]) { continue }
-            usedDetailIndices.insert(index)
-            return index
-        }
-        return nil
+        if let match { usedDetailIndices.insert(match) }
+        return match
     }
 
     private static func normalizeStationName(_ value: String?) -> String? {
