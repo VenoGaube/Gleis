@@ -62,9 +62,6 @@ struct OnboardingView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.25), value: currentStepIndex)
-                .onChange(of: currentStepIndex) { _, newIndex in
-                    persistRouteBeforeTimingStepIfNeeded(movingTo: newIndex)
-                }
 
                 footer
             }
@@ -72,7 +69,8 @@ struct OnboardingView: View {
             .padding(.bottom, 24)
         }
         .task { await refreshNotificationStatus() }
-        .onChange(of: currentStepIndex) { _, _ in
+        .onChange(of: currentStepIndex) { _, newIndex in
+            if steps[safe: newIndex] == .timing { persistSetupSelections() }
             Task { await refreshNotificationStatus() }
         }
         .onChange(of: scenePhase) { _, newValue in
@@ -150,11 +148,6 @@ struct OnboardingView: View {
             .opacity(canContinue ? 1 : 0.5)
             .padding(.horizontal, 20)
         }
-    }
-
-    private func persistRouteBeforeTimingStepIfNeeded(movingTo index: Int) {
-        guard steps[safe: index] == .timing else { return }
-        persistSetupSelections()
     }
 
     @ViewBuilder private func stepView(_ step: OnboardingStep) -> some View {
@@ -752,15 +745,10 @@ struct JourneySetupStepView: View {
 
     private var routePickerCard: some View {
         RouteHeader(
-            transportType: .trainCommute,
             startStation: originStation,
             endStation: destinationStation,
             travelTimeToStart: nil,
-            travelTimeToEnd: nil,
-            suggestedTravelTimeToStart: nil,
-            suggestedTravelTimeToEnd: nil,
             bufferTimeToStart: nil,
-            bufferTimeToEnd: nil,
             onSwap: {
                 let currentOrigin = originStation
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -869,8 +857,6 @@ struct JourneySetupStepView: View {
             stations: popularStations,
             recentStations: recent,
             favoriteStations: favorites,
-            nearbyStations: [],
-            stationDistances: [:],
             searchHandler: { query in await searchStations(query: query) },
             onToggleFavorite: { station in settingsManager.toggleFavoriteStation(station) },
             selection: selection
@@ -1449,68 +1435,6 @@ struct OnboardingBackdrop: View {
     }
 }
 
-struct HighlightTile: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon)
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(Color(red: 0.11, green: 0.29, blue: 0.53))
-            Text(title)
-                .font(.footnote.weight(.semibold))
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-struct StationSelectButton: View {
-    let title: String
-    let station: Station?
-    let icon: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.11, green: 0.29, blue: 0.53))
-                    .frame(width: 28, height: 28)
-                    .background(Color(red: 0.11, green: 0.29, blue: 0.53).opacity(0.1), in: Circle())
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Text(station?.name ?? "Select Station")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(station == nil ? .secondary : .primary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct OnboardingWidgetPreviewEntry {
     let date: Date
     let data: WidgetData?
@@ -1561,12 +1485,12 @@ struct OnboardingSmallWidgetView: View {
 
                 Spacer(minLength: 0)
 
-                OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+                OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime)
 
                 Spacer(minLength: 0)
 
                 VStack(spacing: 4) {
-                    OnboardingWidgetDepartureInfo(connection: conn, size: .small)
+                    OnboardingWidgetDepartureInfo(connection: conn)
                     if conn.hasServiceAlert {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -1596,7 +1520,7 @@ struct OnboardingMediumWidgetView: View {
 
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
-                    OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime, size: .medium)
+                    OnboardingWidgetCountdownDisplay(remaining: remaining, leaveTime: current.leaveTime)
 
                     if remaining > 0 {
                         Text("Leave at \(current.leaveTime, style: .time)")
@@ -1732,38 +1656,33 @@ struct OnboardingWidgetLineBadge: View {
 struct OnboardingWidgetCountdownDisplay: View {
     let remaining: TimeInterval
     let leaveTime: Date
-    let size: CountdownSize
 
-    enum CountdownSize {
-        case medium
-
-        var mainFont: Font { .system(size: 28, weight: .bold, design: .rounded) }
-        var labelFont: Font { .system(size: 10) }
-    }
+    private let mainFont: Font = .system(size: 28, weight: .bold, design: .rounded)
+    private let labelFont: Font = .system(size: 10)
 
     var body: some View {
         VStack(spacing: 2) {
             if remaining <= 0 {
                 Text("GO!")
-                    .font(size.mainFont)
+                    .font(mainFont)
                     .foregroundStyle(.secondary)
                     .scalableText(minimumScale: 0.6)
             } else if remaining <= 60 {
                 Text(leaveTime, style: .timer)
-                    .font(size.mainFont.monospacedDigit())
-                    .foregroundStyle(onboardingUrgencyColor(remaining))
+                    .font(mainFont.monospacedDigit())
+                    .foregroundStyle(Color.urgency(for: remaining))
                     .multilineTextAlignment(.center)
                     .scalableText(minimumScale: 0.6)
                 Text("leave now")
-                    .font(size.labelFont.weight(.medium))
+                    .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             } else {
                 Text(onboardingFormatCountdown(remaining))
-                    .font(size.mainFont.monospacedDigit())
-                    .foregroundStyle(onboardingUrgencyColor(remaining))
+                    .font(mainFont.monospacedDigit())
+                    .foregroundStyle(Color.urgency(for: remaining))
                     .scalableText(minimumScale: 0.6)
                 Text("to leave")
-                    .font(size.labelFont.weight(.medium))
+                    .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             }
         }
@@ -1772,45 +1691,28 @@ struct OnboardingWidgetCountdownDisplay: View {
 
 struct OnboardingWidgetDepartureInfo: View {
     let connection: WidgetConnection
-    let size: InfoSize
 
-    enum InfoSize {
-        case small
-        case medium
-
-        var labelFont: Font { .system(size: 9, weight: .semibold) }
-        var departureLabel: String { self == .small ? "DEP" : "DEPARTURE" }
-        var platformLabel: String { self == .small ? "PL" : "PLATFORM" }
-        var valueFont: Font {
-            self == .small
-                ? .subheadline.weight(.bold).monospacedDigit()
-                : .title2.weight(.bold).monospacedDigit()
-        }
-
-        var delayFont: Font {
-            self == .small
-                ? .system(size: 10, weight: .bold)
-                : .caption.weight(.bold)
-        }
-    }
+    private let labelFont: Font = .system(size: 9, weight: .semibold)
+    private let valueFont: Font = .subheadline.weight(.bold).monospacedDigit()
+    private let delayFont: Font = .system(size: 10, weight: .bold)
 
     var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(size.departureLabel).font(size.labelFont).foregroundStyle(.secondary)
+                Text("DEP").font(labelFont).foregroundStyle(.secondary)
                 if connection.isDelayed {
                     HStack(spacing: 4) {
                         Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
-                            .font(size.valueFont)
+                            .font(valueFont)
                             .foregroundStyle(.orange)
                             .scalableText(minimumScale: 0.7)
                         Text("+\(connection.delay)'")
-                            .font(size.delayFont)
+                            .font(delayFont)
                             .foregroundStyle(.orange)
                     }
                 } else {
                     Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
-                        .font(size.valueFont)
+                        .font(valueFont)
                         .scalableText(minimumScale: 0.7)
                 }
             }
@@ -1818,8 +1720,8 @@ struct OnboardingWidgetDepartureInfo: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(size.platformLabel).font(size.labelFont).foregroundStyle(.secondary)
-                Text(connection.platform ?? "–").font(size.valueFont).scalableText(minimumScale: 0.7)
+                Text("PL").font(labelFont).foregroundStyle(.secondary)
+                Text(connection.platform ?? "–").font(valueFont).scalableText(minimumScale: 0.7)
             }
         }
     }
@@ -1910,15 +1812,8 @@ private func onboardingFormatCountdown(_ seconds: TimeInterval) -> String {
     return "\(minutes)m"
 }
 
-private func onboardingUrgencyColor(_ remaining: TimeInterval) -> Color {
-    if remaining <= 0 { return .secondary }
-    if remaining < 120 { return .red }
-    if remaining < 300 { return .orange }
-    return .green
-}
-
 private func onboardingWidgetGradient(remaining: TimeInterval) -> some View {
-    let color = onboardingUrgencyColor(remaining)
+    let color = Color.urgency(for: remaining)
     return LinearGradient(
         colors: [color.opacity(0.45), color.opacity(0.1), .clear],
         startPoint: .trailing,

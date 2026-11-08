@@ -57,30 +57,9 @@ struct ContentView: View {
                 // Pop to root if tapping current tab
                 if tappedTab == selectedTab {
                     switch tappedTab {
-                    case 0:
-                        let hadNavigationDepth = !trainPath.isEmpty
-                        trainPath = NavigationPath()
-                        if hadNavigationDepth {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { trainScrollToTopTrigger += 1 }
-                        } else {
-                            trainScrollToTopTrigger += 1
-                        }
-                    case 1:
-                        let hadNavigationDepth = !repeatPath.isEmpty
-                        repeatPath = NavigationPath()
-                        if hadNavigationDepth {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { repeatScrollToTopTrigger += 1 }
-                        } else {
-                            repeatScrollToTopTrigger += 1
-                        }
-                    case 2:
-                        let hadNavigationDepth = !settingsPath.isEmpty
-                        settingsPath = NavigationPath()
-                        if hadNavigationDepth {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { settingsScrollToTopTrigger += 1 }
-                        } else {
-                            settingsScrollToTopTrigger += 1
-                        }
+                    case 0: popToRootThenScrollToTop($trainPath, $trainScrollToTopTrigger)
+                    case 1: popToRootThenScrollToTop($repeatPath, $repeatScrollToTopTrigger)
+                    case 2: popToRootThenScrollToTop($settingsPath, $settingsScrollToTopTrigger)
                     default: break
                     }
                 }
@@ -103,6 +82,17 @@ struct ContentView: View {
                     settings.hasCompletedOnboarding = true
                     settingsManager.updateAppSettings(settings)
                 }
+        }
+    }
+
+    // When a pushed screen is popped, wait for the pop before scrolling.
+    private func popToRootThenScrollToTop(_ path: Binding<NavigationPath>, _ trigger: Binding<Int>) {
+        let hadNavigationDepth = !path.wrappedValue.isEmpty
+        path.wrappedValue = NavigationPath()
+        if hadNavigationDepth {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { trigger.wrappedValue += 1 }
+        } else {
+            trigger.wrappedValue += 1
         }
     }
 }

@@ -3,7 +3,6 @@ import SwiftUI
 struct LineBadgeStyle {
     let background: Color
     let foreground: Color
-    let border: Color?
 }
 
 extension Color {
@@ -44,12 +43,12 @@ extension Color {
 
     static func lineBadgeStyle(for line: String, apiColors: TrainLineColors?) -> LineBadgeStyle {
         let fallbackBackground = lineColor(for: line)
-        guard let apiColors else { return LineBadgeStyle(background: fallbackBackground, foreground: .white, border: nil) }
+        guard let apiColors else { return LineBadgeStyle(background: fallbackBackground, foreground: .white) }
 
         // Prefer the accent/bar color so the full badge background is the train color (not white API backgrounds).
         let backgroundHex = apiColors.accentHex ?? apiColors.backgroundHex
         let background = color(fromHex: backgroundHex) ?? fallbackBackground
-        return LineBadgeStyle(background: background, foreground: .white, border: nil)
+        return LineBadgeStyle(background: background, foreground: .white)
     }
 
     private static func color(fromHex hex: String?) -> Color? {

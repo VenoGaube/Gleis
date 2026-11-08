@@ -13,8 +13,7 @@ struct TransportView: View {
     @State private var showEndPicker = false
     @State private var detailConnection: TrainConnection?
     @State private var isSwapping = false
-    @State private var showTravelTimeSheet: Station?
-    @State private var showBufferTimeSheet: Station?
+    @State private var activeTimingSheet: TimingSheet?
     @State private var hasAppearedOnce = false
     @State private var isPassedSectionExpanded = false
 
@@ -61,15 +60,11 @@ struct TransportView: View {
                     }
 
                     RouteHeader(
-                        transportType: viewModel.transportType, startStation: startStation, endStation: endStation,
+                        startStation: startStation, endStation: endStation,
                         travelTimeToStart: viewModel.config.travelTime(for: startStation?.id),
-                        travelTimeToEnd: viewModel.config.travelTime(for: endStation?.id),
-                        suggestedTravelTimeToStart: nil,
-                        suggestedTravelTimeToEnd: nil,
-                        bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id),
-                        bufferTimeToEnd: viewModel.config.bufferTime(for: endStation?.id), onSwap: swapStations,
+                        bufferTimeToStart: viewModel.config.bufferTime(for: startStation?.id), onSwap: swapStations,
                         onStartTap: { showStartPicker = true }, onEndTap: { showEndPicker = true },
-                        onSetTravelTime: { showTravelTimeSheet = $0 }, onSetBufferTime: { showBufferTimeSheet = $0 }
+                        onSetTravelTime: { activeTimingSheet = .travel($0) }, onSetBufferTime: { activeTimingSheet = .buffer($0) }
                     )
 
                     // Train type filter chips
@@ -115,7 +110,7 @@ struct TransportView: View {
                 withAnimation(.easeInOut) { proxy.scrollTo(topAnchorId, anchor: .top) }
             }
         }.background {
-            (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
+            Color.screenBackground(colorScheme).ignoresSafeArea(
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).refreshable {
             viewModel.cancelCurrentFetch()
@@ -147,13 +142,16 @@ struct TransportView: View {
                 isPresented: $showEndPicker
             ) { stationPicker(title: "To", selection: $endStation) }.sheet(item: $detailConnection) {
                 ConnectionDetailSheet(connection: $0)
-            }.sheet(item: $showTravelTimeSheet) { station in
-                TravelTimeSheet(station: station, currentValue: viewModel.config.travelTime(for: station.id)) { time in
-                    settingsManager.saveTravelTime(time, for: station.id, transportType: viewModel.transportType)
-                }
-            }.sheet(item: $showBufferTimeSheet) { station in
-                BufferTimeSheet(station: station, currentValue: viewModel.config.bufferTime(for: station.id)) { time in
-                    settingsManager.saveBufferTime(time, for: station.id, transportType: viewModel.transportType)
+            }.sheet(item: $activeTimingSheet) { sheet in
+                switch sheet {
+                case let .travel(station):
+                    TravelTimeSheet(station: station, currentValue: viewModel.config.travelTime(for: station.id)) { time in
+                        settingsManager.saveTravelTime(time, for: station.id, transportType: viewModel.transportType)
+                    }
+                case let .buffer(station):
+                    BufferTimeSheet(station: station, currentValue: viewModel.config.bufferTime(for: station.id)) { time in
+                        settingsManager.saveBufferTime(time, for: station.id, transportType: viewModel.transportType)
+                    }
                 }
             }.toastOverlay(viewModel.toastManager).alert(
                 viewModel.errorTitle ?? "Error", isPresented: $viewModel.showError
@@ -201,10 +199,10 @@ struct TransportView: View {
         let upcomingConnections = visibleConnections
             .filter { !$0.isLeaveWindowPassed }
             .sorted { $0.connection.departureTime < $1.connection.departureTime }
-        let visibleUpcomingConnections = Array(upcomingConnections.prefix(viewModel.config.displayMaxConnections))
         let passedLeaveWindowConnections = visibleConnections
             .filter(\.isLeaveWindowPassed)
             .sorted { $0.connection.departureTime > $1.connection.departureTime }
+        let visibleUpcomingConnections = Array(upcomingConnections.prefix(viewModel.config.displayMaxConnections))
 
         return VStack(spacing: 12) {
             if upcomingConnections.isEmpty, passedLeaveWindowConnections.isEmpty, pinnedId != nil {
@@ -285,8 +283,6 @@ struct TransportView: View {
         StationPickerSheet(
             title: title, stations: viewModel.stations, recentStations: viewModel.config.recentStations,
             favoriteStations: viewModel.config.favoriteStations,
-            nearbyStations: [],
-            stationDistances: [:],
             searchHandler: { await viewModel.searchStations($0) },
             onToggleFavorite: { settingsManager.toggleFavoriteStation($0, for: viewModel.transportType) },
             selection: selection

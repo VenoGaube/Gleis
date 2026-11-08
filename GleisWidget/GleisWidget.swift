@@ -205,21 +205,17 @@ struct GleisEntry: TimelineEntry {
     let snapshot: WidgetRenderSnapshot?
     let configuration: SelectTransportIntent
 
-    init(date: Date, snapshot: WidgetRenderSnapshot?, configuration: SelectTransportIntent) {
-        self.date = date
-        self.snapshot = snapshot
-        self.configuration = configuration
-    }
-
-    /// Convenience for call sites that still hold a full snapshot (placeholders, previews).
-    init(date: Date, data: WidgetData?, configuration: SelectTransportIntent) {
-        self.init(date: date, snapshot: data?.renderSnapshot(at: date), configuration: configuration)
-    }
-
     var relevance: TimelineEntryRelevance? {
         guard let leaveTime = snapshot?.leaveTime else { return nil }
         let remaining = leaveTime.timeIntervalSince(date)
         return TimelineEntryRelevance(score: remaining < 300 ? 1.0 : 0.5)
+    }
+}
+
+extension GleisEntry {
+    /// Convenience for call sites that still hold a full snapshot (placeholders, previews).
+    init(date: Date, data: WidgetData?, configuration: SelectTransportIntent) {
+        self.init(date: date, snapshot: data?.renderSnapshot(at: date), configuration: configuration)
     }
 }
 
@@ -233,7 +229,6 @@ struct GleisWidgetEntryView: View {
     var body: some View {
         switch family {
         case .systemSmall: SmallWidgetView(entry: entry).widgetBackground(entry: entry, colorScheme: colorScheme)
-        case .systemMedium: MediumWidgetView(entry: entry).widgetBackground(entry: entry, colorScheme: colorScheme)
         case .accessoryCircular:
             CircularWidgetView(entry: entry).containerBackground(for: .widget) { AccessoryWidgetBackground() }
         case .accessoryRectangular:
@@ -260,7 +255,7 @@ extension View {
         return containerBackground(for: .widget) {
             LinearGradient(
                 colors: [
-                    color.opacity(colorScheme == .dark ? 0.45 : 0.45), color.opacity(colorScheme == .dark ? 0.12 : 0.1),
+                    color.opacity(0.45), color.opacity(colorScheme == .dark ? 0.12 : 0.1),
                     .clear,
                 ], startPoint: .trailing, endPoint: .leading
             )
@@ -273,7 +268,6 @@ extension View {
 /// Focused on: When to leave, departure time, platform, and delay status
 struct SmallWidgetView: View {
     let entry: GleisEntry
-    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         if let data = entry.snapshot, let current = data.scheduled {
@@ -324,19 +318,16 @@ struct SmallWidgetView: View {
                 // Center: Countdown - the hero element
                 CountdownDisplay(
                     leaveTime: current.leaveTime,
-                    referenceDate: entry.date,
-                    size: .medium
+                    referenceDate: entry.date
                 )
 
                 Spacer(minLength: 0)
 
                 // Bottom: Departure info - what you need at the station
-                VStack(spacing: 4) {
-                    DepartureInfo(connection: conn, size: .small)
-                }
-                .padding(.top, 6)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                DepartureInfo(connection: conn)
+                    .padding(.top, 6)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
             }.widgetURL(entryURL(entry, fallbackConnectionId: conn.id))
         } else {
             EmptyWidgetView(size: .small, snapshot: entry.snapshot)
@@ -359,8 +350,7 @@ struct MediumWidgetView: View {
                 VStack(spacing: 4) {
                     CountdownDisplay(
                         leaveTime: current.leaveTime,
-                        referenceDate: entry.date,
-                        size: .medium
+                        referenceDate: entry.date
                     )
 
                     if remaining > 0 {
@@ -627,48 +617,32 @@ struct LineBadge: View {
 struct CountdownDisplay: View {
     let leaveTime: Date
     let referenceDate: Date
-    let size: CountdownSize
 
-    enum CountdownSize {
-        case large, medium
-
-        var mainFont: Font {
-            switch self {
-            case .large: .system(size: 44, weight: .bold, design: .rounded)
-            case .medium: .system(size: 28, weight: .bold, design: .rounded)
-            }
-        }
-
-        var labelFont: Font {
-            switch self {
-            case .large: .system(size: 12)
-            case .medium: .system(size: 11)
-            }
-        }
-    }
+    private let mainFont: Font = .system(size: 28, weight: .bold, design: .rounded)
+    private let labelFont: Font = .system(size: 11)
 
     var body: some View {
         let remaining = leaveTime.timeIntervalSince(referenceDate)
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("GO!").font(size.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
+                Text("GO!").font(mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.6)
             } else if remaining <= 60 {
                 Text(leaveTime, style: .timer)
-                    .font(size.mainFont.monospacedDigit())
+                    .font(mainFont.monospacedDigit())
                     .foregroundStyle(urgencyColor(remaining))
                     .multilineTextAlignment(.center)
                     .scalableText(minimumScale: 0.6)
                 Text("leave now")
-                    .font(size.labelFont.weight(.medium))
+                    .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             } else {
                 Text("\(minutesRemaining(remaining))m")
-                    .font(size.mainFont.monospacedDigit())
+                    .font(mainFont.monospacedDigit())
                     .foregroundStyle(urgencyColor(remaining))
                     .multilineTextAlignment(.center)
                     .scalableText(minimumScale: 0.6)
                 Text("to leave")
-                    .font(size.labelFont.weight(.medium))
+                    .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             }
         }
@@ -679,106 +653,65 @@ struct CountdownDisplay: View {
 
 struct DepartureInfo: View {
     let connection: WidgetConnection
-    let size: InfoSize
     private var displayPlatform: String {
         let trimmed = connection.platform?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, !trimmed.isEmpty else { return "–" }
         return trimmed
     }
 
-    enum InfoSize {
-        case small, medium
-
-        var labelFont: Font { .system(size: 9, weight: .semibold) }
-        var departureLabel: String {
-            switch self {
-            case .small: "Departure"
-            case .medium: "DEPARTURE"
-            }
-        }
-
-        var platformLabel: String {
-            switch self {
-            case .small: "Platform"
-            case .medium: "PLATFORM"
-            }
-        }
-
-        var valueFont: Font {
-            switch self {
-            case .small: .headline.weight(.bold).monospacedDigit()
-            case .medium: .title2.weight(.bold).monospacedDigit()
-            }
-        }
-
-        var delayFont: Font {
-            switch self {
-            case .small: .system(size: 10, weight: .bold)
-            case .medium: .caption.weight(.bold)
-            }
-        }
-    }
+    private let labelFont: Font = .system(size: 9, weight: .semibold)
+    private let valueFont: Font = .headline.weight(.bold).monospacedDigit()
 
     var body: some View {
-        switch size {
-        case .small:
-            VStack(spacing: 4) {
-                HStack(alignment: .top) {
-                    departureColumn
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    platformColumn(alignment: .center)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-
-                if connection.isDelayed {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.badge.exclamationmark")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Delay +\(connection.delay) m")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-
-        case .medium:
+        VStack(spacing: 4) {
             HStack(alignment: .top) {
                 departureColumn
-                Spacer()
-                platformColumn(alignment: .trailing)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                platformColumn
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            if connection.isDelayed {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Delay +\(connection.delay) m")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
     }
 
     private var departureColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(size.departureLabel)
-                .font(size.labelFont)
+            Text("Departure")
+                .font(labelFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             if connection.isDelayed {
                 Text(timeFormatter.string(from: connection.departureTime))
-                    .font(size.valueFont)
+                    .font(valueFont)
                     .foregroundStyle(.orange)
                     .scalableText(minimumScale: 0.7)
             } else {
-                Text(timeFormatter.string(from: connection.departureTime)).font(size.valueFont).scalableText(
+                Text(timeFormatter.string(from: connection.departureTime)).font(valueFont).scalableText(
                     minimumScale: 0.7)
             }
         }
     }
 
-    private func platformColumn(alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 2) {
-            Text(size.platformLabel)
-                .font(size.labelFont)
+    private var platformColumn: some View {
+        VStack(alignment: .center, spacing: 2) {
+            Text("Platform")
+                .font(labelFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text(displayPlatform).font(size.valueFont).scalableText(minimumScale: 0.7)
+            Text(displayPlatform).font(valueFont).scalableText(minimumScale: 0.7)
         }
     }
 }

@@ -9,25 +9,6 @@ struct ConnectionCard: View {
     let onPin: () -> Void
     let onUnpin: () -> Void
     let onTap: () -> Void
-    let showLayoutDebug: Bool
-
-    init(
-        displayConnection: DisplayConnection,
-        onSchedule: @escaping () -> Void,
-        onCancel: @escaping () -> Void,
-        onPin: @escaping () -> Void,
-        onUnpin: @escaping () -> Void,
-        onTap: @escaping () -> Void,
-        showLayoutDebug: Bool = false
-    ) {
-        self.displayConnection = displayConnection
-        self.onSchedule = onSchedule
-        self.onCancel = onCancel
-        self.onPin = onPin
-        self.onUnpin = onUnpin
-        self.onTap = onTap
-        self.showLayoutDebug = showLayoutDebug
-    }
 
     @Environment(\.colorScheme) var colorScheme
     @State private var isExpanded = false
@@ -43,12 +24,10 @@ struct ConnectionCard: View {
     private var isSelected: Bool { displayConnection.isSelected }
     private var isPinned: Bool { displayConnection.isPinned }
     private var scheduledDepartureTime: Date? {
-        guard connection.delay > 0 else { return nil }
-        return connection.departureTime.addingTimeInterval(TimeInterval(-connection.delay * 60))
+        scheduledTimeIfDelayed(from: connection.departureTime, delayMinutes: connection.delay)
     }
     private var scheduledArrivalTime: Date? {
-        guard connection.delay > 0 else { return nil }
-        return connection.arrivalTime.addingTimeInterval(TimeInterval(-connection.delay * 60))
+        scheduledTimeIfDelayed(from: connection.arrivalTime, delayMinutes: connection.delay)
     }
 
     var body: some View {
@@ -77,7 +56,7 @@ struct ConnectionCard: View {
     }
 
     private var cardBackgroundColor: Color {
-        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+        Color.cardSurface(colorScheme)
     }
 
     private var cardCornerRadius: CGFloat {
@@ -110,15 +89,12 @@ struct ConnectionCard: View {
             Spacer()
             Text("GO!").font(.caption.weight(.bold)).foregroundStyle(.secondary)
             Image(systemName: "chevron.down").font(.caption).foregroundStyle(.tertiary)
-        }.padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6).debugLayoutBox(showLayoutDebug, color: .gray)
+        }.padding(.horizontal, 16).padding(.vertical, 12).opacity(0.6)
     }
 
     private var headerSection: some View {
         HStack(spacing: 12) {
-            LineBadge(line: connection.lineNumber, colors: connection.lineColors).debugLayoutBox(
-                showLayoutDebug,
-                color: .indigo
-            )
+            LineBadge(line: connection.lineNumber, colors: connection.lineColors)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(connection.departureStation.name).font(.subheadline.weight(.medium)).scalableText(
@@ -129,10 +105,10 @@ struct ConnectionCard: View {
                     Image(systemName: "arrow.right").font(.caption2)
                     Text(connection.arrivalStation.name).font(.caption).scalableText(minimumScale: 0.8)
                 }.foregroundStyle(.secondary)
-            }.debugLayoutBox(showLayoutDebug, color: .mint)
+            }
             Spacer()
-            headerStatusBadges.debugLayoutBox(showLayoutDebug, color: .pink)
-        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12).debugLayoutBox(showLayoutDebug, color: .blue)
+            headerStatusBadges
+        }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
     }
 
     @ViewBuilder
@@ -186,7 +162,7 @@ struct ConnectionCard: View {
                 }
                 .frame(minWidth: 66, alignment: .center)
                 .layoutPriority(2)
-                .debugLayoutBox(showLayoutDebug, color: .cyan)
+
                 VStack(spacing: 6) {
                     Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
                     Text("\(Int(connection.duration / 60)) min").font(.caption2).foregroundStyle(.secondary)
@@ -235,7 +211,7 @@ struct ConnectionCard: View {
 
                 }
                 .frame(minWidth: 64, maxWidth: .infinity)
-                .debugLayoutBox(showLayoutDebug, color: .orange)
+
                 VStack(spacing: 6) {
                     Text("ARRIVES")
                         .font(.caption2.weight(.medium))
@@ -263,7 +239,7 @@ struct ConnectionCard: View {
                 }
                 .frame(minWidth: 66, alignment: .center)
                 .layoutPriority(2)
-                .debugLayoutBox(showLayoutDebug, color: .green)
+
             }.frame(maxWidth: .infinity)
             Divider().frame(height: 40).padding(2)
             VStack(spacing: 2) {
@@ -271,7 +247,7 @@ struct ConnectionCard: View {
                 Text(connection.platform ?? "—").font(
                     connection.platform != nil ? .headline.weight(.semibold).monospacedDigit() : .caption2
                 ).foregroundStyle(connection.platform != nil ? .primary : .tertiary)
-            }.frame(width: 58).debugLayoutBox(showLayoutDebug, color: .purple)
+            }.frame(width: 58)
             Button {
                 Haptics.selection()
                 onTap()
@@ -279,8 +255,8 @@ struct ConnectionCard: View {
                 Image(systemName: "info.circle").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                     .padding(2).background(Color.accentColor.opacity(0.12), in: Circle()).contentShape(
                         Rectangle())
-            }.buttonStyle(.borderless).debugLayoutBox(showLayoutDebug, color: .teal)
-        }.padding(.horizontal, 16).padding(.vertical, 12).debugLayoutBox(showLayoutDebug, color: .yellow)
+            }.buttonStyle(.borderless)
+        }.padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     private var leaveTimeSection: some View {
@@ -306,14 +282,11 @@ struct ConnectionCard: View {
                         Text("to leave").font(.system(size: 8)).foregroundStyle(.secondary)
                     }
                 }
-            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel).debugLayoutBox(
-                showLayoutDebug,
-                color: .orange
-            )
+            }.frame(width: 56, height: 56).accessibilityLabel(countdownAccessibilityLabel)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Leave at").font(.caption).foregroundStyle(.secondary)
                 Text(leaveTime, style: .time).font(.headline.monospacedDigit()).foregroundStyle(urgencyColor)
-            }.debugLayoutBox(showLayoutDebug, color: .green)
+            }
             Spacer()
 
             // Pin button
@@ -326,7 +299,7 @@ struct ConnectionCard: View {
                         isPinned ? Color.accentColor : Color.secondary.opacity(0.15), in: Circle()
                     )
             }.disabled(hasDeparted && !isPinned).accessibilityLabel(
-                isPinned ? "Unpin journey" : "Pin as My Journey").debugLayoutBox(showLayoutDebug, color: .red)
+                isPinned ? "Unpin journey" : "Pin as My Journey")
 
             // Reminder button
             Button {
@@ -343,11 +316,8 @@ struct ConnectionCard: View {
                 isSelected ? "Cancel reminder" : "Set reminder"
             ).accessibilityHint(
                 isSelected ? "Removes the departure notification" : "Notifies you when it's time to leave")
-                .debugLayoutBox(showLayoutDebug, color: .blue)
-        }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08)).debugLayoutBox(
-            showLayoutDebug,
-            color: .mint
-        )
+
+        }.padding(16).background(urgencyColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
     }
 
     private var countdownAccessibilityLabel: String {
@@ -373,20 +343,6 @@ struct ConnectionCard: View {
     }
 }
 
-private extension View {
-    @ViewBuilder
-    func debugLayoutBox(_ enabled: Bool, color: Color) -> some View {
-        if enabled {
-            self
-                .padding(2)
-                .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.65), lineWidth: 1))
-        } else {
-            self
-        }
-    }
-}
-
 // MARK: - LineBadge
 
 struct LineBadge: View {
@@ -407,11 +363,6 @@ struct LineBadge: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(style.background, in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                if let border = style.border {
-                    RoundedRectangle(cornerRadius: 8).stroke(border.opacity(0.7), lineWidth: 1)
-                }
-            }
     }
 }
 
@@ -466,8 +417,6 @@ struct ServiceAlertBadge: View {
 // MARK: - PinBadge
 
 struct PinBadge: View {
-    @Environment(\.colorScheme) var colorScheme
-
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "pin.fill").font(.system(size: 10))
@@ -555,8 +504,7 @@ struct PinBadge: View {
             onCancel: {},
             onPin: {},
             onUnpin: {},
-            onTap: {},
-            showLayoutDebug: true
+            onTap: {}
         )
         .padding()
     }

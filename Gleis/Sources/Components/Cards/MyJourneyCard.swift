@@ -5,30 +5,10 @@ import SwiftUI
 struct MyJourneyCard: View {
     let journey: PinnedJourney
     let onUnpin: () -> Void
-    let leaveTime: Date?
-    let showLayoutDebug: Bool
-
-    init(
-        journey: PinnedJourney,
-        onUnpin: @escaping () -> Void,
-        leaveTime: Date? = nil,
-        showLayoutDebug: Bool = false
-    ) {
-        self.journey = journey
-        self.onUnpin = onUnpin
-        self.leaveTime = leaveTime
-        self.showLayoutDebug = showLayoutDebug
-    }
+    var leaveTime: Date? = nil
 
     @Environment(\.colorScheme) var colorScheme
     @State private var isExpanded = true
-
-    private func normalizedPlatformValue(_ value: String?) -> String? {
-        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
-            return nil
-        }
-        return trimmed
-    }
 
     private var journeyProgress: Double {
         let now = Date()
@@ -45,15 +25,13 @@ struct MyJourneyCard: View {
         if journey.isInProgress { .green } else if journey.hasDeparted { .secondary } else { .blue }
     }
 
-    private var headerLegCandidates: [ConnectionLeg] {
-        let sourceLegs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
-        let transitLegs = sourceLegs.filter { !$0.isWalking }
-        return transitLegs.isEmpty ? sourceLegs : transitLegs
+    private var displayLegs: [ConnectionLeg] {
+        journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
     }
 
     private var headerDisplayLeg: ConnectionLeg? {
         let now = Date()
-        let legs = headerLegCandidates
+        let legs = travelLegs
         guard !legs.isEmpty else { return nil }
 
         if let activeLeg = legs.last(where: { leg in
@@ -90,16 +68,6 @@ struct MyJourneyCard: View {
         return journey.lineColors
     }
 
-    private var scheduledDeparture: Date? {
-        guard journey.delay > 0 else { return nil }
-        return journey.departureTime.addingTimeInterval(TimeInterval(-journey.delay * 60))
-    }
-
-    private var plannedArrival: Date? {
-        guard journey.delay > 0 else { return nil }
-        return journey.arrivalTime.addingTimeInterval(TimeInterval(-journey.delay * 60))
-    }
-
     private var leaveCountdownText: String? {
         guard let leaveTime else { return nil }
         let seconds = leaveTime.timeIntervalSinceNow
@@ -110,7 +78,7 @@ struct MyJourneyCard: View {
     }
 
     private var travelLegs: [ConnectionLeg] {
-        let legs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
+        let legs = displayLegs
         let transitLegs = legs.filter { !$0.isWalking }
         return transitLegs.isEmpty ? legs : transitLegs
     }
@@ -119,48 +87,19 @@ struct MyJourneyCard: View {
     private var lastTravelLeg: ConnectionLeg? { travelLegs.last }
 
     private var departurePlatformLabel: String? {
-        normalizedPlatformValue(firstTravelLeg?.platform) ?? normalizedPlatformValue(journey.platform)
+        firstTravelLeg?.platform.trimmedNonEmpty ?? journey.platform.trimmedNonEmpty
     }
 
     private var finalArrivalPlatformLabel: String? {
-        normalizedPlatformValue(lastTravelLeg?.arrivalPlatform)
+        lastTravelLeg?.arrivalPlatform.trimmedNonEmpty
     }
 
-    @ViewBuilder
     private var departureTimeValue: some View {
-        if let scheduledDeparture {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(scheduledDeparture, style: .time)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .strikethrough()
-                Text(journey.departureTime, style: .time)
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(.orange)
-            }
-        } else {
-            Text(journey.departureTime, style: .time).font(.headline.monospacedDigit())
-        }
+        DelayedTimeText(time: journey.departureTime, delayMinutes: journey.delay)
     }
 
-    @ViewBuilder
     private var arrivalTimeValue: some View {
-        if let plannedArrival {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(plannedArrival, style: .time)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .strikethrough()
-                Text(journey.arrivalTime, style: .time)
-                    .font(.headline.monospacedDigit())
-                    .fontWeight(.bold)
-                    .foregroundStyle(.orange)
-            }
-        } else {
-            Text(journey.arrivalTime, style: .time)
-                .font(.headline.monospacedDigit())
-                .fontWeight(.bold)
-        }
+        DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold)
     }
 
     var body: some View {
@@ -177,7 +116,7 @@ struct MyJourneyCard: View {
                     .asymmetric(insertion: .topDownReveal, removal: .opacity)
                 )
             }
-        }.background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)).clipShape(
+        }.background(Color.cardSurface(colorScheme)).clipShape(
             RoundedRectangle(cornerRadius: 16)
         ).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.accentColor.opacity(0.5), lineWidth: 2)).shadow(
             color: colorScheme == .dark ? .clear : .black.opacity(0.08), radius: 12, y: 6
@@ -190,7 +129,7 @@ struct MyJourneyCard: View {
                 LineBadge(line: displayLineNumber, colors: displayLineColors)
                     .fixedSize(horizontal: true, vertical: false)
                     .layoutPriority(2)
-                    .debugJourneyLayoutBox(showLayoutDebug, color: .indigo)
+
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -211,15 +150,15 @@ struct MyJourneyCard: View {
                             .minimumScaleFactor(0.8)
                             .fixedSize(horizontal: true, vertical: false)
 
-                    }.frame(maxWidth: .infinity, alignment: .leading).debugJourneyLayoutBox(showLayoutDebug, color: .mint)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
 
                     Text("\(journey.departureStation.name) → \(journey.arrivalStation.name)").font(
                         .subheadline.weight(.medium)
                     )
                     .lineLimit(1)
                     .scalableText(minimumScale: 0.8)
-                    .debugJourneyLayoutBox(showLayoutDebug, color: .cyan)
-                }.layoutPriority(1).debugJourneyLayoutBox(showLayoutDebug, color: .blue)
+
+                }.layoutPriority(1)
 
                 Spacer()
 
@@ -228,8 +167,8 @@ struct MyJourneyCard: View {
                     onUnpin()
                 } label: {
                     Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
-                }.debugJourneyLayoutBox(showLayoutDebug, color: .pink)
-            }.debugJourneyLayoutBox(showLayoutDebug, color: .green)
+                }
+            }
 
             // Journey timing section
             VStack(spacing: 8) {
@@ -304,7 +243,7 @@ struct MyJourneyCard: View {
                     Spacer(minLength: 0)
                 }
 
-            }.debugJourneyLayoutBox(showLayoutDebug, color: .yellow)
+            }
 
             // Expand/collapse button
             Button {
@@ -314,13 +253,13 @@ struct MyJourneyCard: View {
                     Text(isExpanded ? "Hide route" : "Show route").font(.caption.weight(.medium))
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down").font(.caption)
                 }.foregroundStyle(.secondary)
-            }.debugJourneyLayoutBox(showLayoutDebug, color: .teal)
-        }.padding(16).debugJourneyLayoutBox(showLayoutDebug, color: .purple)
+            }
+        }.padding(16)
     }
 
     private var timelineSection: some View {
         VStack(spacing: 0) {
-            let legs = journey.legs.isEmpty ? [createFallbackLeg()] : journey.legs
+            let legs = displayLegs
 
             ForEach(Array(legs.enumerated()), id: \.element.id) { legIndex, leg in
                 // Show leg with its stops
@@ -347,13 +286,8 @@ struct MyJourneyCard: View {
                             nextLineColors: transition.targetLeg.lineColors,
                             currentPlatform: leg.arrivalPlatform ?? leg.platform,
                             nextPlatform: transition.targetLeg.platform,
-                            destinationPlatform: transition.targetLeg.arrivalPlatform,
                             nextDepartureTime: transition.targetLeg.departureTime,
-                            lineColor: transition.hasUpcomingTransitLeg
-                                ? Color.lineColor(
-                                    for: transition.targetLeg.lineNumber,
-                                    apiColors: transition.targetLeg.lineColors
-                                ) : .gray,
+                            lineColor: transition.targetLeg.displayLineColor,
                             isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
                             involvesWalking: transition.involvesWalking,
                             nextLegIsWalking: transition.nextLegIsWalking,
@@ -375,20 +309,6 @@ struct MyJourneyCard: View {
     }
 }
 
-private extension View {
-    @ViewBuilder
-    func debugJourneyLayoutBox(_ enabled: Bool, color: Color) -> some View {
-        if enabled {
-            self
-                .padding(2)
-                .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.65), lineWidth: 1))
-        } else {
-            self
-        }
-    }
-}
-
 // MARK: - JourneyLegSection
 
 private struct JourneyLegSection: View {
@@ -399,33 +319,21 @@ private struct JourneyLegSection: View {
     let arrivalStation: Station?
     let arrivalPlatformOverride: String?
 
-    @Environment(\.colorScheme) var colorScheme
-
     private var now: Date { Date() }
-    private var legLineColor: Color {
-        leg.isWalking ? .gray : Color.lineColor(for: leg.lineNumber, apiColors: leg.lineColors)
-    }
-    private var hasDeparted: Bool { leg.departureTime.map { now >= $0 } ?? false }
-    private var hasArrived: Bool { leg.arrivalTime.map { now >= $0 } ?? false }
-    private var passedIntermediateStops: [IntermediateStop] {
-        leg.intermediateStops.filter { $0.arrivalTime.map { now >= $0 } ?? false }
-    }
-    private var upcomingIntermediateStops: [IntermediateStop] {
-        leg.intermediateStops.filter { !($0.arrivalTime.map { now >= $0 } ?? false) }
-    }
-    private var visibleIntermediateStops: [IntermediateStop] {
-        guard !leg.isWalking else { return [] }
-        if hasArrived { return [] }
-        if hasDeparted {
-            let maxVisibleUpcomingStops = 3
-            let upcoming = Array(upcomingIntermediateStops.prefix(maxVisibleUpcomingStops))
-            return passedIntermediateStops + upcoming
+    private var legLineColor: Color { leg.displayLineColor }
+    private func intermediateStopsLayout() -> (visible: [IntermediateStop], hiddenUpcomingCount: Int) {
+        let now = self.now
+        if leg.arrivalTime.map({ now >= $0 }) ?? false { return ([], 0) }
+        guard leg.departureTime.map({ now >= $0 }) ?? false else { return (leg.intermediateStops, 0) }
+
+        var passed: [IntermediateStop] = []
+        var upcoming: [IntermediateStop] = []
+        for stop in leg.intermediateStops {
+            if stop.arrivalTime.map({ now >= $0 }) ?? false { passed.append(stop) } else { upcoming.append(stop) }
         }
-        return leg.intermediateStops
-    }
-    private var hiddenUpcomingStopsCount: Int {
-        guard hasDeparted, !hasArrived else { return 0 }
-        return max(0, upcomingIntermediateStops.count - visibleIntermediateStops.count)
+        let maxVisibleUpcomingStops = 3
+        let visible = passed + upcoming.prefix(maxVisibleUpcomingStops)
+        return (visible, max(0, upcoming.count - visible.count))
     }
 
     var body: some View {
@@ -450,7 +358,8 @@ private struct JourneyLegSection: View {
 
             // Intermediate stops
             if !leg.isWalking {
-                ForEach(visibleIntermediateStops) { stop in
+                let stopsLayout = intermediateStopsLayout()
+                ForEach(stopsLayout.visible) { stop in
                     let stopTime = stop.arrivalTime ?? stop.departureTime
                     let stopDelay = stop.arrivalTime != nil ? stop.arrivalDelay : stop.departureDelay
                     JourneyStopRow(
@@ -465,9 +374,9 @@ private struct JourneyLegSection: View {
                     )
                 }
 
-                if hiddenUpcomingStopsCount > 0 {
+                if stopsLayout.hiddenUpcomingCount > 0 {
                     JourneyCollapsedStopsRow(
-                        text: "\(hiddenUpcomingStopsCount) more stops", systemImage: "ellipsis.circle",
+                        text: "\(stopsLayout.hiddenUpcomingCount) more stops", systemImage: "ellipsis.circle",
                         lineColor: legLineColor
                     )
                 }
@@ -575,11 +484,6 @@ private struct JourneyStopRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(style.background, in: RoundedRectangle(cornerRadius: 4))
-                    .overlay {
-                        if let border = style.border {
-                            RoundedRectangle(cornerRadius: 4).stroke(border.opacity(0.7), lineWidth: 1)
-                        }
-                    }
             }
 
             // Stop info
@@ -838,8 +742,7 @@ private extension AnyTransition {
                 ],
                 transfers: 1
             ),
-            onUnpin: {},
-            showLayoutDebug: true
+            onUnpin: {}
         )
         .padding()
     }

@@ -12,12 +12,9 @@ struct CommuteScheduleView: View {
     @State private var showCopySheet: Weekday?
     @State private var showExcludedDatesSheet = false
     @State private var excludedDateSelection: Set<DateComponents> = []
-    @State private var toWorkSuggestions: [Weekday: DaySchedule] = [:]
-    @State private var toHomeSuggestions: [Weekday: DaySchedule] = [:]
-    @State private var toWorkSuggestionLoadingDays: Set<Weekday> = []
-    @State private var toHomeSuggestionLoadingDays: Set<Weekday> = []
-    @State private var toWorkDismissedSuggestionDays: Set<Weekday> = []
-    @State private var toHomeDismissedSuggestionDays: Set<Weekday> = []
+    @State private var suggestions: [CommuteDirection: [Weekday: DaySchedule]] = [:]
+    @State private var suggestionLoadingDays: [CommuteDirection: Set<Weekday>] = [:]
+    @State private var dismissedSuggestionDays: [CommuteDirection: Set<Weekday>] = [:]
     @State private var suggestionLookupTask: Task<Void, Never>?
     @State private var suggestionLookupGeneration = 0
     @State private var weekendActivationPromptDirection: CommuteDirection?
@@ -65,18 +62,6 @@ struct CommuteScheduleView: View {
         if activeDays == Set(Weekday.workweek) { return .workweek }
         if activeDays == Set(Weekday.mondayFirst) { return .allDays }
         return .custom
-    }
-
-    private enum TimingSheet: Identifiable {
-        case travel(Station)
-        case buffer(Station)
-
-        var id: String {
-            switch self {
-            case let .travel(station): "travel-\(station.id)"
-            case let .buffer(station): "buffer-\(station.id)"
-            }
-        }
     }
 
     init(transportType: TransportType = .trainCommute, scrollToTopTrigger: Int = 0) {
@@ -127,15 +112,10 @@ struct CommuteScheduleView: View {
                 }
 
                 RouteHeader(
-                    transportType: viewModel.transportType,
                     startStation: viewModel.currentFromStation,
                     endStation: viewModel.currentToStation,
                     travelTimeToStart: viewModel.config.travelTime(for: viewModel.currentFromStation?.id),
-                    travelTimeToEnd: viewModel.config.travelTime(for: viewModel.currentToStation?.id),
-                    suggestedTravelTimeToStart: nil,
-                    suggestedTravelTimeToEnd: nil,
                     bufferTimeToStart: viewModel.config.bufferTime(for: viewModel.currentFromStation?.id),
-                    bufferTimeToEnd: viewModel.config.bufferTime(for: viewModel.currentToStation?.id),
                     onSwap: {
                         viewModel.selectedDirection = viewModel.selectedDirection == .toWork ? .toHome : .toWork
                     },
@@ -189,7 +169,7 @@ struct CommuteScheduleView: View {
                 }
             }
         }.background {
-            (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
+            Color.screenBackground(colorScheme).ignoresSafeArea(
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).task {
             viewModel.onAppear()
@@ -200,37 +180,25 @@ struct CommuteScheduleView: View {
             .onChange(of: viewModel.selectedDirection) { _, _ in
                 suggestionLookupTask?.cancel()
                 suggestionLookupTask = nil
-                clearAllSuggestionLoading()
-                clearAllDismissedSuggestions()
+                suggestionLoadingDays.removeAll()
+                dismissedSuggestionDays.removeAll()
             }
             .sheet(isPresented: $showFromStationPicker) {
-                StationPickerSheet(
-                    title: "From Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
-                    favoriteStations: viewModel.favoriteStations,
-                    nearbyStations: [],
-                    stationDistances: [:],
-                    searchHandler: { await viewModel.searchStations($0) },
-                    onToggleFavorite: { viewModel.toggleFavorite($0) },
+                stationPicker(
+                    title: "From Station",
                     selection: Binding(
                         get: { viewModel.currentFromStation },
                         set: { viewModel.handleFromStationChange($0) }
                     )
                 )
-                .task { await viewModel.loadStationsIfNeeded() }
             }.sheet(isPresented: $showToStationPicker) {
-                StationPickerSheet(
-                    title: "To Station", stations: viewModel.stations, recentStations: viewModel.recentStations,
-                    favoriteStations: viewModel.favoriteStations,
-                    nearbyStations: [],
-                    stationDistances: [:],
-                    searchHandler: { await viewModel.searchStations($0) },
-                    onToggleFavorite: { viewModel.toggleFavorite($0) },
+                stationPicker(
+                    title: "To Station",
                     selection: Binding(
                         get: { viewModel.currentToStation },
                         set: { viewModel.handleToStationChange($0) }
                     )
                 )
-                .task { await viewModel.loadStationsIfNeeded() }
             }.sheet(item: $selectedDay) { day in
                 if let from = viewModel.currentFromStation, let to = viewModel.currentToStation {
                     DayTrainPicker(
@@ -303,6 +271,17 @@ struct CommuteScheduleView: View {
             .toastOverlay(viewModel.toastManager)
     }
 
+    private func stationPicker(title: String, selection: Binding<Station?>) -> some View {
+        StationPickerSheet(
+            title: title, stations: viewModel.stations, recentStations: viewModel.recentStations,
+            favoriteStations: viewModel.favoriteStations,
+            searchHandler: { await viewModel.searchStations($0) },
+            onToggleFavorite: { viewModel.toggleFavorite($0) },
+            selection: selection
+        )
+        .task { await viewModel.loadStationsIfNeeded() }
+    }
+
     private var commuteDaysControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -368,7 +347,7 @@ struct CommuteScheduleView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12).fill(
-                colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+                Color.cardSurface(colorScheme)
             )
         )
         .overlay(
@@ -391,12 +370,12 @@ struct CommuteScheduleView: View {
 
                 ForEach(Weekday.mondayFirst) { day in
                     let schedule = viewModel.route.schedule(for: day, direction: viewModel.selectedDirection)
-                    let hasSchedule = schedule != nil
                     let isDayActive = viewModel.route.isDayActive(day, direction: viewModel.selectedDirection)
-                    let suggestion = isDayActive ? suggestion(for: day, direction: viewModel.selectedDirection) : nil
+                    let suggestion = isDayActive ? suggestions[viewModel.selectedDirection]?[day] : nil
                     let isSuggestionLoading =
                         isDayActive
-                        && suggestion == nil && suggestionLoading(for: day, direction: viewModel.selectedDirection)
+                        && suggestion == nil
+                        && suggestionLoadingDays[viewModel.selectedDirection]?.contains(day) == true
 
                     DayScheduleRow(
                         day: day,
@@ -404,7 +383,7 @@ struct CommuteScheduleView: View {
                         schedule: schedule,
                         suggestion: suggestion,
                         isSuggestionLoading: isSuggestionLoading,
-                        walkingTime: travelTime, bufferTime: bufferTime, hasNotification: hasSchedule,
+                        walkingTime: travelTime, bufferTime: bufferTime,
                         onTap: { selectedDay = day },
                         onEnableDay: !isDayActive ? {
                             var activeDays = viewModel.route.activeDays(for: viewModel.selectedDirection)
@@ -412,16 +391,12 @@ struct CommuteScheduleView: View {
                             setActiveDays(activeDays, for: viewModel.selectedDirection)
                         } : nil,
                         onClear: { handleScheduleCleared(day: day, direction: viewModel.selectedDirection) },
-                        onCopy: hasSchedule ? { showCopySheet = day } : nil,
-                        onUseSuggestion: suggestion != nil
-                            ? { applySuggestion(for: day, direction: viewModel.selectedDirection) }
-                            : nil,
-                        onChooseDifferentSuggestion: suggestion != nil
-                            ? { chooseDifferentSuggestion(for: day, direction: viewModel.selectedDirection) }
-                            : nil,
-                        onDismissSuggestion: suggestion != nil
-                            ? { dismissSuggestion(for: day, direction: viewModel.selectedDirection) }
-                            : nil
+                        onCopy: { showCopySheet = day },
+                        onUseSuggestion: { applySuggestion(for: day, direction: viewModel.selectedDirection) },
+                        onChooseDifferentSuggestion: {
+                            chooseDifferentSuggestion(for: day, direction: viewModel.selectedDirection)
+                        },
+                        onDismissSuggestion: { dismissSuggestion(for: day, direction: viewModel.selectedDirection) }
                     )
                 }
             }
@@ -448,15 +423,13 @@ struct CommuteScheduleView: View {
         direction: CommuteDirection,
         resetDismissedDays: Bool
     ) {
-        suggestionLookupTask?.cancel()
-        suggestionLookupTask = nil
-        suggestionLookupGeneration += 1
+        cancelSuggestionLookup()
         let lookupGeneration = suggestionLookupGeneration
 
         if resetDismissedDays {
-            clearDismissedSuggestions(for: direction)
+            dismissedSuggestionDays[direction] = []
         }
-        clearSuggestions(for: direction)
+        suggestions[direction] = [:]
 
         let candidates = Weekday.mondayFirst.filter { day in
             viewModel.route.isDayActive(day, direction: direction)
@@ -464,10 +437,10 @@ struct CommuteScheduleView: View {
                 && !isSuggestionDismissed(day, direction: direction)
         }
         guard !candidates.isEmpty else {
-            clearSuggestionLoading(for: direction)
+            suggestionLoadingDays[direction] = []
             return
         }
-        setSuggestionLoading(Set(candidates), for: direction)
+        suggestionLoadingDays[direction] = Set(candidates)
 
         suggestionLookupTask = Task(priority: .utility) {
             for candidateDay in candidates {
@@ -482,23 +455,20 @@ struct CommuteScheduleView: View {
 
                 await MainActor.run {
                     guard suggestionLookupGeneration == lookupGeneration else { return }
-                    removeSuggestionLoading(for: candidateDay, direction: direction)
+                    suggestionLoadingDays[direction]?.remove(candidateDay)
 
                     guard let matchedSchedule else { return }
                     guard viewModel.route.schedule(for: candidateDay, direction: direction) == nil else { return }
                     guard !isSuggestionDismissed(candidateDay, direction: direction) else { return }
 
-                    switch direction {
-                    case .toWork: toWorkSuggestions[candidateDay] = matchedSchedule
-                    case .toHome: toHomeSuggestions[candidateDay] = matchedSchedule
-                    }
+                    suggestions[direction, default: [:]][candidateDay] = matchedSchedule
                 }
             }
 
             if Task.isCancelled { return }
             await MainActor.run {
                 guard suggestionLookupGeneration == lookupGeneration else { return }
-                clearSuggestionLoading(for: direction)
+                suggestionLoadingDays[direction] = []
                 suggestionLookupTask = nil
             }
         }
@@ -507,115 +477,36 @@ struct CommuteScheduleView: View {
     private func handleScheduleCleared(day: Weekday, direction: CommuteDirection) {
         viewModel.clearSchedule(day: day, direction: direction)
         dismissSuggestion(for: day, direction: direction)
+        cancelSuggestionLookup()
+        suggestionLoadingDays[direction] = []
+    }
+
+    /// Bumping the generation makes any in-flight lookup drop its results instead of writing them.
+    private func cancelSuggestionLookup() {
         suggestionLookupTask?.cancel()
         suggestionLookupTask = nil
         suggestionLookupGeneration += 1
-        clearSuggestionLoading(for: direction)
-    }
-
-    private func suggestion(for day: Weekday, direction: CommuteDirection) -> DaySchedule? {
-        switch direction {
-        case .toWork: return toWorkSuggestions[day]
-        case .toHome: return toHomeSuggestions[day]
-        }
-    }
-
-    private func setSuggestions(_ suggestions: [Weekday: DaySchedule], for direction: CommuteDirection) {
-        switch direction {
-        case .toWork: toWorkSuggestions = suggestions
-        case .toHome: toHomeSuggestions = suggestions
-        }
-    }
-
-    private func clearSuggestions(for direction: CommuteDirection) {
-        setSuggestions([:], for: direction)
-    }
-
-    private func suggestionLoading(for day: Weekday, direction: CommuteDirection) -> Bool {
-        switch direction {
-        case .toWork: return toWorkSuggestionLoadingDays.contains(day)
-        case .toHome: return toHomeSuggestionLoadingDays.contains(day)
-        }
-    }
-
-    private func setSuggestionLoading(_ loadingDays: Set<Weekday>, for direction: CommuteDirection) {
-        switch direction {
-        case .toWork: toWorkSuggestionLoadingDays = loadingDays
-        case .toHome: toHomeSuggestionLoadingDays = loadingDays
-        }
-    }
-
-    private func removeSuggestionLoading(for day: Weekday, direction: CommuteDirection) {
-        switch direction {
-        case .toWork: toWorkSuggestionLoadingDays.remove(day)
-        case .toHome: toHomeSuggestionLoadingDays.remove(day)
-        }
-    }
-
-    private func clearSuggestionLoading(for direction: CommuteDirection) {
-        setSuggestionLoading([], for: direction)
-    }
-
-    private func dismissedSuggestionDays(for direction: CommuteDirection) -> Set<Weekday> {
-        switch direction {
-        case .toWork: return toWorkDismissedSuggestionDays
-        case .toHome: return toHomeDismissedSuggestionDays
-        }
     }
 
     private func isSuggestionDismissed(_ day: Weekday, direction: CommuteDirection) -> Bool {
-        dismissedSuggestionDays(for: direction).contains(day)
-    }
-
-    private func setDismissedSuggestionDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
-        switch direction {
-        case .toWork: toWorkDismissedSuggestionDays = days
-        case .toHome: toHomeDismissedSuggestionDays = days
-        }
-    }
-
-    private func markSuggestionDismissed(_ day: Weekday, direction: CommuteDirection) {
-        switch direction {
-        case .toWork: toWorkDismissedSuggestionDays.insert(day)
-        case .toHome: toHomeDismissedSuggestionDays.insert(day)
-        }
-    }
-
-    private func clearDismissedSuggestions(for direction: CommuteDirection) {
-        setDismissedSuggestionDays([], for: direction)
-    }
-
-    private func clearAllDismissedSuggestions() {
-        toWorkDismissedSuggestionDays.removeAll()
-        toHomeDismissedSuggestionDays.removeAll()
-    }
-
-    private func clearAllSuggestionLoading() {
-        toWorkSuggestionLoadingDays.removeAll()
-        toHomeSuggestionLoadingDays.removeAll()
+        dismissedSuggestionDays[direction]?.contains(day) == true
     }
 
     private func resetAllSuggestions() {
-        suggestionLookupTask?.cancel()
-        suggestionLookupTask = nil
-        suggestionLookupGeneration += 1
-        toWorkSuggestions.removeAll()
-        toHomeSuggestions.removeAll()
-        clearAllSuggestionLoading()
-        clearAllDismissedSuggestions()
+        cancelSuggestionLookup()
+        suggestions.removeAll()
+        suggestionLoadingDays.removeAll()
+        dismissedSuggestionDays.removeAll()
     }
 
     private func dismissSuggestion(for day: Weekday, direction: CommuteDirection) {
-        markSuggestionDismissed(day, direction: direction)
-        removeSuggestionLoading(for: day, direction: direction)
-        switch direction {
-        case .toWork: toWorkSuggestions.removeValue(forKey: day)
-        case .toHome: toHomeSuggestions.removeValue(forKey: day)
-        }
+        dismissedSuggestionDays[direction, default: []].insert(day)
+        suggestionLoadingDays[direction]?.remove(day)
+        suggestions[direction]?.removeValue(forKey: day)
     }
 
     private func applySuggestion(for day: Weekday, direction: CommuteDirection) {
-        guard let schedule = suggestion(for: day, direction: direction) else { return }
+        guard let schedule = suggestions[direction]?[day] else { return }
 
         viewModel.route.setSchedule(schedule, for: day, direction: direction)
         viewModel.save()
@@ -667,10 +558,8 @@ struct CommuteScheduleView: View {
     }
 
     private func setActiveDays(_ days: Set<Weekday>, for direction: CommuteDirection) {
-        suggestionLookupTask?.cancel()
-        suggestionLookupTask = nil
-        suggestionLookupGeneration += 1
-        clearSuggestionLoading(for: direction)
+        cancelSuggestionLookup()
+        suggestionLoadingDays[direction] = []
         viewModel.route.setActiveDays(days, for: direction)
         viewModel.save()
         viewModel.rescheduleAllNotifications()
@@ -681,16 +570,9 @@ struct CommuteScheduleView: View {
         let inactiveDays = Set(Weekday.mondayFirst).subtracting(viewModel.route.activeDays(for: direction))
         guard !inactiveDays.isEmpty else { return }
 
-        switch direction {
-        case .toWork:
-            toWorkSuggestions = toWorkSuggestions.filter { !inactiveDays.contains($0.key) }
-            toWorkSuggestionLoadingDays.subtract(inactiveDays)
-            toWorkDismissedSuggestionDays.subtract(inactiveDays)
-        case .toHome:
-            toHomeSuggestions = toHomeSuggestions.filter { !inactiveDays.contains($0.key) }
-            toHomeSuggestionLoadingDays.subtract(inactiveDays)
-            toHomeDismissedSuggestionDays.subtract(inactiveDays)
-        }
+        suggestions[direction] = suggestions[direction]?.filter { !inactiveDays.contains($0.key) }
+        suggestionLoadingDays[direction]?.subtract(inactiveDays)
+        dismissedSuggestionDays[direction]?.subtract(inactiveDays)
     }
 
     private func dateComponentsSet(from dates: [Date]) -> Set<DateComponents> {
@@ -755,33 +637,31 @@ struct DayScheduleRow: View {
     let isSuggestionLoading: Bool
     let walkingTime: Int
     let bufferTime: Int
-    let hasNotification: Bool
     let onTap: () -> Void
     let onEnableDay: (() -> Void)?
     let onClear: () -> Void
-    let onCopy: (() -> Void)?
-    let onUseSuggestion: (() -> Void)?
-    let onChooseDifferentSuggestion: (() -> Void)?
-    let onDismissSuggestion: (() -> Void)?
+    let onCopy: () -> Void
+    let onUseSuggestion: () -> Void
+    let onChooseDifferentSuggestion: () -> Void
+    let onDismissSuggestion: () -> Void
     @State private var animateSuggestionLoading = false
     @Environment(\.colorScheme) var colorScheme
 
     init(
         day: Weekday,
-        isDayActive: Bool = true,
+        isDayActive: Bool,
         schedule: DaySchedule?,
-        suggestion: DaySchedule? = nil,
-        isSuggestionLoading: Bool = false,
+        suggestion: DaySchedule?,
+        isSuggestionLoading: Bool,
         walkingTime: Int,
         bufferTime: Int,
-        hasNotification: Bool,
         onTap: @escaping () -> Void,
-        onEnableDay: (() -> Void)? = nil,
+        onEnableDay: (() -> Void)?,
         onClear: @escaping () -> Void,
-        onCopy: (() -> Void)? = nil,
-        onUseSuggestion: (() -> Void)? = nil,
-        onChooseDifferentSuggestion: (() -> Void)? = nil,
-        onDismissSuggestion: (() -> Void)? = nil
+        onCopy: @escaping () -> Void,
+        onUseSuggestion: @escaping () -> Void,
+        onChooseDifferentSuggestion: @escaping () -> Void,
+        onDismissSuggestion: @escaping () -> Void
     ) {
         self.day = day
         self.isDayActive = isDayActive
@@ -790,7 +670,6 @@ struct DayScheduleRow: View {
         self.isSuggestionLoading = isSuggestionLoading
         self.walkingTime = walkingTime
         self.bufferTime = bufferTime
-        self.hasNotification = hasNotification
         self.onTap = onTap
         self.onEnableDay = onEnableDay
         self.onClear = onClear
@@ -917,20 +796,9 @@ struct DayScheduleRow: View {
     }
 
     private func suggestionPreviewView(_ s: DaySchedule) -> some View {
-        let style = Color.lineBadgeStyle(for: s.lineNumber, apiColors: s.lineColors)
-        return HStack(spacing: 10) {
+        HStack(spacing: 10) {
             HStack(spacing: 8) {
-                Text(s.lineNumber)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(style.foreground)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(style.background, in: Capsule())
-                    .overlay {
-                        if let border = style.border {
-                            Capsule().stroke(border.opacity(0.7), lineWidth: 1)
-                        }
-                    }
+                ScheduleLineBadge(schedule: s, horizontalPadding: 8, verticalPadding: 4)
 
                 Text(s.departureTimeString)
                     .font(.body.weight(.medium))
@@ -955,19 +823,8 @@ struct DayScheduleRow: View {
     }
 
     private func trainLineRow(_ s: DaySchedule) -> some View {
-        let style = Color.lineBadgeStyle(for: s.lineNumber, apiColors: s.lineColors)
-        return HStack(spacing: 8) {
-            Text(s.lineNumber)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(style.foreground)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(style.background, in: Capsule())
-                .overlay {
-                    if let border = style.border {
-                        Capsule().stroke(border.opacity(0.7), lineWidth: 1)
-                    }
-                }
+        HStack(spacing: 8) {
+            ScheduleLineBadge(schedule: s, horizontalPadding: 8, verticalPadding: 4)
 
             Text(s.departureTimeString)
                 .font(.body.weight(.medium))
@@ -998,7 +855,7 @@ struct DayScheduleRow: View {
                 .background(Color.repeatLeaveChip, in: Capsule())
             }
 
-            if hasNotification {
+            if schedule != nil {
                 HStack(spacing: 3) {
                     Image(systemName: "bell.fill").font(.caption2)
                     Text("ON").font(.caption2.weight(.semibold))
@@ -1014,10 +871,8 @@ struct DayScheduleRow: View {
     @ViewBuilder
     private var contextMenuContent: some View {
         if schedule != nil {
-            if let onCopy {
-                Button { Haptics.selection(); onCopy() } label: {
-                    Label("Copy to other days", systemImage: "doc.on.doc")
-                }
+            Button { Haptics.selection(); onCopy() } label: {
+                Label("Copy to other days", systemImage: "doc.on.doc")
             }
             Button { Haptics.selection(); onTap() } label: {
                 Label("Edit", systemImage: "pencil")
@@ -1041,63 +896,65 @@ struct DayScheduleRow: View {
         }
     }
 
-    @ViewBuilder
     private var suggestionActionRow: some View {
         HStack {
             HStack(spacing: 18) {
-                if let onUseSuggestion {
-                    Button {
-                        Haptics.selection()
-                        onUseSuggestion()
-                    }
-                    label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.green)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Accept suggested train")
-                }
-
-                if let onChooseDifferentSuggestion {
-                    Button {
-                        Haptics.selection()
-                        onChooseDifferentSuggestion()
-                    }
-                    label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.orange)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Deny suggestion and choose another train")
-                }
+                suggestionButton(
+                    systemImage: "checkmark.circle.fill", font: .title3.weight(.semibold), style: .green,
+                    accessibilityLabel: "Accept suggested train", action: onUseSuggestion
+                )
+                suggestionButton(
+                    systemImage: "xmark.circle.fill", font: .title3.weight(.semibold), style: .orange,
+                    accessibilityLabel: "Deny suggestion and choose another train",
+                    action: onChooseDifferentSuggestion
+                )
             }
 
             Spacer()
 
-            if let onDismissSuggestion {
-                Button {
-                    Haptics.selection()
-                    onDismissSuggestion()
-                }
-                label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss suggestion")
-            }
+            suggestionButton(
+                systemImage: "minus.circle.fill", font: .title3, style: .secondary,
+                accessibilityLabel: "Dismiss suggestion", action: onDismissSuggestion
+            )
         }
         .padding(.leading, 50)
         .padding(.top, -6)
+    }
+
+    private func suggestionButton<S: ShapeStyle>(
+        systemImage: String, font: Font, style: S, accessibilityLabel: String, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Haptics.selection()
+            action()
+        }
+        label: {
+            Image(systemName: systemImage)
+                .font(font)
+                .foregroundStyle(style)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+// MARK: - ScheduleLineBadge
+
+private struct ScheduleLineBadge: View {
+    let schedule: DaySchedule
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+
+    var body: some View {
+        let style = Color.lineBadgeStyle(for: schedule.lineNumber, apiColors: schedule.lineColors)
+        Text(schedule.lineNumber)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(style.foreground)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .background(style.background, in: Capsule())
     }
 }
 
@@ -1188,19 +1045,8 @@ struct CopyScheduleSheet: View {
                     Text("Copy \(sourceDay.fullName)'s Schedule").font(.title3.weight(.semibold))
 
                     if let schedule = sourceSchedule {
-                        let style = Color.lineBadgeStyle(for: schedule.lineNumber, apiColors: schedule.lineColors)
                         HStack(spacing: 8) {
-                            Text(schedule.lineNumber)
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(style.foreground)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(style.background, in: Capsule())
-                                .overlay {
-                                    if let border = style.border {
-                                        Capsule().stroke(border.opacity(0.7), lineWidth: 1)
-                                    }
-                                }
+                            ScheduleLineBadge(schedule: schedule, horizontalPadding: 10, verticalPadding: 5)
 
                             Text(schedule.departureTimeString).font(.body.weight(.medium))
                         }.padding(.horizontal, 16).padding(.vertical, 10).background(
@@ -1208,7 +1054,7 @@ struct CopyScheduleSheet: View {
                                 colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6)))
                     }
                 }.padding(.vertical, 20).padding(.horizontal, 20).background(
-                    colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground))
+                    Color.screenBackground(colorScheme))
 
                 List {
                     Section {
@@ -1304,6 +1150,12 @@ struct DayTrainPicker: View {
     /// search runs against the next occurrence of `day`, not against today.
     private var serviceDay: Date { day.nextOccurrence() }
 
+    private var serviceDayWindow: DateInterval {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: serviceDay)
+        return DateInterval(start: dayStart, end: calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+    }
+
     init(
         day: Weekday, from: Station, to: Station, direction: CommuteDirection,
         transportType: TransportType = .trainCommute,
@@ -1366,8 +1218,9 @@ struct DayTrainPicker: View {
         isLoading = true
 
         let calendar = Calendar.current
-        let dayStart = calendar.startOfDay(for: serviceDay)
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let window = serviceDayWindow
+        let dayStart = window.start
+        let dayEnd = window.end
 
         // Seed before the first useful departure rather than at midnight. A
         // midnight-anchored search spends its whole first response on night trains —
@@ -1403,13 +1256,15 @@ struct DayTrainPicker: View {
         preselectExisting()
     }
 
-    /// Merges a page into the list without disturbing what is already on screen.
-    private func appendPage(_ page: [TrainConnection]) {
+    /// Merges a page into the list without disturbing what is already on screen, and says whether it added any.
+    @discardableResult
+    private func appendPage(_ page: [TrainConnection]) -> Bool {
         let existingIds = Set(connections.map(\.id))
         let additions = page.filter { !existingIds.contains($0.id) }
-        guard !additions.isEmpty else { return }
+        guard !additions.isEmpty else { return false }
         connections.append(contentsOf: additions)
         connections.sort { $0.departureTime < $1.departureTime }
+        return true
     }
 
     /// Roughly two pages' worth. The provider caps a response at six or seven trips, so
@@ -1419,9 +1274,9 @@ struct DayTrainPicker: View {
 
     private func loadMore(remainingHops: Int = FetchLimits.maxCoveragePages) {
         guard remainingHops > 0, hasMore, !isLoadingMore, let last = connections.last else { return }
-        let calendar = Calendar.current
-        let dayStart = calendar.startOfDay(for: serviceDay)
-        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let window = serviceDayWindow
+        let dayStart = window.start
+        let dayEnd = window.end
         guard forwardCursor != nil, last.departureTime < dayEnd else {
             hasMore = false
             return
@@ -1450,14 +1305,9 @@ struct DayTrainPicker: View {
             let nextCursor = page.forwardCursor
             forwardCursor = (nextCursor != nil && nextCursor != cursor) ? nextCursor : nil
 
-            let existingIds = Set(connections.map(\.id))
-            let newConns = page.connections.filter { new in
-                !existingIds.contains(new.id)
-                    && new.departureTime >= dayStart
-                    && new.departureTime < dayEnd
-            }
-            connections.append(contentsOf: newConns)
-            connections.sort { $0.departureTime < $1.departureTime }
+            let addedConnections = appendPage(
+                page.connections.filter { $0.departureTime >= dayStart && $0.departureTime < dayEnd }
+            )
 
             // A page whose results were all filtered out leaves `connections.last`
             // unchanged, so the list's onAppear trigger never fires again. Keep paging
@@ -1465,7 +1315,7 @@ struct DayTrainPicker: View {
             let exhaustedDay = page.connections.contains { $0.departureTime >= dayEnd }
             hasMore = forwardCursor != nil && !exhaustedDay
             isLoadingMore = false
-            if hasMore, newConns.isEmpty { loadMore(remainingHops: remainingHops - 1) }
+            if hasMore, !addedConnections { loadMore(remainingHops: remainingHops - 1) }
         }
     }
 
@@ -1552,11 +1402,6 @@ struct TrainSelectionRow: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(style.background, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    if let border = style.border {
-                        RoundedRectangle(cornerRadius: 8).stroke(border.opacity(0.7), lineWidth: 1)
-                    }
-                }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(connection.departureTime, style: .time).font(.title3.weight(.medium))

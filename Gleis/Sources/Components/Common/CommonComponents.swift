@@ -39,6 +39,61 @@ extension Color {
     static func urgencyRedFallback(_ colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? Color(red: 1.0, green: 0.3, blue: 0.3) : .red
     }
+
+    /// Full-screen background behind a tab or sheet.
+    static func screenBackground(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)
+    }
+
+    /// Fill for a card sitting on the screen background.
+    static func cardSurface(_ colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+    }
+}
+
+extension ConnectionLeg {
+    /// Gray for a walking leg, otherwise the line's own colour.
+    var displayLineColor: Color { isWalking ? .gray : Color.lineColor(for: lineNumber, apiColors: lineColors) }
+}
+
+// MARK: - Display Helpers
+
+extension Optional where Wrapped == String {
+    /// The trimmed string, or nil when nothing is left after trimming.
+    var trimmedNonEmpty: String? {
+        guard let trimmed = self?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+}
+
+/// The timetable time behind a delayed time, or nil when there is no delay to strike through.
+func scheduledTimeIfDelayed(from time: Date?, delayMinutes: Int?) -> Date? {
+    guard let delayMinutes, delayMinutes > 0 else { return nil }
+    return ConnectionTransferPlanner.plannedTime(from: time, delayMinutes: delayMinutes)
+}
+
+/// A headline time that shows the struck-through timetable time beside it, in orange, when delayed.
+struct DelayedTimeText: View {
+    let time: Date
+    let delayMinutes: Int
+    var weight: Font.Weight? = nil
+
+    var body: some View {
+        if let scheduled = scheduledTimeIfDelayed(from: time, delayMinutes: delayMinutes) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(scheduled, style: .time)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .strikethrough()
+                Text(time, style: .time)
+                    .font(.headline.monospacedDigit())
+                    .fontWeight(weight ?? .semibold)
+                    .foregroundStyle(.orange)
+            }
+        } else {
+            Text(time, style: .time).font(.headline.monospacedDigit()).fontWeight(weight ?? .semibold)
+        }
+    }
 }
 
 // MARK: - TabItem
@@ -163,7 +218,6 @@ struct SkeletonBox: View {
 struct ConnectionsLoadingView: View {
     /// When the wait began. Owned by the caller so it survives the parent's re-renders.
     let startedAt: Date
-    var skeletonCount: Int = 3
 
     private static let slowThreshold: TimeInterval = 5
     private static let verySlowThreshold: TimeInterval = 12
@@ -194,7 +248,7 @@ struct ConnectionsLoadingView: View {
                 .accessibilityLabel(text)
             }
 
-            SkeletonLoadingView(count: skeletonCount)
+            SkeletonLoadingView(count: 3)
         }
     }
 }
@@ -265,7 +319,7 @@ struct SkeletonConnectionCard: View {
     }
 
     private var skeletonBackgroundColor: Color {
-        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemBackground)
+        Color.cardSurface(colorScheme)
     }
 
     private var skeletonBorder: some View {
@@ -323,89 +377,6 @@ struct OfflineBanner: View {
         }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 10).background(
             Color.orange, in: RoundedRectangle(cornerRadius: 10)
         )
-    }
-}
-
-// MARK: - CachedDataBanner
-
-struct CachedDataBanner: View {
-    let lastUpdated: Date?
-
-    private var timeAgoText: String {
-        guard let lastUpdated else { return "" }
-        let minutes = Int(Date().timeIntervalSince(lastUpdated) / 60)
-        if minutes < 1 { return "just now" }
-        if minutes < 60 { return "\(minutes)m ago" }
-        let hours = minutes / 60
-        return hours < 24 ? "\(hours)h ago" : "over a day ago"
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath").font(.subheadline.weight(.semibold))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Showing cached data").font(.subheadline.weight(.medium))
-                if lastUpdated != nil { Text("Updated \(timeAgoText)").font(.caption).opacity(0.9) }
-            }
-            Spacer()
-            Text("Pull to refresh").font(.caption).opacity(0.8)
-        }.foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 10).background(
-            Color.blue.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)
-        )
-    }
-}
-
-// MARK: - ServiceDegradedBanner
-
-struct ServiceDegradedBanner: View {
-    let retryAt: Date?
-    let lastUpdated: Date?
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            let retry = retryDescription(at: timeline.date)
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.subheadline.weight(.semibold))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Live data delayed").font(.subheadline.weight(.semibold))
-                    Text("Showing cached departures").font(.caption).opacity(0.95)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 2) {
-                    if let retry {
-                        Text(retry).font(.caption.weight(.semibold))
-                    }
-                    if let lastUpdated {
-                        Text("Updated \(lastUpdated, style: .relative)").font(.caption2).opacity(0.9)
-                    }
-                }
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color.red.opacity(0.88), in: RoundedRectangle(cornerRadius: 10))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Live data delayed. Showing cached departures.")
-            .accessibilityValue(accessibilityValue(at: timeline.date))
-        }
-    }
-
-    private func retryDescription(at now: Date) -> String? {
-        guard let retryAt else { return nil }
-        let remaining = Int(retryAt.timeIntervalSince(now))
-        if remaining <= 0 { return "Retrying now" }
-        let minutes = remaining / 60
-        let seconds = remaining % 60
-        let secondText = seconds < 10 ? "0\(seconds)" : "\(seconds)"
-        return "Retry in \(minutes):\(secondText)"
-    }
-
-    private func accessibilityValue(at now: Date) -> String {
-        let retryText = retryDescription(at: now) ?? "Retry time unavailable"
-        if let lastUpdated {
-            return "\(retryText). Last updated \(RelativeDateTimeFormatter().localizedString(for: lastUpdated, relativeTo: now))."
-        }
-        return retryText
     }
 }
 
@@ -503,73 +474,24 @@ struct ErrorView: View {
 // MARK: - RouteHeader
 
 struct RouteHeader: View {
-    let transportType: TransportType
     let startStation: Station?
     let endStation: Station?
     let travelTimeToStart: Int?
-    let travelTimeToEnd: Int?
-    let suggestedTravelTimeToStart: Int?
-    let suggestedTravelTimeToEnd: Int?
     let bufferTimeToStart: Int?
-    let bufferTimeToEnd: Int?
     let onSwap: () -> Void
     let onStartTap: () -> Void
     let onEndTap: () -> Void
     let onSetTravelTime: (Station) -> Void
     let onSetBufferTime: (Station) -> Void
-    let swapIcon: String
-    let swapRotationStep: Double
-    let swapAnimation: Animation
-    let showsTimingControls: Bool
-    let swapAccessibilityLabel: String
-    let swapAccessibilityValue: String?
+    var swapIcon = "arrow.left.arrow.right"
+    var showsTimingControls = true
+    var swapAccessibilityLabel = "Swap stations"
+    var swapAccessibilityValue: String? = nil
+    private let swapRotationStep: Double = 180
+    private let swapAnimation: Animation = .spring(response: 0.3)
     @Environment(\.colorScheme) var colorScheme
     @State private var swapRotation: Double = 0
     @State private var pulseHint = false
-
-    init(
-        transportType: TransportType,
-        startStation: Station?,
-        endStation: Station?,
-        travelTimeToStart: Int?,
-        travelTimeToEnd: Int?,
-        suggestedTravelTimeToStart: Int?,
-        suggestedTravelTimeToEnd: Int?,
-        bufferTimeToStart: Int?,
-        bufferTimeToEnd: Int?,
-        onSwap: @escaping () -> Void,
-        onStartTap: @escaping () -> Void,
-        onEndTap: @escaping () -> Void,
-        onSetTravelTime: @escaping (Station) -> Void,
-        onSetBufferTime: @escaping (Station) -> Void,
-        swapIcon: String = "arrow.left.arrow.right",
-        swapRotationStep: Double = 180,
-        swapAnimation: Animation = .spring(response: 0.3),
-        showsTimingControls: Bool = true,
-        swapAccessibilityLabel: String = "Swap stations",
-        swapAccessibilityValue: String? = nil
-    ) {
-        self.transportType = transportType
-        self.startStation = startStation
-        self.endStation = endStation
-        self.travelTimeToStart = travelTimeToStart
-        self.travelTimeToEnd = travelTimeToEnd
-        self.suggestedTravelTimeToStart = suggestedTravelTimeToStart
-        self.suggestedTravelTimeToEnd = suggestedTravelTimeToEnd
-        self.bufferTimeToStart = bufferTimeToStart
-        self.bufferTimeToEnd = bufferTimeToEnd
-        self.onSwap = onSwap
-        self.onStartTap = onStartTap
-        self.onEndTap = onEndTap
-        self.onSetTravelTime = onSetTravelTime
-        self.onSetBufferTime = onSetBufferTime
-        self.swapIcon = swapIcon
-        self.swapRotationStep = swapRotationStep
-        self.swapAnimation = swapAnimation
-        self.showsTimingControls = showsTimingControls
-        self.swapAccessibilityLabel = swapAccessibilityLabel
-        self.swapAccessibilityValue = swapAccessibilityValue
-    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -597,8 +519,6 @@ struct RouteHeader: View {
                             Label("\(time) min", systemImage: "figure.walk").font(.caption).foregroundStyle(.blue)
                         }
                         .buttonStyle(.plain)
-                    } else if let suggested = suggestedTravelTimeToStart {
-                        suggestedTravelTimeHintButton(for: station, suggested: suggested)
                     } else {
                         travelTimeHintButton(for: station)
                     }
@@ -652,18 +572,6 @@ struct RouteHeader: View {
         } label: {
             Label("Set travel time", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
                 pulseHint ? 0.6 : 1)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func suggestedTravelTimeHintButton(for station: Station, suggested: Int) -> some View {
-        Button {
-            onSetTravelTime(station)
-        } label: {
-            Label("Suggested \(suggested) min", systemImage: "sparkles")
-                .font(.caption)
-                .foregroundStyle(.blue)
-                .opacity(pulseHint ? 0.7 : 1)
         }
         .buttonStyle(.plain)
     }
@@ -797,11 +705,6 @@ struct TrainTypeFilterBar: View {
                                 in: Capsule()
                             )
                             .foregroundStyle(isEnabled ? style.foreground : .secondary)
-                            .overlay {
-                                if isEnabled, let border = style.border {
-                                    Capsule().stroke(border.opacity(0.7), lineWidth: 1)
-                                }
-                            }
                     }.buttonStyle(.plain)
                 }
             }
@@ -822,36 +725,40 @@ struct EndOfListFooter: View {
     }
 }
 
+// MARK: - TimingSheet
+
+/// Which timing sheet a RouteHeader tap opened, and for which station.
+enum TimingSheet: Identifiable {
+    case travel(Station)
+    case buffer(Station)
+
+    var id: String {
+        switch self {
+        case let .travel(station): "travel-\(station.id)"
+        case let .buffer(station): "buffer-\(station.id)"
+        }
+    }
+}
+
 // MARK: - TravelTimeSheet
 
 struct TravelTimeSheet: View {
     let station: Station
     let currentValue: Int?
-    let suggestedValue: Int?
     let onSave: (Int?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var minutes: Int = 10
 
-    init(station: Station, currentValue: Int? = nil, suggestedValue: Int? = nil, onSave: @escaping (Int?) -> Void) {
+    init(station: Station, currentValue: Int? = nil, onSave: @escaping (Int?) -> Void) {
         self.station = station
         self.currentValue = currentValue
-        self.suggestedValue = suggestedValue
         self.onSave = onSave
-        _minutes = State(initialValue: currentValue ?? suggestedValue ?? 10)
+        _minutes = State(initialValue: currentValue ?? 10)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                if let suggestedValue {
-                    Section("Suggested") {
-                        HStack {
-                            Label("\(suggestedValue) min from current location", systemImage: "sparkles")
-                            Spacer()
-                            Button("Use") { minutes = suggestedValue }
-                        }
-                    }
-                }
                 Section {
                     Stepper(value: $minutes, in: 1 ... 60) {
                         HStack {
@@ -873,7 +780,7 @@ struct TravelTimeSheet: View {
                     }
                 }
             }
-        }.presentationDetents([suggestedValue == nil ? .height(220) : .height(280)])
+        }.presentationDetents([.height(220)])
     }
 }
 

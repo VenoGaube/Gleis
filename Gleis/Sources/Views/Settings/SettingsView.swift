@@ -38,7 +38,7 @@ struct SettingsView: View {
                 }
             }
         }.background {
-            (colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)).ignoresSafeArea(
+            Color.screenBackground(colorScheme).ignoresSafeArea(
                 edges: .all)
         }.navigationBarTitleDisplayMode(.inline).toolbar(.hidden, for: .navigationBar).onAppear {
             checkNotificationStatus()
@@ -175,8 +175,8 @@ struct SettingsView: View {
         Section {
             if let data = AppGroupStorage.loadPrimaryWidgetData(for: .trainCommute) {
                 widgetDebugRow(title: "State", value: data.state.rawValue)
-                widgetDebugRow(title: "Generated", value: debugDateTime(data.generatedAt))
-                widgetDebugRow(title: "Coverage End", value: debugDateTime(data.coverageEnd))
+                widgetDebugRow(title: "Generated", value: Self.debugDateFormatter.string(from: data.generatedAt))
+                widgetDebugRow(title: "Coverage End", value: Self.debugDateFormatter.string(from: data.coverageEnd))
                 widgetDebugRow(title: "Route", value: data.routeSignature)
                 widgetDebugRow(title: "Signature", value: String(data.snapshotSignature.prefix(44)))
                 widgetDebugRow(title: "Connections", value: "\(data.connections.count)")
@@ -202,12 +202,12 @@ struct SettingsView: View {
         .font(.caption)
     }
 
-    private func debugDateTime(_ date: Date) -> String {
+    private static let debugDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .medium
-        return formatter.string(from: date)
-    }
+        return formatter
+    }()
     #endif
 
     private var remindersSection: some View {

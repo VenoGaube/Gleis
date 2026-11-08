@@ -4,7 +4,6 @@ import SwiftUI
 
 struct ConnectionDetailSheet: View {
     let connection: TrainConnection
-    let onRefresh: (() async -> Void)?
     private let transportService: TransportService
     @Environment(\.dismiss) private var dismiss
     @State private var resolvedConnection: TrainConnection
@@ -12,11 +11,10 @@ struct ConnectionDetailSheet: View {
     @State private var hasLoadedDetails = false
 
     init(
-        connection: TrainConnection, onRefresh: (() async -> Void)? = nil,
+        connection: TrainConnection,
         transportService: TransportService = .shared
     ) {
         self.connection = connection
-        self.onRefresh = onRefresh
         self.transportService = transportService
         _resolvedConnection = State(initialValue: connection)
     }
@@ -31,7 +29,7 @@ struct ConnectionDetailSheet: View {
                 }
                 .padding()
             }
-            .refreshable { await refreshContent() }
+            .refreshable { await loadConnectionDetailsIfNeeded(force: true) }
             .navigationTitle("Connection Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
@@ -67,19 +65,7 @@ struct ConnectionDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Depart").font(.caption2).foregroundStyle(.secondary)
-                    if let scheduledDepartureTime {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(scheduledDepartureTime, style: .time)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .strikethrough()
-                            Text(resolvedConnection.departureTime, style: .time)
-                                .font(.headline.monospacedDigit())
-                                .foregroundStyle(.orange)
-                        }
-                    } else {
-                        Text(resolvedConnection.departureTime, style: .time).font(.headline.monospacedDigit())
-                    }
+                    DelayedTimeText(time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay)
                     if let platform = summaryDeparturePlatform {
                         Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -87,19 +73,7 @@ struct ConnectionDetailSheet: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("Arrive").font(.caption2).foregroundStyle(.secondary)
-                    if let scheduledArrivalTime {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(scheduledArrivalTime, style: .time)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .strikethrough()
-                            Text(resolvedConnection.arrivalTime, style: .time)
-                                .font(.headline.monospacedDigit())
-                                .foregroundStyle(.orange)
-                        }
-                    } else {
-                        Text(resolvedConnection.arrivalTime, style: .time).font(.headline.monospacedDigit())
-                    }
+                    DelayedTimeText(time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay)
                     if let platform = summaryArrivalPlatform {
                         Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
                     }
@@ -155,11 +129,10 @@ struct ConnectionDetailSheet: View {
                             transferMinutes: ConnectionTransferPlanner.transferMinutes(from: leg, to: transition.targetLeg),
                             nextLineNumber: transition.targetLeg.lineNumber,
                             nextLineColors: transition.targetLeg.lineColors,
-                            currentPlatform: normalizedPlatform(leg.arrivalPlatform) ?? normalizedPlatform(leg.platform),
-                            nextPlatform: normalizedPlatform(transition.targetLeg.platform),
-                            destinationPlatform: normalizedPlatform(transition.targetLeg.arrivalPlatform),
+                            currentPlatform: leg.arrivalPlatform.trimmedNonEmpty ?? leg.platform.trimmedNonEmpty,
+                            nextPlatform: transition.targetLeg.platform.trimmedNonEmpty,
                             nextDepartureTime: transition.targetLeg.departureTime,
-                            lineColor: transition.hasUpcomingTransitLeg ? legLineColor(transition.targetLeg) : .gray,
+                            lineColor: transition.targetLeg.displayLineColor,
                             isPassed: leg.arrivalTime.map { Date() >= $0 } ?? false,
                             involvesWalking: transition.involvesWalking,
                             nextLegIsWalking: transition.nextLegIsWalking,
@@ -184,12 +157,6 @@ struct ConnectionDetailSheet: View {
             ]
         }
         return resolvedConnection.legs
-    }
-
-    @MainActor
-    private func refreshContent() async {
-        await onRefresh?()
-        await loadConnectionDetailsIfNeeded(force: true)
     }
 
     @MainActor
@@ -221,41 +188,23 @@ struct ConnectionDetailSheet: View {
     }
 
     private var firstTravelLeg: ConnectionLeg? {
-        displayLegs.first { !$0.isWalking } ?? displayLegs.first
+        let legs = displayLegs
+        return legs.first { !$0.isWalking } ?? legs.first
     }
 
     private var lastTravelLeg: ConnectionLeg? {
-        displayLegs.last { !$0.isWalking } ?? displayLegs.last
+        let legs = displayLegs
+        return legs.last { !$0.isWalking } ?? legs.last
     }
 
     private var summaryDeparturePlatform: String? {
-        normalizedPlatform(firstTravelLeg?.platform) ?? normalizedPlatform(resolvedConnection.platform)
+        firstTravelLeg?.platform.trimmedNonEmpty ?? resolvedConnection.platform.trimmedNonEmpty
     }
 
     private var summaryArrivalPlatform: String? {
-        normalizedPlatform(lastTravelLeg?.arrivalPlatform)
+        lastTravelLeg?.arrivalPlatform.trimmedNonEmpty
     }
 
-    private var scheduledDepartureTime: Date? {
-        guard resolvedConnection.delay > 0 else { return nil }
-        return resolvedConnection.departureTime.addingTimeInterval(TimeInterval(-resolvedConnection.delay * 60))
-    }
-
-    private var scheduledArrivalTime: Date? {
-        guard resolvedConnection.delay > 0 else { return nil }
-        return resolvedConnection.arrivalTime.addingTimeInterval(TimeInterval(-resolvedConnection.delay * 60))
-    }
-
-    private func normalizedPlatform(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
-
-    private func legLineColor(_ leg: ConnectionLeg) -> Color {
-        guard !leg.isWalking else { return .gray }
-        return Color.lineColor(for: leg.lineNumber, apiColors: leg.lineColors)
-    }
 }
 
 // MARK: - ConnectionLegRow
@@ -277,17 +226,14 @@ struct ConnectionLegRow: View {
         let showChangedBadge: Bool
     }
 
-    private var railColor: Color {
-        guard !leg.isWalking else { return .gray }
-        return Color.lineColor(for: leg.lineNumber, apiColors: leg.lineColors)
-    }
+    private var railColor: Color { leg.displayLineColor }
 
     private var departurePlatform: String? {
-        normalizedPlatform(leg.platform)
+        leg.platform.trimmedNonEmpty
     }
 
     private var arrivalPlatform: String? {
-        normalizedPlatform(leg.arrivalPlatform)
+        leg.arrivalPlatform.trimmedNonEmpty
     }
 
     private var stopEntries: [LegStopEntry] {
@@ -296,7 +242,7 @@ struct ConnectionLegRow: View {
                 id: "\(leg.id)-dep",
                 name: leg.from.name,
                 time: leg.departureTime,
-                scheduledTime: scheduledTime(
+                scheduledTime: scheduledTimeIfDelayed(
                     from: leg.departureTime,
                     delayMinutes: leg.departureDelayMinutes ?? leg.delayMinutes
                 ),
@@ -315,7 +261,7 @@ struct ConnectionLegRow: View {
                     id: $0.id,
                     name: $0.name,
                     time: displayTime,
-                    scheduledTime: scheduledTime(from: displayTime, delayMinutes: displayDelay),
+                    scheduledTime: scheduledTimeIfDelayed(from: displayTime, delayMinutes: displayDelay),
                     delayMinutes: displayDelay,
                     platform: nil,
                     isEndpoint: false,
@@ -329,7 +275,7 @@ struct ConnectionLegRow: View {
                 id: "\(leg.id)-arr",
                 name: leg.to.name,
                 time: leg.arrivalTime,
-                scheduledTime: scheduledTime(
+                scheduledTime: scheduledTimeIfDelayed(
                     from: leg.arrivalTime,
                     delayMinutes: leg.arrivalDelayMinutes ?? leg.delayMinutes
                 ),
@@ -344,17 +290,6 @@ struct ConnectionLegRow: View {
     }
 
     private var now: Date { Date() }
-
-    private func scheduledTime(from time: Date?, delayMinutes: Int?) -> Date? {
-        guard let time, let delayMinutes, delayMinutes > 0 else { return nil }
-        return time.addingTimeInterval(TimeInterval(-delayMinutes * 60))
-    }
-
-    private func normalizedPlatform(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
 
     private var walkingDurationMinutes: Int? {
         ConnectionTransferPlanner.walkingDurationMinutes(for: leg)
@@ -403,16 +338,16 @@ struct ConnectionLegRow: View {
     }
 
     private var fullLegBody: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(stopEntries.enumerated()), id: \.element.id) { index, stop in
-                stopRow(stop: stop, index: index)
+        let entries = stopEntries
+        return VStack(spacing: 0) {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, stop in
+                stopRow(stop: stop, index: index, isLast: index == entries.count - 1)
             }
         }
     }
 
-    private func stopRow(stop: LegStopEntry, index: Int) -> some View {
+    private func stopRow(stop: LegStopEntry, index: Int, isLast: Bool) -> some View {
         let isFirst = index == 0
-        let isLast = index == stopEntries.count - 1
         let isPassed = stop.time.map { now >= $0 } ?? false
         let connectorColor = isPassed ? railColor : railColor.opacity(0.35)
         let nodeFillColor = isPassed ? railColor : (colorScheme == .dark ? railColor.opacity(0.4) : railColor.opacity(0.22))
@@ -442,11 +377,6 @@ struct ConnectionLegRow: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(style.background, in: RoundedRectangle(cornerRadius: 5))
-                    .overlay {
-                        if let border = style.border {
-                            RoundedRectangle(cornerRadius: 5).stroke(border.opacity(0.7), lineWidth: 1)
-                        }
-                    }
             }
 
             VStack(alignment: .leading, spacing: 1) {
@@ -507,7 +437,6 @@ struct TransferRow: View {
     let nextLineColors: TrainLineColors?
     let currentPlatform: String?
     let nextPlatform: String?
-    let destinationPlatform: String?
     let nextDepartureTime: Date?
     let lineColor: Color
     let isPassed: Bool
@@ -577,15 +506,11 @@ struct TransferRow: View {
 
     private var urgency: TransferUrgency {
         if involvesWalking && !hasUpcomingTransitLeg { return .walking }
-        guard let effectiveTransferMinutes else { return .unknown }
-        let effectiveTransfer = effectiveTransferMinutes
-        if effectiveTransfer <= 0 { return .missed }
-        if effectiveTransfer < 5 { return .critical }
-        if effectiveTransfer <= 8 { return .tight }
+        guard let transferMinutes else { return .unknown }
+        if transferMinutes <= 0 { return .missed }
+        if transferMinutes < 5 { return .critical }
+        if transferMinutes <= 8 { return .tight }
         return .comfortable
-    }
-    private var effectiveTransferMinutes: Int? {
-        transferMinutes
     }
     private var indicatorColor: Color { urgency.color }
     private var transferIconName: String { urgency.icon }
@@ -603,8 +528,8 @@ struct TransferRow: View {
     }
     private var riskBadgeText: String? {
         if urgency == .missed { return "Missed" }
-        guard let effectiveTransferMinutes else { return nil }
-        return "\(effectiveTransferMinutes) min"
+        guard let transferMinutes else { return nil }
+        return "\(transferMinutes) min"
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }
@@ -613,16 +538,8 @@ struct TransferRow: View {
         default: return .primary
         }
     }
-    private var normalizedCurrentPlatform: String? {
-        let trimmed = currentPlatform?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
-    private var normalizedNextPlatform: String? {
-        let trimmed = nextPlatform?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
+    private var normalizedCurrentPlatform: String? { currentPlatform.trimmedNonEmpty }
+    private var normalizedNextPlatform: String? { nextPlatform.trimmedNonEmpty }
     private var platformChangeText: String? {
         guard let from = normalizedCurrentPlatform, let to = normalizedNextPlatform, from != to else { return nil }
         return "Platform \(from) -> \(to)"
@@ -773,19 +690,6 @@ struct TransferRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 10).fill(indicatorColor.opacity(colorScheme == .dark ? 0.18 : 0.1))
             )
-        }
-    }
-}
-
-// MARK: - TimeText
-
-struct TimeText: View {
-    let date: Date?
-    var body: some View {
-        if let date {
-            Text(date, style: .time).font(.subheadline.monospacedDigit())
-        } else {
-            Text("--").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
         }
     }
 }

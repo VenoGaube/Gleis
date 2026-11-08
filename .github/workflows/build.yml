@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app and widget for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Gleis.xcodeproj \
+            -scheme Gleis \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee xcodebuild.log | grep -E 'error:|warning:|BUILD (SUCCEEDED|FAILED)' || true
+          grep -q 'BUILD SUCCEEDED' xcodebuild.log
+
+      - name: Launch in a simulator and take screenshots
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))][0].udid')
+          app=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          mkdir -p screenshots
+          for appearance in light dark; do
+            xcrun simctl ui "$udid" appearance "$appearance"
+            xcrun simctl terminate "$udid" "$bundle_id" || true
+            xcrun simctl launch "$udid" "$bundle_id"
+            sleep 15
+            xcrun simctl io "$udid" screenshot "screenshots/launch-$appearance.png"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-${{ github.sha }}
+          path: |
+            xcodebuild.log
+            screenshots/

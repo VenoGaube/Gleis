@@ -37,7 +37,7 @@ struct TicketWalletView: View {
     }
 
     private var backgroundColor: Color {
-        colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)
+        Color.screenBackground(colorScheme)
     }
 
     private var headerStats: some View {
@@ -362,7 +362,7 @@ struct TicketDetailView: View {
     }
 
     private var detailBackgroundColor: Color {
-        colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)
+        Color.screenBackground(colorScheme)
     }
 
     private var cardPreviewSection: some View {
@@ -523,7 +523,9 @@ struct CardFaceView: View {
 // MARK: - FullscreenTicketView
 
 struct FullscreenTicketView: View {
-    let ticket: TicketCard
+    // Decoded once here so pinch and drag frames do not decode the photo again.
+    private let frontImage: UIImage?
+    private let backImage: UIImage?
     @Binding var isFlipped: Bool
     var brightness: CGFloat
     @Environment(\.dismiss) private var dismiss
@@ -532,14 +534,19 @@ struct FullscreenTicketView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
+    init(ticket: TicketCard, isFlipped: Binding<Bool>, brightness: CGFloat) {
+        frontImage = ticket.frontImageData.flatMap(UIImage.init(data:))
+        backImage = ticket.backImageData.flatMap(UIImage.init(data:))
+        _isFlipped = isFlipped
+        self.brightness = brightness
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color.black.ignoresSafeArea()
                 Group {
-                    if let data = (isFlipped ? ticket.backImageData : ticket.frontImageData),
-                       let uiImage = UIImage(data: data)
-                    {
+                    if let uiImage = isFlipped ? backImage : frontImage {
                         Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fit)
                     } else {
                         Rectangle().fill(Color.gray.opacity(0.3)).aspectRatio(1.586, contentMode: .fit).overlay {
@@ -652,7 +659,7 @@ struct TicketScannerView: View {
     // MARK: - Extracted Views
 
     private var backgroundStyle: Color {
-        colorScheme == .dark ? Color(.systemBackground) : Color(.systemGroupedBackground)
+        Color.screenBackground(colorScheme)
     }
 
     @ToolbarContentBuilder
@@ -673,9 +680,15 @@ struct TicketScannerView: View {
             VStack(spacing: 28) {
                 warningBanner
                 ticketNameInput
-                frontImageSection
+                cardSideSection(
+                    title: "Front of Card", icon: "creditcard.fill", image: frontImage, side: .front,
+                    isPickerShown: $showFrontSourcePicker
+                )
                 swapButton
-                backImageSection
+                cardSideSection(
+                    title: "Back of Card", icon: "creditcard", image: backImage, side: .back,
+                    isPickerShown: $showBackSourcePicker
+                )
                 saveButton
             }
             .padding(.vertical, 24)
@@ -722,14 +735,16 @@ struct TicketScannerView: View {
         .padding(.horizontal, 20)
     }
 
-    private var frontImageSection: some View {
+    private func cardSideSection(
+        title: String, icon: String, image: UIImage?, side: CardSide, isPickerShown: Binding<Bool>
+    ) -> some View {
         VStack(spacing: 16) {
-            Label("Front of Card", systemImage: "creditcard.fill").font(.headline)
-            ModernCardScanButton(image: frontImage, side: "Front") {
-                currentSide = .front
-                showFrontSourcePicker = true
+            Label(title, systemImage: icon).font(.headline)
+            ModernCardScanButton(image: image, side: side == .front ? "Front" : "Back") {
+                currentSide = side
+                isPickerShown.wrappedValue = true
             }
-            .confirmationDialog("Select Image Source", isPresented: $showFrontSourcePicker, titleVisibility: .visible) {
+            .confirmationDialog("Select Image Source", isPresented: isPickerShown, titleVisibility: .visible) {
                 imageSourceButtons
             }
         }
@@ -751,19 +766,6 @@ struct TicketScannerView: View {
             }
             .buttonStyle(.bordered)
             .tint(.orange)
-        }
-    }
-
-    private var backImageSection: some View {
-        VStack(spacing: 16) {
-            Label("Back of Card", systemImage: "creditcard").font(.headline)
-            ModernCardScanButton(image: backImage, side: "Back") {
-                currentSide = .back
-                showBackSourcePicker = true
-            }
-            .confirmationDialog("Select Image Source", isPresented: $showBackSourcePicker, titleVisibility: .visible) {
-                imageSourceButtons
-            }
         }
     }
 
