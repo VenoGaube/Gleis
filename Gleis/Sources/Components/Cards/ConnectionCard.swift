@@ -424,8 +424,7 @@ struct ConnectionCard: View {
             ).rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 if timeRemaining <= 0 {
-                    Text("Leave now").font(.system(.caption, design: .monospaced).weight(.bold))
-                        .multilineTextAlignment(.center)
+                    Text("GO!").font(.system(.caption, design: .monospaced).weight(.bold))
                 } else if timeRemaining <= 60 {
                     Text(leaveTime, style: .timer).font(.system(.caption, design: .monospaced).weight(.bold))
                         .multilineTextAlignment(.center)
@@ -493,10 +492,10 @@ struct ConnectionCard: View {
         let minutes = totalMinutes % 60
 
         if hours > 0 {
-            if minutes == 0 { return "\(hours) h" }
-            return "\(hours) h \(minutes) min"
+            if minutes == 0 { return "\(hours)h" }
+            return "\(hours)h\(minutes)m"
         }
-        return "\(minutes) min"
+        return "\(minutes)m"
     }
 }
 

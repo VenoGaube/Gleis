@@ -1766,7 +1766,7 @@ struct OnboardingWidgetCountdownDisplay: View {
     var body: some View {
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("Leave now")
+                Text("GO!")
                     .font(mainFont)
                     .foregroundStyle(.secondary)
                     .scalableText(minimumScale: 0.8)
@@ -1910,10 +1910,10 @@ private func onboardingFormatCountdown(_ seconds: TimeInterval) -> String {
     let minutes = totalMinutes % 60
 
     if hours > 0 {
-        if minutes == 0 { return "\(hours) h" }
-        return "\(hours) h \(minutes) min"
+        if minutes == 0 { return "\(hours)h" }
+        return "\(hours)h \(minutes)m"
     }
-    return "\(minutes) min"
+    return "\(minutes)m"
 }
 
 private func onboardingWidgetGradient(remaining: TimeInterval) -> some View {

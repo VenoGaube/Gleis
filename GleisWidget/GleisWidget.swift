@@ -486,7 +486,7 @@ struct CircularWidgetView: View {
                 }
 
                 if remaining <= 0 {
-                    Text("Now")
+                    Text("GO")
                         .font(.system(.headline, design: .rounded, weight: .black))
                         .scalableText(minimumScale: 0.8)
                 } else if remaining <= 60 {
@@ -637,14 +637,14 @@ struct RectangularWidgetView: View {
     private func countdownValue(_ current: ScheduledConnection, remaining: TimeInterval) -> some View {
         let font = Font.subheadline.weight(.bold).monospacedDigit()
         if remaining <= 0 {
-            Text("Leave now").font(font).widgetAccentable().scalableText(minimumScale: 0.8)
+            Text("GO!").font(font).widgetAccentable().scalableText(minimumScale: 0.8)
         } else if remaining <= 60 {
             Text(timerInterval: entry.date...max(entry.date, current.leaveTime), countsDown: true, showsHours: false)
                 .font(font)
                 .widgetAccentable()
                 .scalableText(minimumScale: 0.8)
         } else {
-            Text("\(minutesRemaining(remaining)) min")
+            Text("\(minutesRemaining(remaining))m")
                 .font(font)
                 .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
                 .widgetAccentable()
@@ -859,7 +859,7 @@ struct CountdownDisplay: View {
         let remaining = leaveTime.timeIntervalSince(referenceDate)
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("Leave now")
+                Text("GO!")
                     .font(Self.mainFont)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -874,7 +874,7 @@ struct CountdownDisplay: View {
                     .scalableText(minimumScale: 0.8)
                 label("to leave")
             } else {
-                Text("\(minutesRemaining(remaining)) min")
+                Text("\(minutesRemaining(remaining))m")
                     .font(Self.mainFont.monospacedDigit())
                     .foregroundStyle(urgencyColor(remaining))
                     .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
