@@ -12,6 +12,39 @@ struct SeatMapSheet: View {
     @State private var reloadCount = 0
 
     private static let oebbShopURL = URL(string: "https://shop.oebbtickets.at/de/ticket")!
+    private static let scottySearchBase = "https://fahrplan.oebb.at/bin/query.exe/dn"
+    // One minute early so the chosen train is the first result; its "Ticket und Preise" link opens it in the shop.
+    private static let scottySearchLeadTime: TimeInterval = 60
+    private static let scottyDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_AT")
+        formatter.dateFormat = "dd.MM.yy"
+        return formatter
+    }()
+    private static let scottyTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_AT")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    /// ÖBB's timetable search for this train's stations and time, or the shop start page if the link cannot be built.
+    private var reserveURL: URL {
+        let trainLegs = connection.legs.filter { !$0.isWalking }
+        let fromName = trainLegs.first?.from.name ?? connection.departureStation.name
+        let toName = trainLegs.last?.to.name ?? connection.arrivalStation.name
+        let departure = (trainLegs.first?.departureTime ?? connection.departureTime)
+            .addingTimeInterval(-Self.scottySearchLeadTime)
+        var components = URLComponents(string: Self.scottySearchBase)
+        components?.queryItems = [
+            URLQueryItem(name: "S", value: fromName),
+            URLQueryItem(name: "Z", value: toName),
+            URLQueryItem(name: "date", value: Self.scottyDateFormatter.string(from: departure)),
+            URLQueryItem(name: "time", value: Self.scottyTimeFormatter.string(from: departure)),
+            URLQueryItem(name: "start", value: "1"),
+        ]
+        return components?.url ?? Self.oebbShopURL
+    }
 
     init(connection: TrainConnection) {
         self.connection = connection
@@ -84,7 +117,7 @@ struct SeatMapSheet: View {
     }
 
     private var reserveLink: some View {
-        Link(destination: Self.oebbShopURL) {
+        Link(destination: reserveURL) {
             Label("Reserve in ÖBB", systemImage: "arrow.up.forward.app")
                 .frame(maxWidth: .infinity)
         }
