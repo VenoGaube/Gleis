@@ -23,9 +23,12 @@ actor OebbAPIClient {
     // Idle timeout on the shared auth call, so a server that goes silent fails before the 20 s user fetch budget.
     private static let authRequestTimeout: TimeInterval = 10
     // The seat reservation endpoints expect the web shop's client identity on top of the session headers.
-    private static let seatReservationClientId = "31"
+    // Values the shop web app sent in the captured seat flow.
+    private static let seatReservationClientId = "33"
     private static let seatReservationClientVersion = "2.4.12417-9680"
     private static let seatReservationLanguage = "de"
+    private static let timetableEntryPoint = "timetable"
+    private static let travelActionHistoryCount = 5
     private static let seatReservationPersonCount = "1"
 
     private let baseURL = URL(string: "https://shop.oebbtickets.at")!
@@ -197,13 +200,65 @@ actor OebbAPIClient {
         )
     }
 
-    func fetchOffers(connectionId: String) async throws -> OebbOffersResponse {
+    /// Searches the shop the way its web app does before offering seats: register a travel action, then search
+    /// with it. Trip ids from any other search are refused by the offers call.
+    func searchShopConnectionsForSeats(
+        from: OebbStationRef, to: OebbStationRef, departure: Date, count: Int,
+        passenger: OebbTimetableRequest.Passenger
+    ) async throws -> [OebbConnection] {
+        let datetime = dateFormatter.string(from: departure)
+        let actionStation = { (ref: OebbStationRef) in
+            OebbTravelActionsRequest.Station(
+                meta: "", latitude: ref.latitude, longitude: ref.longitude, name: ref.name, number: ref.number
+            )
+        }
+        let actionPayload = OebbTravelActionsRequest(
+            departureTime: true, from: actionStation(from), to: actionStation(to), datetime: datetime,
+            customerVias: [], travelActionTypes: [Self.timetableEntryPoint],
+            filter: .init(productTypes: [], history: true, maxEntries: Self.travelActionHistoryCount, channel: "inet")
+        )
+        let actions = try await performAuthorized(
+            url: baseURL.appendingPathComponent("api/offer/v2/travelActions"),
+            method: "POST",
+            body: encoder.encode(actionPayload),
+            extraHeaders: seatReservationHeaders,
+            decode: OebbTravelActionsResponse.self
+        )
+        guard let action = actions.travelActions.first(where: { $0.type == Self.timetableEntryPoint })
+            ?? actions.travelActions.first
+        else {
+            throw GleisError.apiError("ÖBB did not start a timetable search for \(from.name) to \(to.name).")
+        }
+        let stationRef = { (ref: OebbStationRef) in
+            OebbTimetableRequest.StationRef(
+                latitude: ref.latitude, longitude: ref.longitude, name: ref.name, number: ref.number
+            )
+        }
+        let searchPayload = OebbSeatTimetableRequest(
+            travelActionId: action.id, datetimeDeparture: datetime, filter: .default, passengers: [passenger],
+            entryPointId: Self.timetableEntryPoint, count: count, debugFilter: .default, sortType: "DEPARTURE",
+            from: stationRef(from), to: stationRef(to)
+        )
+        let response = try await performAuthorized(
+            url: baseURL.appendingPathComponent("api/hafas/v4/timetable"),
+            method: "POST",
+            body: encoder.encode(searchPayload),
+            extraHeaders: seatReservationHeaders,
+            decode: OebbTimetableResponse.self
+        )
+        return response.connections
+    }
+
+    /// `searchDate` is the departure the trip was searched for, which the shop expects back here.
+    func fetchOffers(
+        connectionId: String, passenger: OebbTimetableRequest.Passenger, searchDate: Date
+    ) async throws -> OebbOffersResponse {
         let payload = OebbOffersRequest(
             selection: OebbOfferSelection(connectionId: connectionId, offerSections: []),
             ignoreSelectionOnOfferChange: false,
-            passengers: [.default],
+            passengers: [passenger],
             debugFilter: .default,
-            datetime: offerDateTimeFormatter.string(from: Date())
+            datetime: offerDateTimeFormatter.string(from: searchDate)
         )
         var rawResponse = Data()
         let response = try await performAuthorized(
@@ -269,6 +324,8 @@ actor OebbAPIClient {
             "clientId": Self.seatReservationClientId,
             "clientVersion": Self.seatReservationClientVersion,
             "lang": Self.seatReservationLanguage,
+            "ts-settings-shoppingcart-new": "false",
+            "x-ts-travelevents": "disabled",
         ]
     }
 

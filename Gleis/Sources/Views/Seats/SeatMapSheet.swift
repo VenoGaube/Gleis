@@ -215,6 +215,8 @@ private struct LegSeatMapView: View {
             switch leg.content {
             case .notReservable:
                 noticeText("No seat reservation on this train.")
+            case .reservableWithoutMap:
+                noticeText("ÖBB shows no seat map for this train. You can still reserve a seat in ÖBB, and ÖBB picks it for you.")
             case .map(let seatMap):
                 if seatMap.coaches.isEmpty {
                     noticeText("ÖBB has no seat map for this train.")

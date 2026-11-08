@@ -21,15 +21,20 @@ struct OebbTimetableRequest: Encodable {
     struct Passenger: Encodable {
         let type: String
         let id: Int
-        let me, remembered: Bool
+        let me, remembered, markedForDeath: Bool
         let challengedFlags: ChallengedFlags
         let relations, cards: [String]
         let birthdateChangeable, birthdateDeletable, nameChangeable, passengerDeletable: Bool
-        static let `default` = Passenger(
-            type: "ADULT", id: 1_514_028_726, me: false, remembered: false, challengedFlags: .default, relations: [],
-            cards: [], birthdateChangeable: true, birthdateDeletable: true, nameChangeable: true,
-            passengerDeletable: true
-        )
+        static let `default` = adult(id: 1_514_028_726)
+
+        /// One adult passenger, the shape the shop sends; the seat lookup uses a fresh id per search like the browser.
+        static func adult(id: Int) -> Passenger {
+            Passenger(
+                type: "ADULT", id: id, me: false, remembered: false, markedForDeath: false, challengedFlags: .default,
+                relations: [], cards: [], birthdateChangeable: true, birthdateDeletable: true, nameChangeable: true,
+                passengerDeletable: true
+            )
+        }
     }
 
     struct ChallengedFlags: Encodable {
@@ -116,4 +121,52 @@ enum OebbNullValue: Encodable {
         var container = encoder.singleValueContainer()
         try container.encodeNil()
     }
+}
+
+/// Registers a timetable search with the shop; the offer endpoints only accept trips from a registered search.
+struct OebbTravelActionsRequest: Encodable {
+    struct Station: Encodable {
+        let meta: String
+        let latitude, longitude: Int
+        let name: String
+        let number: Int
+    }
+
+    struct Filter: Encodable {
+        let productTypes: [String]
+        let history: Bool
+        let maxEntries: Int
+        let channel: String
+    }
+
+    let departureTime: Bool
+    let from: Station
+    let to: Station
+    let datetime: String
+    let customerVias: [String]
+    let travelActionTypes: [String]
+    let filter: Filter
+}
+
+/// The shop timetable search as the browser sends it, tied to a travel action.
+struct OebbSeatTimetableRequest: Encodable {
+    struct Filter: Encodable {
+        let regionaltrains, direct, wheelchair, bikes, trains, motorail: Bool
+        let connections: [String]
+        static let `default` = Filter(
+            regionaltrains: false, direct: false, wheelchair: false, bikes: false, trains: false, motorail: false,
+            connections: []
+        )
+    }
+
+    let travelActionId: String
+    let datetimeDeparture: String
+    let filter: Filter
+    let passengers: [OebbTimetableRequest.Passenger]
+    let entryPointId: String
+    let count: Int
+    let debugFilter: OebbTimetableRequest.DebugFilter
+    let sortType: String
+    let from: OebbTimetableRequest.StationRef
+    let to: OebbTimetableRequest.StationRef
 }

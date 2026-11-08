@@ -69,6 +69,8 @@ struct LegSeatMap: Identifiable, Equatable {
 
     enum Content: Equatable {
         case notReservable
+        /// Seats can be reserved, but ÖBB picks the seat: it publishes no seat map for this train.
+        case reservableWithoutMap
         case map(SeatMap)
     }
 }

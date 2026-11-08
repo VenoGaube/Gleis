@@ -1127,3 +1127,12 @@ enum OebbDecoding {
 struct OebbIgnoredResponse: Decodable {
     init(from decoder: Decoder) throws {}
 }
+
+struct OebbTravelActionsResponse: Decodable {
+    struct TravelAction: Decodable {
+        let id: String
+        let type: String?
+    }
+
+    let travelActions: [TravelAction]
+}

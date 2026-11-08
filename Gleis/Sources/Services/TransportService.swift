@@ -356,11 +356,15 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
         var step = "shop timetable"
         do {
-            let shopConnection = try await findShopConnection(for: connection)
+            // A fresh passenger id per lookup, as the shop web app creates one per search.
+            let passenger = OebbTimetableRequest.Passenger.adult(id: Int(Date().timeIntervalSince1970))
+            let (shopConnection, searchDate) = try await findShopConnection(for: connection, passenger: passenger)
             step = "prices"
             try await apiClient.priceConnection(connectionId: shopConnection.id)
             step = "offers"
-            let offers = try await apiClient.fetchOffers(connectionId: shopConnection.id)
+            let offers = try await apiClient.fetchOffers(
+                connectionId: shopConnection.id, passenger: passenger, searchDate: searchDate
+            )
             guard !offers.offerError, let offerSections = offers.offerSections, !offerSections.isEmpty else {
                 let trip = "\(connection.lineNumber) from \(connection.departureStation.name)"
                 throw GleisError.apiError("ÖBB could not load the seat offers for \(trip). Please try again.")
@@ -401,7 +405,9 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     }
 
     /// The same trip in the shop timetable, which is the only source of the id the offer endpoints accept.
-    private func findShopConnection(for connection: TrainConnection) async throws -> OebbConnection {
+    private func findShopConnection(
+        for connection: TrainConnection, passenger: OebbTimetableRequest.Passenger
+    ) async throws -> (connection: OebbConnection, searchDate: Date) {
         // Search from the stations the trains use: a trip from a combined stop such as "Wien Hbf (U)" starts
         // with a walk, and ÖBB returns no seat offers for it.
         let trainLegs = connection.legs.filter { !$0.isWalking }
@@ -413,17 +419,16 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         )
         let trainDeparture = trainLegs.first?.departureTime ?? connection.departureTime
         let scheduledDeparture = trainDeparture.addingTimeInterval(-TimeInterval(connection.delay * 60))
-        let page = try await apiClient.fetchTimetableViaShop(
-            from: resolvedFrom.ref,
-            to: resolvedTo.ref,
-            pageSize: Self.seatMapShopSearchCount,
-            seedDateTime: scheduledDeparture.addingTimeInterval(-Self.seatMapDepartureTolerance)
+        let searchDate = scheduledDeparture.addingTimeInterval(-Self.seatMapDepartureTolerance)
+        let shopConnections = try await apiClient.searchShopConnectionsForSeats(
+            from: resolvedFrom.ref, to: resolvedTo.ref, departure: searchDate, count: Self.seatMapShopSearchCount,
+            passenger: passenger
         )
-        if let sameId = page.connections.first(where: { $0.id == connection.id }) { return sameId }
+        if let sameId = shopConnections.first(where: { $0.id == connection.id }) { return (sameId, searchDate) }
 
         let firstLineNumber = connection.legs.first { !$0.isWalking }?.lineNumber ?? connection.lineNumber
         let lineName = Self.normalizedLineName(firstLineNumber)
-        let match = page.connections.first { shop in
+        let match = shopConnections.first { shop in
             let shopSection = shop.sections?.first { $0.category.map { !Self.isWalkingCategory($0) } ?? false }
             let departureText = shop.from.departure ?? shopSection?.from.departure
             guard let category = shopSection?.category,
@@ -437,7 +442,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
             let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
             throw GleisError.apiError("The ÖBB shop does not list \(trip), so its seats cannot be shown.")
         }
-        return match
+        return (match, searchDate)
     }
 
     private func legSeatMap(
@@ -447,7 +452,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         let toName = section.toName ?? ""
         guard let graphical = section.graphical, graphical.isAvailable == true, let ride = graphical.ride else {
             return LegSeatMap(
-                id: legIndex, lineName: lineName, fromName: fromName, toName: toName, content: .notReservable
+                id: legIndex, lineName: lineName, fromName: fromName, toName: toName, content: .reservableWithoutMap
             )
         }
         let response = try await apiClient.fetchGraphicalReservation(ride: ride)
