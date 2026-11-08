@@ -190,13 +190,23 @@ actor OebbAPIClient {
             debugFilter: .default,
             datetime: offerDateTimeFormatter.string(from: Date())
         )
-        return try await performAuthorized(
+        var rawResponse = Data()
+        let response = try await performAuthorized(
             url: baseURL.appendingPathComponent("api/offer/v6/offers"),
             method: "POST",
             body: encoder.encode(payload),
             extraHeaders: seatReservationHeaders,
-            decode: OebbOffersResponse.self
+            decode: OebbOffersResponse.self,
+            captureRaw: { rawResponse = $0 }
         )
+        #if DEBUG
+        if response.offerError || (response.offerSections ?? []).isEmpty {
+            let requestBody = String(decoding: try encoder.encode(payload).prefix(300), as: UTF8.self)
+            let responseBody = String(decoding: rawResponse.prefix(900), as: UTF8.self)
+            throw GleisError.apiError("offers returned no sections. Sent: \(requestBody) Got: \(responseBody)")
+        }
+        #endif
+        return response
     }
 
     func fetchReservationDetails(
@@ -1066,7 +1076,8 @@ actor OebbAPIClient {
     // MARK: - Private Helpers
 
     private func performAuthorized<T: Decodable>(
-        url: URL?, method: String, body: Data? = nil, extraHeaders: [String: String] = [:], decode: T.Type
+        url: URL?, method: String, body: Data? = nil, extraHeaders: [String: String] = [:], decode: T.Type,
+        captureRaw: ((Data) -> Void)? = nil
     ) async throws -> T {
         guard let url else { throw GleisError.networkError("Invalid URL") }
         var request = URLRequest(url: url)
@@ -1075,7 +1086,7 @@ actor OebbAPIClient {
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         for (field, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: field) }
         let authorized = try await applyAuth(to: request)
-        return try await perform(authorized, decode: decode)
+        return try await perform(authorized, decode: decode, captureRaw: captureRaw)
     }
 
     private func applyAuth(to request: URLRequest) async throws -> URLRequest {
