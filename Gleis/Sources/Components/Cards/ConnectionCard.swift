@@ -499,102 +499,6 @@ struct ConnectionCard: View {
     }
 }
 
-// MARK: - CompactConnectionRow
-
-/// One-line summary of a later train; the presenter swaps it for a full ConnectionCard on tap.
-struct CompactConnectionRow: View {
-    let displayConnection: DisplayConnection
-    let isReminderSet: Bool
-    let onTap: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var connection: TrainConnection { displayConnection.connection }
-
-    var body: some View {
-        Button(action: onTap) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    lineBadge
-                    VStack(alignment: .leading, spacing: 2) {
-                        departureArrivalText
-                        leavePlatformText
-                    }
-                    Spacer(minLength: 8)
-                    statusMarks
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        lineBadge
-                        Spacer(minLength: 8)
-                        statusMarks
-                    }
-                    departureArrivalText
-                    leavePlatformText
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    lineBadge
-                    ConnectionStatusBadges(connection: connection, alignment: .leading)
-                    reminderMark
-                    departureArrivalText
-                    leavePlatformText
-                }
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.cardSurface(colorScheme), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.15), lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(ConnectionCardPressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenSummary)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Shows the full connection")
-        .accessibilityAction(.default) { onTap() }
-    }
-
-    private var spokenSummary: String {
-        var parts = displayConnection.spokenTimetable
-        if isReminderSet { parts.append("reminder set") }
-        return parts.joined(separator: ", ")
-    }
-
-    private var lineBadge: some View {
-        LineBadge(line: connection.lineNumber, colors: connection.lineColors)
-    }
-
-    private var departureArrivalText: some View {
-        (Text(connection.departureTime, style: .time) + Text(" → ") + Text(connection.arrivalTime, style: .time))
-            .font(.subheadline.weight(.semibold).monospacedDigit())
-    }
-
-    private var leavePlatformText: some View {
-        var text = Text("Leave ") + Text(displayConnection.leaveTime, style: .time)
-        if let platform = connection.platform { text = text + Text(" · Platform \(platform)") }
-        return text.font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
-    }
-
-    private var statusMarks: some View {
-        HStack(spacing: 6) {
-            ConnectionStatusBadges(connection: connection, alignment: .trailing)
-            reminderMark
-        }
-    }
-
-    @ViewBuilder
-    private var reminderMark: some View {
-        if isReminderSet {
-            Image(systemName: "bell.fill").font(.caption).foregroundStyle(Color.accentColor)
-        }
-    }
-}
-
 // MARK: - ConnectionCardPressStyle
 
 /// Shrinks the card while the finger is down, or dims it under Reduce Motion.
@@ -628,7 +532,7 @@ private extension TrainConnection {
 }
 
 private extension DisplayConnection {
-    /// Spoken parts shared by the card and the compact row: line, status, leave, departure, arrival, platform.
+    /// The card's spoken parts: line, status, leave, departure, arrival, platform.
     var spokenTimetable: [String] {
         func spoken(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
         var parts = [connection.lineNumber]
@@ -841,7 +745,6 @@ struct PinBadge: View {
                 onUnpin: {},
                 onTap: {}
             )
-            CompactConnectionRow(displayConnection: displayConnection, isReminderSet: true, onTap: {})
         }
         .padding()
     }

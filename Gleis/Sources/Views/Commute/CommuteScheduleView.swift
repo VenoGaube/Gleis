@@ -85,14 +85,16 @@ struct CommuteScheduleView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !dynamicTypeSize.isAccessibilitySize {
+            if !headerScrollsWithList {
+                // Full height for the pinned header, so the List gives up space instead of the header's text truncating.
                 headerContent
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             ScrollViewReader { proxy in
                 List {
-                    // At accessibility sizes the header alone can be taller than an SE screen, so it scrolls with the list.
-                    if dynamicTypeSize.isAccessibilitySize {
+                    // From XXXL up the header alone can be taller than an SE screen, so it scrolls with the list.
+                    if headerScrollsWithList {
                         Section {
                             headerContent
                                 .listRowInsets(EdgeInsets())
@@ -113,7 +115,7 @@ struct CommuteScheduleView: View {
                         }
                     }
                 }.onChange(of: scrollToTopTrigger) { _, _ in
-                    let topId = dynamicTypeSize.isAccessibilitySize ? headerAnchorId : listTopAnchorId
+                    let topId = headerScrollsWithList ? headerAnchorId : listTopAnchorId
                     withAnimation(.easeInOut) { proxy.scrollTo(topId, anchor: .top) }
                 }
             }
@@ -220,11 +222,20 @@ struct CommuteScheduleView: View {
             .toastOverlay(viewModel.toastManager)
     }
 
+    private var headerScrollsWithList: Bool { dynamicTypeSize >= .xxxLarge }
+
     private var headerContent: some View {
         VStack(spacing: 20) {
-            HStack(alignment: .center) {
+            // At accessibility sizes the menu moves under the title, so the title gets the full width and wraps between words.
+            let titleLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .center))
+            titleLayout {
                 Text("Repeat Journeys").font(.largeTitle.bold())
-                Spacer()
+                    .layoutPriority(1)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer()
+                }
                 Menu {
                     Button {
                         excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
@@ -252,9 +263,11 @@ struct CommuteScheduleView: View {
                         }
                     }
                 }
+                .fixedSize()
                 .padding(.trailing, 4)
                 .accessibilityLabel("More options")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             RouteHeader(
                 startStation: viewModel.currentFromStation,

@@ -22,6 +22,11 @@ actor OebbAPIClient {
     private static let gateMidnightRolloverThreshold: TimeInterval = 12 * 60 * 60
     // Idle timeout on the shared auth call, so a server that goes silent fails before the 20 s user fetch budget.
     private static let authRequestTimeout: TimeInterval = 10
+    // The seat reservation endpoints expect the web shop's client identity on top of the session headers.
+    private static let seatReservationClientId = "31"
+    private static let seatReservationClientVersion = "2.4.12417-9680"
+    private static let seatReservationLanguage = "de"
+    private static let seatReservationPersonCount = "1"
 
     private let baseURL = URL(string: "https://shop.oebbtickets.at")!
     private let fahrplanBaseURL = URL(string: "https://fahrplan.oebb.at")!
@@ -38,6 +43,14 @@ actor OebbAPIClient {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+        return f
+    }()
+
+    private lazy var offerDateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         return f
     }()
 
@@ -134,7 +147,7 @@ actor OebbAPIClient {
         )
     }
 
-    private func fetchTimetableViaShop(
+    func fetchTimetableViaShop(
         from: OebbStationRef, to: OebbStationRef, pageSize: Int, seedDateTime: Date
     ) async throws -> OebbTimetablePage {
         let payload = OebbTimetableRequest(
@@ -165,6 +178,73 @@ actor OebbAPIClient {
             throw GleisError.networkError("Invalid connection detail URL")
         }
         return try await performAuthorized(url: url, method: "GET", decode: OebbConnectionDetailResponse.self)
+    }
+
+    // MARK: - Seat Reservation
+
+    func fetchOffers(connectionId: String) async throws -> OebbOffersResponse {
+        let payload = OebbOffersRequest(
+            selection: OebbOfferSelection(connectionId: connectionId, offerSections: []),
+            ignoreSelectionOnOfferChange: false,
+            passengers: [.default],
+            debugFilter: .default,
+            datetime: offerDateTimeFormatter.string(from: Date())
+        )
+        return try await performAuthorized(
+            url: baseURL.appendingPathComponent("api/offer/v6/offers"),
+            method: "POST",
+            body: encoder.encode(payload),
+            extraHeaders: seatReservationHeaders,
+            decode: OebbOffersResponse.self
+        )
+    }
+
+    func fetchReservationDetails(
+        connectionId: String, selections: [OebbReservationOfferSelection]
+    ) async throws -> OebbReservationDetailsResponse {
+        let payload = OebbReservationDetailsRequest(
+            selection: OebbOfferSelection(connectionId: connectionId, offerSections: selections)
+        )
+        return try await performAuthorized(
+            url: baseURL.appendingPathComponent("api/offer/v1/reservation-details"),
+            method: "POST",
+            body: encoder.encode(payload),
+            extraHeaders: seatReservationHeaders,
+            decode: OebbReservationDetailsResponse.self
+        )
+    }
+
+    func fetchGraphicalReservation(ride: OebbGraphicalRide) async throws -> OebbGraphicalReservationResponse {
+        let fields: [(String, String?)] = [
+            ("category", ride.category), ("number", ride.number), ("from", ride.from), ("to", ride.to),
+            ("departure", ride.departure), ("origin", ride.origin), ("originDeparture", ride.originDeparture),
+            ("destination", ride.destination), ("personCount", Self.seatReservationPersonCount),
+        ]
+        // The departure carries a "+01:00" offset, and URLComponents leaves "+" bare, which servers read as a space.
+        let allowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+&="))
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("api/offer/v1/graphicalReservation"), resolvingAgainstBaseURL: false
+        )
+        components?.percentEncodedQueryItems = try fields.map { name, value in
+            guard let value, let encoded = value.addingPercentEncoding(withAllowedCharacters: allowed) else {
+                throw GleisError.apiError("Seats could not be loaded for this train. ÖBB left out the \(name).")
+            }
+            return URLQueryItem(name: name, value: encoded)
+        }
+        return try await performAuthorized(
+            url: components?.url,
+            method: "GET",
+            extraHeaders: seatReservationHeaders,
+            decode: OebbGraphicalReservationResponse.self
+        )
+    }
+
+    private var seatReservationHeaders: [String: String] {
+        [
+            "clientId": Self.seatReservationClientId,
+            "clientVersion": Self.seatReservationClientVersion,
+            "lang": Self.seatReservationLanguage,
+        ]
     }
 
     private func fetchTimetableViaGateTripSearch(
@@ -986,13 +1066,14 @@ actor OebbAPIClient {
     // MARK: - Private Helpers
 
     private func performAuthorized<T: Decodable>(
-        url: URL?, method: String, body: Data? = nil, decode: T.Type
+        url: URL?, method: String, body: Data? = nil, extraHeaders: [String: String] = [:], decode: T.Type
     ) async throws -> T {
         guard let url else { throw GleisError.networkError("Invalid URL") }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        for (field, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: field) }
         let authorized = try await applyAuth(to: request)
         return try await perform(authorized, decode: decode)
     }

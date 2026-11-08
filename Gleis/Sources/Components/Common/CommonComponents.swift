@@ -89,21 +89,34 @@ struct DelayedTimeText: View {
     let time: Date
     let delayMinutes: Int
     var weight: Font.Weight? = nil
+    /// Where the two times line up when they are too wide to sit side by side and stack instead.
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
         if let scheduled = scheduledTimeIfDelayed(from: time, delayMinutes: delayMinutes) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(scheduled, style: .time)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .strikethrough()
-                Text(time, style: .time)
-                    .font(.headline.monospacedDigit())
-                    .fontWeight(weight ?? .semibold)
-                    .foregroundStyle(.orange)
+            let scheduledText = Text(scheduled, style: .time)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .strikethrough()
+                .fixedSize()
+            let liveText = Text(time, style: .time)
+                .font(.headline.monospacedDigit())
+                .fontWeight(weight ?? .semibold)
+                .foregroundStyle(.orange)
+                .fixedSize()
+            // fixedSize keeps each time whole, so the pair stacks rather than splitting "7:56 PM" across lines.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    scheduledText
+                    liveText
+                }
+                VStack(alignment: alignment, spacing: 2) {
+                    scheduledText
+                    liveText
+                }
             }
         } else {
-            Text(time, style: .time).font(.headline.monospacedDigit()).fontWeight(weight ?? .semibold)
+            Text(time, style: .time).font(.headline.monospacedDigit()).fontWeight(weight ?? .semibold).fixedSize()
         }
     }
 }

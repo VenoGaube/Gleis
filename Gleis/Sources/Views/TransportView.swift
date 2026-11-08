@@ -19,7 +19,6 @@ struct TransportView: View {
     @State private var activeTimingSheet: TimingSheet?
     @State private var hasAppearedOnce = false
     @State private var isPassedSectionExpanded = false
-    @State private var expandedConnectionIds: Set<String> = []
     @State private var jumpsInFlight = 0
     @State private var didApplyDebugLaunchOptions = false
 
@@ -321,19 +320,13 @@ struct TransportView: View {
 
             if isPassedSectionExpanded {
                 ForEach(rows.passed) { displayConnection in
-                    connectionRow(displayConnection, showsFullCard: true)
+                    connectionRow(displayConnection)
                 }
             }
         }
 
-        let firstUpcomingId = rows.upcoming.first?.id
         ForEach(rows.upcoming) { displayConnection in
-            connectionRow(
-                displayConnection,
-                showsFullCard: displayConnection.id == firstUpcomingId
-                    || displayConnection.isWithinLeaveCountdownWindow
-                    || expandedConnectionIds.contains(displayConnection.id)
-            )
+            connectionRow(displayConnection)
         }
 
         if viewModel.isLoadingMore {
@@ -386,11 +379,13 @@ struct TransportView: View {
                 ).frame(maxWidth: .infinity).padding(.top, 24).transition(.opacity)
             } else {
                 ForEach(rows) { displayConnection in
-                    connectionRow(displayConnection, showsFullCard: expandedConnectionIds.contains(displayConnection.id))
+                    connectionRow(displayConnection)
                 }
 
                 if viewModel.isLoadingMoreAnchored {
                     SkeletonLoadingView(count: 1).transition(.opacity)
+                } else if (viewModel.anchoredConnections.value?.count ?? 0) >= viewModel.config.displayMaxConnections {
+                    EndOfListFooter(count: rows.count)
                 } else if viewModel.anchoredReachedEnd {
                     Text("No more connections")
                         .font(.caption).foregroundStyle(.secondary)
@@ -411,30 +406,17 @@ struct TransportView: View {
         }
     }
 
-    @ViewBuilder private func connectionRow(_ displayConnection: DisplayConnection, showsFullCard: Bool) -> some View {
+    private func connectionRow(_ displayConnection: DisplayConnection) -> some View {
         let isHighlighted = highlightConnectionId == displayConnection.id
-        if showsFullCard {
-            fullConnectionCard(displayConnection)
-                .overlay {
-                    if isHighlighted {
-                        DeepLinkHighlightRing(cornerRadius: displayConnection.isLeaveWindowPassed ? 12 : 16)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.3), value: isHighlighted)
-                .id(displayConnection.id)
-                .transition(.opacity)
-        } else {
-            CompactConnectionRow(displayConnection: displayConnection, isReminderSet: displayConnection.isSelected) {
-                Haptics.selection()
-                withAnimation(toggleAnimation) { _ = expandedConnectionIds.insert(displayConnection.id) }
-            }
+        return fullConnectionCard(displayConnection)
             .overlay {
-                if isHighlighted { DeepLinkHighlightRing(cornerRadius: 12) }
+                if isHighlighted {
+                    DeepLinkHighlightRing(cornerRadius: displayConnection.isLeaveWindowPassed ? 12 : 16)
+                }
             }
             .animation(.easeInOut(duration: 0.3), value: isHighlighted)
             .id(displayConnection.id)
             .transition(.opacity)
-        }
     }
 
     private func fullConnectionCard(_ displayConnection: DisplayConnection) -> some View {
@@ -527,11 +509,7 @@ struct TransportView: View {
               let target = viewModel.displayConnections.first(where: { $0.id == targetId })
         else { return }
         if viewModel.departureAnchor != nil { viewModel.returnToNow() }
-        if target.isLeaveWindowPassed {
-            isPassedSectionExpanded = true
-        } else {
-            expandedConnectionIds.insert(targetId)
-        }
+        if target.isLeaveWindowPassed { isPassedSectionExpanded = true }
         // The next main-actor turn runs after the rows above are laid out, so the lazy stack knows the target.
         Task { @MainActor in
             withAnimation(reduceMotion ? nil : .gleisToggle) { proxy.scrollTo(targetId, anchor: .center) }
@@ -542,21 +520,7 @@ struct TransportView: View {
 
     private func detailSheet(for selected: DisplayConnection) -> some View {
         let current = currentDisplayConnection(id: selected.id) ?? selected
-        let isPinned = pinnedConnectionId == selected.id
-        return ConnectionDetailSheet(
-            connection: current.connection,
-            onRemind: {
-                if current.isSelected {
-                    viewModel.cancelNotification(for: current.connection)
-                } else {
-                    Task { await viewModel.scheduleNotification(for: current.connection) }
-                }
-            },
-            onPin: { setPinned(!isPinned, connection: current.connection) },
-            isReminderSet: current.isSelected,
-            isPinned: isPinned,
-            leaveTime: current.leaveTime
-        )
+        return ConnectionDetailSheet(connection: current.connection)
     }
 
     // MARK: Actions
@@ -641,7 +605,6 @@ struct TransportView: View {
         if routeChanged {
             viewModel.cancelCurrentFetch()
             viewModel.setImmediateRouteTransitionState(start: start, end: end)
-            expandedConnectionIds = []
         }
         config.startStation = start
         config.endStation = end

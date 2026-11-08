@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @Binding var isPresented: Bool
     @StateObject private var settingsManager = SettingsManager.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var currentStepIndex = 0
     @State private var originStation: Station?
@@ -18,6 +19,8 @@ struct OnboardingView: View {
 
     private let steps = OnboardingStep.allCases
     private let stepBottomPadding: CGFloat = 4
+    /// Room under the card at accessibility sizes so its last line and shadow (radius 12, y 6) scroll clear of the page's clip edge.
+    private let accessibilityScrollEndMargin: CGFloat = 20
 
     private var isLastStep: Bool { currentStepIndex == steps.count - 1 }
     private var hasPersistedRouteConfiguration: Bool {
@@ -47,34 +50,34 @@ struct OnboardingView: View {
     }
 
     var body: some View {
-        ZStack {
-            OnboardingBackdrop()
+        VStack(spacing: 20) {
+            topBar
 
-            VStack(spacing: 20) {
-                topBar
-
-                TabView(selection: $currentStepIndex) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                        GeometryReader { page in
-                            ScrollView(.vertical, showsIndicators: false) {
-                                stepView(step)
-                                    .environment(\.onboardingPanelMinHeight, max(0, page.size.height - stepBottomPadding))
-                                    .padding(.horizontal, 20)
-                                    .padding(.bottom, stepBottomPadding)
-                            }
-                            .scrollBounceBehavior(.basedOnSize)
+            TabView(selection: $currentStepIndex) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    GeometryReader { page in
+                        ScrollView(.vertical, showsIndicators: dynamicTypeSize.isAccessibilitySize) {
+                            stepView(step)
+                                .environment(\.onboardingPanelMinHeight, max(0, page.size.height - stepBottomPadding))
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, stepBottomPadding)
                         }
-                        .tag(index)
+                        .contentMargins(.bottom, dynamicTypeSize.isAccessibilitySize ? accessibilityScrollEndMargin : 0, for: .scrollContent)
+                        .scrollBounceBehavior(.basedOnSize)
+                        .scrollIndicatorsFlash(onAppear: true)
                     }
+                    .tag(index)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.25), value: currentStepIndex)
-
-                footer
             }
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(.easeInOut(duration: 0.25), value: currentStepIndex)
+
+            footer
         }
+        .padding(.top, 8)
+        .padding(.bottom, 24)
+        // As a ZStack sibling the 420pt glow made the stack 420pt wide and the content was placed at that width, past a 375pt screen; a background takes the content's size instead.
+        .background { OnboardingBackdrop() }
         .task { await refreshNotificationStatus() }
         .onChange(of: currentStepIndex) { _, newIndex in
             if steps[safe: newIndex] == .timing { persistSetupSelections() }

@@ -39,6 +39,7 @@
 		B034 /* PinnedJourney.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034 /* PinnedJourney.swift */; };
 		B035 /* MyJourneyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035 /* MyJourneyCard.swift */; };
 		B039 /* DisplayConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039 /* DisplayConnection.swift */; };
+		BSEATMAP01 /* SeatMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = FSEATMAP01 /* SeatMap.swift */; };
 		B041 /* ToastManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041 /* ToastManager.swift */; };
 		B043 /* StationSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043 /* StationSearchService.swift */; };
 		B044 /* CommuteScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044 /* CommuteScheduleViewModel.swift */; };
@@ -60,6 +61,7 @@
 		W008 /* WidgetContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = F048 /* WidgetContract.swift */; };
 		9A1C0E4F2B7D3E5A6C8F0B11 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9A1C0E4F2B7D3E5A6C8F0B12 /* PrivacyInfo.xcprivacy */; };
 		9A1C0E4F2B7D3E5A6C8F0B13 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9A1C0E4F2B7D3E5A6C8F0B14 /* PrivacyInfo.xcprivacy */; };
+		EB5ED528E515813F0FD698F9 /* SeatMapSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 544604E90A4FD00B775F5FC4 /* SeatMapSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -120,6 +122,7 @@
 		F034 /* PinnedJourney.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedJourney.swift; sourceTree = "<group>"; };
 		F035 /* MyJourneyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyJourneyCard.swift; sourceTree = "<group>"; };
 		F039 /* DisplayConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayConnection.swift; sourceTree = "<group>"; };
+		FSEATMAP01 /* SeatMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeatMap.swift; sourceTree = "<group>"; };
 		F041 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
 		F043 /* StationSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSearchService.swift; sourceTree = "<group>"; };
 		F044 /* CommuteScheduleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommuteScheduleViewModel.swift; sourceTree = "<group>"; };
@@ -143,6 +146,7 @@
 		WF06 /* GleisWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GleisWidget.entitlements; sourceTree = "<group>"; };
 		9A1C0E4F2B7D3E5A6C8F0B12 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		9A1C0E4F2B7D3E5A6C8F0B14 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		544604E90A4FD00B775F5FC4 /* SeatMapSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeatMapSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -240,6 +244,7 @@
 				F022 /* AppSettings.swift */,
 				F034 /* PinnedJourney.swift */,
 				F039 /* DisplayConnection.swift */,
+				FSEATMAP01 /* SeatMap.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -260,6 +265,7 @@
 				F003 /* TransportView.swift */,
 				G011 /* Settings */,
 				G012 /* Commute */,
+				4AD16AAB0028A0DDEF36854E /* Seats */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -278,6 +284,14 @@
 				F032 /* CommuteScheduleView.swift */,
 			);
 			path = Commute;
+			sourceTree = "<group>";
+		};
+		4AD16AAB0028A0DDEF36854E /* Seats */ = {
+			isa = PBXGroup;
+			children = (
+				544604E90A4FD00B775F5FC4 /* SeatMapSheet.swift */,
+			);
+			path = Seats;
 			sourceTree = "<group>";
 		};
 		G015 /* ViewModels */ = {
@@ -511,6 +525,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EB5ED528E515813F0FD698F9 /* SeatMapSheet.swift in Sources */,
 				B001 /* GleisApp.swift in Sources */,
 				B002 /* ContentView.swift in Sources */,
 				B003 /* TransportView.swift in Sources */,
@@ -543,6 +558,7 @@
 				B034 /* PinnedJourney.swift in Sources */,
 				B035 /* MyJourneyCard.swift in Sources */,
 				B039 /* DisplayConnection.swift in Sources */,
+				BSEATMAP01 /* SeatMap.swift in Sources */,
 				B041 /* ToastManager.swift in Sources */,
 				B043 /* StationSearchService.swift in Sources */,
 				B052 /* ConnectionDeduplicator.swift in Sources */,

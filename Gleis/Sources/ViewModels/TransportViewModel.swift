@@ -902,7 +902,8 @@ final class TransportViewModel: ObservableObject {
         let now = Date()
         let knownIds = Set(anchoredTrainConnections.map(\.id))
         let additions = page.filter { $0.departureTime > now && !knownIds.contains($0.id) }
-        anchoredTrainConnections = (anchoredTrainConnections + additions).sorted { $0.departureTime < $1.departureTime }
+        let sortedConnections = (anchoredTrainConnections + additions).sorted { $0.departureTime < $1.departureTime }
+        anchoredTrainConnections = Array(sortedConnections.prefix(config.displayMaxConnections))
         if anchoredTrainConnections.count >= config.displayMaxConnections { anchoredReachedEnd = true }
         anchoredConnections = .loaded(makeDisplayConnections(from: anchoredTrainConnections, at: now))
     }

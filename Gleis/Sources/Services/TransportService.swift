@@ -327,6 +327,171 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - Seat Maps
+
+    /// How far apart the shop's departure and the app's may be and still be the same trip.
+    private static let seatMapDepartureTolerance: TimeInterval = 60
+    /// Shop timetable entries asked for when looking the trip up, starting just before it leaves.
+    private static let seatMapShopSearchCount = 5
+    private static let shopJourneySectionType = "journey"
+    private static let preferredReservationClasses = ["1", "2"]
+    private static let shopDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    /// Seat availability per leg, read from the ÖBB shop: timetable, offers, reservation details, then seat maps.
+    func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
+        do {
+            let shopConnection = try await findShopConnection(for: connection)
+            let offers = try await apiClient.fetchOffers(connectionId: shopConnection.id)
+            guard !offers.offerError, let offerSections = offers.offerSections, !offerSections.isEmpty else {
+                let trip = "\(connection.lineNumber) from \(connection.departureStation.name)"
+                throw GleisError.apiError("ÖBB could not load the seat offers for \(trip). Please try again.")
+            }
+            let selections = offerSections.compactMap(Self.reservationSelection(for:))
+            guard !selections.isEmpty else { return Self.unreservableLegs(of: connection) }
+
+            let details = try await apiClient.fetchReservationDetails(
+                connectionId: shopConnection.id, selections: selections
+            )
+            let journeySections = details.sections.filter {
+                ($0.type ?? Self.shopJourneySectionType) == Self.shopJourneySectionType
+            }
+            guard !journeySections.isEmpty else {
+                let trip = "\(connection.lineNumber) from \(connection.departureStation.name)"
+                throw GleisError.apiError("ÖBB did not send seat information for \(trip).")
+            }
+
+            var usedLegIndices = Set<Int>()
+            var legSeatMaps: [LegSeatMap] = []
+            for (position, section) in journeySections.enumerated() {
+                let lineName = Self.lineName(of: section)
+                let legIndex = Self.legIndex(matching: lineName, in: connection, excluding: usedLegIndices)
+                    ?? connection.legs.count + position
+                usedLegIndices.insert(legIndex)
+                legSeatMaps.append(try await legSeatMap(for: section, lineName: lineName, legIndex: legIndex))
+            }
+            return legSeatMaps
+        } catch {
+            if isCancellation(error) { throw CancellationError() }
+            throw mapError(error)
+        }
+    }
+
+    /// The same trip in the shop timetable, which is the only source of the id the offer endpoints accept.
+    private func findShopConnection(for connection: TrainConnection) async throws -> OebbConnection {
+        async let resolvedFromTask = resolveStation(connection.departureStation)
+        async let resolvedToTask = resolveStation(connection.arrivalStation)
+        let (resolvedFrom, resolvedTo) = try await (resolvedFromTask, resolvedToTask)
+        let scheduledDeparture = connection.departureTime.addingTimeInterval(-TimeInterval(connection.delay * 60))
+        let page = try await apiClient.fetchTimetableViaShop(
+            from: resolvedFrom.ref,
+            to: resolvedTo.ref,
+            pageSize: Self.seatMapShopSearchCount,
+            seedDateTime: scheduledDeparture.addingTimeInterval(-Self.seatMapDepartureTolerance)
+        )
+        if let sameId = page.connections.first(where: { $0.id == connection.id }) { return sameId }
+
+        let firstLineNumber = connection.legs.first { !$0.isWalking }?.lineNumber ?? connection.lineNumber
+        let lineName = Self.normalizedLineName(firstLineNumber)
+        let match = page.connections.first { shop in
+            let shopSection = shop.sections?.first { $0.category.map { !Self.isWalkingCategory($0) } ?? false }
+            let departureText = shop.from.departure ?? shopSection?.from.departure
+            guard let category = shopSection?.category,
+                  Self.normalizedLineName(Self.shopLineName(category)) == lineName,
+                  let departure = departureText.flatMap(Self.shopDateFormatter.date)
+            else { return false }
+            return abs(departure.timeIntervalSince(scheduledDeparture)) <= Self.seatMapDepartureTolerance
+                || abs(departure.timeIntervalSince(connection.departureTime)) <= Self.seatMapDepartureTolerance
+        }
+        guard let match else {
+            let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
+            throw GleisError.apiError("The ÖBB shop does not list \(trip), so its seats cannot be shown.")
+        }
+        return match
+    }
+
+    private func legSeatMap(
+        for section: OebbReservationDetailsSection, lineName: String, legIndex: Int
+    ) async throws -> LegSeatMap {
+        let fromName = section.fromName ?? ""
+        let toName = section.toName ?? ""
+        guard let graphical = section.graphical, graphical.isAvailable == true, let ride = graphical.ride else {
+            return LegSeatMap(
+                id: legIndex, lineName: lineName, fromName: fromName, toName: toName, content: .notReservable
+            )
+        }
+        let response = try await apiClient.fetchGraphicalReservation(ride: ride)
+        guard !response.coaches.isEmpty else {
+            throw GleisError.apiError("ÖBB sent an empty seat map for \(lineName) from \(fromName).")
+        }
+        let seatMap = SeatMap.from(
+            graphicalReservation: response, rideName: lineName, fromName: fromName, toName: toName
+        )
+        return LegSeatMap(id: legIndex, lineName: lineName, fromName: fromName, toName: toName, content: .map(seatMap))
+    }
+
+    /// Picks the first-class reservation-only offer, else second class, else whatever class is offered.
+    private static func reservationSelection(for section: OebbOfferSection) -> OebbReservationOfferSelection? {
+        guard let sectionId = section.id else { return nil }
+        let offers = section.reservationOffers.filter { $0.id != nil && $0.travelClass != nil }
+        let preferred = preferredReservationClasses.lazy.compactMap { travelClass in
+            offers.first { $0.travelClass == travelClass }
+        }.first
+        guard let offer = preferred ?? offers.first, let offerId = offer.id, let travelClass = offer.travelClass else {
+            return nil
+        }
+        return OebbReservationOfferSelection(
+            reservationOnly: .init(isSelected: true, offerId: offerId, travelClass: travelClass),
+            id: sectionId
+        )
+    }
+
+    private static func unreservableLegs(of connection: TrainConnection) -> [LegSeatMap] {
+        connection.legs.enumerated().filter { !$0.element.isWalking }.map { index, leg in
+            LegSeatMap(
+                id: index, lineName: leg.lineNumber, fromName: leg.from.name, toName: leg.to.name,
+                content: .notReservable
+            )
+        }
+    }
+
+    private static func lineName(of section: OebbReservationDetailsSection) -> String {
+        [section.rideShortName, section.rideNumber].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private static func legIndex(
+        matching lineName: String, in connection: TrainConnection, excluding used: Set<Int>
+    ) -> Int? {
+        let wanted = normalizedLineName(lineName)
+        guard !wanted.isEmpty else { return nil }
+        return connection.legs.indices.first { index in
+            !used.contains(index) && !connection.legs[index].isWalking
+                && normalizedLineName(connection.legs[index].lineNumber) == wanted
+        }
+    }
+
+    /// Same shape ConnectionMapper gives a leg's line number: "RJ 654", or the number alone when it has letters.
+    private static func shopLineName(_ category: OebbCategory) -> String {
+        let name = category.shortName ?? category.displayName ?? category.name
+        guard let number = category.number, !number.isEmpty else { return name ?? "" }
+        if number.rangeOfCharacter(from: .letters) != nil { return number }
+        return name.map { "\($0) \(number)" } ?? number
+    }
+
+    private static func isWalkingCategory(_ category: OebbCategory) -> Bool {
+        let name = (category.shortName ?? category.displayName ?? category.name ?? "").uppercased()
+        return name == "W" || name == "WALK"
+    }
+
+    private static func normalizedLineName(_ value: String) -> String {
+        value.uppercased().filter { !$0.isWhitespace }
+    }
+
     // MARK: - Private
 
     private struct ResolvedStation {

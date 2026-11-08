@@ -5,51 +5,32 @@ import SwiftUI
 struct ConnectionDetailSheet: View {
     let connection: TrainConnection
     private let transportService: TransportService
-    private let onRemind: (() -> Void)?
-    private let onPin: (() -> Void)?
-    private let isReminderSet: Bool
-    private let isPinned: Bool
-    private let presenterLeaveTime: Date?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var resolvedConnection: TrainConnection
     @State private var isLoadingDetails = false
     @State private var hasLoadedDetails = false
+    @State private var isShowingSeats = false
 
     init(
         connection: TrainConnection,
-        transportService: TransportService = .shared,
-        onRemind: (() -> Void)? = nil,
-        onPin: (() -> Void)? = nil,
-        isReminderSet: Bool = false,
-        isPinned: Bool = false,
-        leaveTime: Date? = nil
+        transportService: TransportService = .shared
     ) {
         self.connection = connection
         self.transportService = transportService
-        self.onRemind = onRemind
-        self.onPin = onPin
-        self.isReminderSet = isReminderSet
-        self.isPinned = isPinned
-        presenterLeaveTime = leaveTime
         _resolvedConnection = State(initialValue: connection)
     }
 
     var body: some View {
-        let leaveTime = resolvedLeaveTime
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    connectionSummary(leaveTime: leaveTime)
+                    connectionSummary
+                    if hasReservableLeg { viewSeatsButton }
                     serviceAlertsSection
                     connectionLegs
-                    if stacksForAccessibilitySize { stackedJourneyActions(leaveTime: leaveTime) }
                 }
                 .padding()
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !stacksForAccessibilitySize { journeyActionBar(leaveTime: leaveTime) }
             }
             .refreshable { await loadConnectionDetailsIfNeeded(force: true) }
             .navigationTitle("Connection Details")
@@ -57,23 +38,16 @@ struct ConnectionDetailSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
         .task(id: connection.id) { await loadConnectionDetailsIfNeeded() }
-    }
-
-    // Falls back to the travel and buffer times saved for the station this train leaves from.
-    @MainActor private var resolvedLeaveTime: Date {
-        if let presenterLeaveTime { return presenterLeaveTime }
-        return SettingsManager.shared.trainCommuteConfig.leaveTime(
-            for: resolvedConnection, fromStationId: resolvedConnection.departureStation.id
-        )
+        .sheet(isPresented: $isShowingSeats) {
+            SeatMapSheet(connection: resolvedConnection)
+                .presentationDetents([.large])
+        }
     }
 
     private var stacksForAccessibilitySize: Bool { dynamicTypeSize.isAccessibilitySize }
 
-    private func connectionSummary(leaveTime: Date) -> some View {
+    private var connectionSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TimelineView(.everyMinute) { context in
-                leaveTimeHeadline(leaveTime: leaveTime, now: context.date)
-            }
             summaryHeader
             if isLoadingDetails {
                 HStack(spacing: 6) {
@@ -82,34 +56,7 @@ struct ConnectionDetailSheet: View {
                 }.font(.caption2).foregroundStyle(.secondary)
             }
             departArriveRow
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    private func leaveTimeHeadline(leaveTime: Date, now: Date) -> some View {
-        let countdown = leaveCountdown(leaveTime: leaveTime, now: now)
-        return (Text("Leave at ") + Text(leaveTime, style: .time) + Text(" · \(countdown.text)"))
-            .font(.title2.weight(.bold).monospacedDigit())
-            .foregroundStyle(countdown.color)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private struct LeaveCountdown {
-        let text: String
-        let color: Color
-    }
-
-    private func leaveCountdown(leaveTime: Date, now: Date) -> LeaveCountdown {
-        let remaining = leaveTime.timeIntervalSince(now)
-        if remaining > 0 {
-            let minutesLeft = Int((remaining / 60).rounded(.up))
-            return LeaveCountdown(text: "in \(abbreviatedDurationText(minutes: minutesLeft))", color: .urgency(for: remaining))
-        }
-        if resolvedConnection.departureTime > now { return LeaveCountdown(text: "Leave now", color: .urgencyRed) }
-        return LeaveCountdown(text: "Departed", color: .secondary)
+        }.padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var summaryHeader: some View {
@@ -122,126 +69,74 @@ struct ConnectionDetailSheet: View {
                 Text("\(resolvedConnection.departureStation.name) to \(resolvedConnection.arrivalStation.name)")
                     .font(.subheadline.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(abbreviatedDurationText(minutes: Int(resolvedConnection.duration / 60))) total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("\(Int(resolvedConnection.duration / 60)) min total").font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(changesText)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(resolvedConnection.transfers > 0 ? Color.orange : Color.secondary)
-                .fixedSize()
+            if let changesText {
+                Text(changesText).font(.caption.weight(.semibold)).foregroundStyle(.orange).fixedSize()
+            }
         }
     }
 
-    private var changesText: String {
+    private var changesText: String? {
         switch resolvedConnection.transfers {
-        case ...0: return "Direct"
+        case ...0: return nil
         case 1: return "1 change"
         default: return "\(resolvedConnection.transfers) changes"
         }
     }
 
     private var departArriveRow: some View {
-        let layout = stacksForAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top))
-        return layout {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Departs").font(.caption2).foregroundStyle(.secondary)
-                DelayedTimeText(time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay)
-                if let platform = summaryDeparturePlatform {
-                    Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                }
+        // Side by side while it fits, stacked otherwise, so times never split mid-word.
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                departsColumn(alignment: .leading)
+                Spacer()
+                arrivesColumn(alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: stacksForAccessibilitySize ? .leading : .trailing, spacing: 4) {
-                Text("Arrives").font(.caption2).foregroundStyle(.secondary)
-                DelayedTimeText(time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay)
-                if let platform = summaryArrivalPlatform {
-                    Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                departsColumn(alignment: .leading)
+                arrivesColumn(alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: stacksForAccessibilitySize ? .leading : .trailing)
         }
     }
 
-    private func journeyActionBar(leaveTime: Date) -> some View {
-        let shareItem = shareText(leaveTime: leaveTime)
-        // When neither one-line row fits, ViewThatFits falls back to the last row, where the titles wrap instead.
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                journeyActionButtons
-                ShareLink(item: shareItem) {
-                    Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
-                }
+    private func departsColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text("Departs").font(.caption2).foregroundStyle(.secondary)
+            DelayedTimeText(
+                time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay, alignment: alignment
+            )
+            if let platform = summaryDeparturePlatform {
+                Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
             }
-            HStack(spacing: 8) {
-                journeyActionButtons
-                iconOnlyShareLink(item: shareItem)
-            }
-            HStack(alignment: .center, spacing: 8) {
-                journeyActionButtons
-                iconOnlyShareLink(item: shareItem)
-            }
-            .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(.bordered)
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.bar)
     }
 
-    private func iconOnlyShareLink(item: String) -> some View {
-        ShareLink(item: item) { Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly) }
-    }
-
-    // At accessibility sizes the actions scroll with the content so a tall stack never covers the route.
-    private func stackedJourneyActions(leaveTime: Date) -> some View {
-        VStack(spacing: 8) {
-            journeyActionButtons
-            ShareLink(item: shareText(leaveTime: leaveTime)) {
-                Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+    private func arrivesColumn(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text("Arrives").font(.caption2).foregroundStyle(.secondary)
+            DelayedTimeText(
+                time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay, alignment: alignment
+            )
+            if let platform = summaryArrivalPlatform {
+                Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var hasReservableLeg: Bool { displayLegs.contains { !$0.isWalking } }
+
+    private var viewSeatsButton: some View {
+        Button { isShowingSeats = true } label: {
+            Label {
+                Text("View Seats").fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "carseat.right")
+            }
+            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
-    }
-
-    @ViewBuilder private var journeyActionButtons: some View {
-        if let onRemind {
-            Button(action: onRemind) {
-                Label {
-                    Text(isReminderSet ? "Cancel Reminder" : "Remind Me")
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: isReminderSet ? "bell.fill" : "bell")
-                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-        if let onPin {
-            Button(action: onPin) {
-                Label {
-                    Text(isPinned ? "Unpin" : "Pin as My Journey")
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: isPinned ? "pin.fill" : "pin")
-                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    private func shareText(leaveTime: Date) -> String {
-        let departure = resolvedConnection.departureTime.formatted(date: .omitted, time: .shortened)
-        let arrival = resolvedConnection.arrivalTime.formatted(date: .omitted, time: .shortened)
-        let leave = leaveTime.formatted(date: .omitted, time: .shortened)
-        return "\(resolvedConnection.lineNumber) \(resolvedConnection.departureStation.name) \(departure) to "
-            + "\(resolvedConnection.arrivalStation.name) \(arrival), \(changesText.lowercased()). Leave at \(leave)."
     }
 
     @ViewBuilder private var serviceAlertsSection: some View {
@@ -474,11 +369,11 @@ struct ConnectionLegRow: View {
     private var compactWalkingBody: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                railSegment(fill: showTopConnector ? railColor.opacity(0.6) : .clear, minimumHeight: 10)
+                railSegment(fill: showTopConnector ? railColor.opacity(0.6) : .clear, height: 10)
                 Circle()
                     .stroke(railColor.opacity(0.7), lineWidth: 2)
                     .frame(width: walkNodeSize, height: walkNodeSize)
-                railSegment(fill: showBottomConnector ? railColor.opacity(0.6) : .clear, minimumHeight: 10)
+                railSegment(fill: showBottomConnector ? railColor.opacity(0.6) : .clear, height: 10)
             }.frame(width: railWidth)
 
             ViewThatFits(in: .horizontal) {
@@ -500,7 +395,6 @@ struct ConnectionLegRow: View {
                 in: RoundedRectangle(cornerRadius: 10)
             )
         }
-        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 2)
     }
 
@@ -513,18 +407,14 @@ struct ConnectionLegRow: View {
 
     @ViewBuilder private var walkingDurationText: some View {
         if let walkingDurationMinutes {
-            Text(abbreviatedDurationText(minutes: walkingDurationMinutes))
+            Text("\(walkingDurationMinutes) min")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
     }
 
-    // The rail stretches with the row (the row is height-fixed to its content) so a wrapped name never breaks it.
-    private func railSegment(fill: Color, minimumHeight: CGFloat) -> some View {
-        Rectangle()
-            .fill(fill)
-            .frame(width: 2)
-            .frame(minHeight: minimumHeight, idealHeight: minimumHeight, maxHeight: .infinity)
+    private func railSegment(fill: Color, height: CGFloat) -> some View {
+        Rectangle().fill(fill).frame(width: 2, height: height)
     }
 
     private var fullLegBody: some View {
@@ -542,14 +432,15 @@ struct ConnectionLegRow: View {
         let connectorColor = isPassed ? railColor : railColor.opacity(0.35)
         let nodeFillColor = isPassed ? railColor : (colorScheme == .dark ? railColor.opacity(0.4) : railColor.opacity(0.22))
 
-        let stacksForAccessibilitySize = dynamicTypeSize.isAccessibilitySize
+        // Stacks from xxxLarge so long stop names get the full width instead of splitting mid-word.
+        let stacksBadgeAndPlatform = dynamicTypeSize >= .xxxLarge
         let nodeSize = stop.isEndpoint ? endpointNodeSize : stopNodeSize
 
         return HStack(alignment: .center, spacing: 12) {
             VStack(spacing: 0) {
                 railSegment(
                     fill: (isFirst ? showTopConnector : true) ? connectorColor : .clear,
-                    minimumHeight: stop.isEndpoint ? 8 : 10
+                    height: stop.isEndpoint ? 8 : 10
                 )
 
                 Circle()
@@ -559,15 +450,15 @@ struct ConnectionLegRow: View {
 
                 railSegment(
                     fill: (isLast ? showBottomConnector : true) ? connectorColor : .clear,
-                    minimumHeight: stop.isEndpoint ? 8 : 10
+                    height: stop.isEndpoint ? 8 : 10
                 )
             }
             .frame(width: railWidth)
 
-            if isFirst, !stacksForAccessibilitySize { legLineBadge.fixedSize() }
+            if isFirst, !stacksBadgeAndPlatform { legLineBadge.fixedSize() }
 
             VStack(alignment: .leading, spacing: 1) {
-                if isFirst, stacksForAccessibilitySize { legLineBadge.padding(.bottom, 2) }
+                if isFirst, stacksBadgeAndPlatform { legLineBadge.padding(.bottom, 2) }
 
                 Text(stop.name)
                     .font(.caption.weight(stop.isEndpoint ? .semibold : .regular))
@@ -579,17 +470,16 @@ struct ConnectionLegRow: View {
                     VStack(alignment: .leading, spacing: 1) { stopTimeDetails(stop: stop, isPassed: isPassed) }
                 }
 
-                if stacksForAccessibilitySize, let platform = stop.platform, stop.isEndpoint {
+                if stacksBadgeAndPlatform, let platform = stop.platform, stop.isEndpoint {
                     platformCapsule(platform).padding(.top, 2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !stacksForAccessibilitySize, let platform = stop.platform, stop.isEndpoint {
+            if !stacksBadgeAndPlatform, let platform = stop.platform, stop.isEndpoint {
                 platformCapsule(platform).fixedSize()
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, stop.isEndpoint ? 5 : 2)
     }
 
@@ -742,7 +632,7 @@ struct TransferRow: View {
     private var riskBadgeText: String? {
         if urgency == .missed { return "Missed" }
         guard let transferMinutes else { return nil }
-        return abbreviatedDurationText(minutes: transferMinutes)
+        return "\(transferMinutes) min"
     }
     private var summaryTextColor: Color {
         if isPassed { return .secondary }
@@ -790,15 +680,13 @@ struct TransferRow: View {
                 fullTransferBody
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .padding(.vertical, 3)
     }
 
     private var railSegment: some View {
         Rectangle()
             .fill(isPassed ? lineColor : lineColor.opacity(0.35))
-            .frame(width: 2)
-            .frame(minHeight: connectorSegmentHeight, idealHeight: connectorSegmentHeight, maxHeight: .infinity)
+            .frame(width: 2, height: connectorSegmentHeight)
     }
 
     private var compactWalkingBody: some View {
@@ -918,9 +806,4 @@ struct TransferRow: View {
             }
         }
     }
-}
-
-/// Minutes as "15 min" or "3 hr, 31 min" in the user's locale.
-private func abbreviatedDurationText(minutes: Int) -> String {
-    Duration.seconds(max(0, minutes) * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))
 }

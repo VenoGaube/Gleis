@@ -115,6 +115,8 @@ protocol TransportServiceProtocol: Sendable {
     func claimPrewarmedConnections(from: Station, to: Station) async throws -> PrewarmedConnectionsPage?
     func fetchStations() async throws -> [Station]
     func searchStations(matching query: String) async throws -> [Station]
+    /// Seat availability for each leg of the connection. The only call that reaches the ÖBB seat endpoints.
+    func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap]
 }
 
 // MARK: - NotificationServiceProtocol

@@ -237,7 +237,7 @@ struct MyJourneyCard: View {
     private func departureColumn(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             Text("Departs").font(.caption2).foregroundStyle(.secondary)
-            DelayedTimeText(time: journey.departureTime, delayMinutes: journey.delay)
+            DelayedTimeText(time: journey.departureTime, delayMinutes: journey.delay, alignment: alignment)
             if let departurePlatformLabel {
                 Text("Platform \(departurePlatformLabel)")
                     .font(.caption2.weight(.medium))
@@ -249,7 +249,7 @@ struct MyJourneyCard: View {
     private func arrivalColumn(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             Text("Arrives").font(.caption2).foregroundStyle(.secondary)
-            DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold)
+            DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold, alignment: alignment)
             if let finalArrivalPlatformLabel {
                 Text("Platform \(finalArrivalPlatformLabel)")
                     .font(.caption2.weight(.medium))
