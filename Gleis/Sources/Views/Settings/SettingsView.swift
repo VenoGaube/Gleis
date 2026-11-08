@@ -67,18 +67,18 @@ struct SettingsView: View {
                     Haptics.selection()
                 }
             )) {
-                SettingsRow(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", title: "Account For Delays", color: .trainBlue)
+                SettingsRow(icon: "clock.arrow.trianglehead.counterclockwise.rotate.90", title: "Follow live delays", color: .trainBlue)
             }
         } header: {
-            Text("Leave Time")
+            Text("Leave time").textCase(nil)
         } footer: {
             if settingsManager.trainCommuteConfig.usesDelayInLeaveTime {
                 Text(
-                    "Leave times follow the live delay, so a late train means you can leave later. Turn this off to always plan against the scheduled departure."
+                    "Your leave time moves with the delay, so a delayed train lets you leave later. Turn this off to always use the timetable."
                 )
             } else {
                 Text(
-                    "Leave times are based on the scheduled departure. Turn this on to push your leave time back when a train is running late."
+                    "Your leave time uses the timetable. Turn this on to leave later when your train is delayed."
                 )
             }
         }
@@ -90,9 +90,9 @@ struct SettingsView: View {
             Button {
                 handleNotificationToggle()
             } label: {
-                settingsValueRow(icon: "bell.fill", title: "Notification Permission", color: .orange) {
+                settingsValueRow(icon: "bell.fill", title: "Notification permission", color: .orange) {
                     HStack(spacing: 4) {
-                        Text(isNotificationEnabled ? "Allowed" : "Denied").font(.caption).foregroundStyle(.secondary)
+                        Text(isNotificationEnabled ? "Allowed" : "Not allowed").font(.caption).foregroundStyle(.secondary)
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
@@ -107,7 +107,7 @@ struct SettingsView: View {
                     Haptics.selection()
                 }
             )) {
-                SettingsRow(icon: "speaker.wave.2.fill", title: "Reminder Sound", color: .purple)
+                SettingsRow(icon: "speaker.wave.2.fill", title: "Reminder sound", color: .purple)
             }
             .disabled(!isNotificationEnabled)
 
@@ -117,20 +117,20 @@ struct SettingsView: View {
             } label: {
                 // The message sits under the title so it can wrap in full instead of being cut to one line.
                 VStack(alignment: .leading, spacing: 4) {
-                    SettingsRow(icon: "text.bubble.fill", title: "Reminder Message", color: .teal)
+                    SettingsRow(icon: "text.bubble.fill", title: "Reminder message", color: .teal)
                     Text(settingsManager.trainCommuteConfig.notificationSettings.customMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         } header: {
-            Text("Notifications")
+            Text("Notifications").textCase(nil)
         } footer: {
             if !isNotificationEnabled {
-                Text("Enable notification permission to receive train departure reminders. Tap to open Settings.")
+                Text("Enable notifications so Gleis can remind you when to leave. Tap above to turn them on.")
             } else {
                 Text(
-                    "When enabled, you'll receive both a 5-minute warning and an exact departure time alert for your scheduled journeys."
+                    "You get a reminder 5 minutes before your leave time and another when it is time to leave."
                 )
             }
         }
@@ -155,15 +155,15 @@ struct SettingsView: View {
                 Text("1.0.0").foregroundStyle(.secondary)
             }
             Link(destination: URL(string: "https://shop.oebbtickets.at/")!) {
-                settingsValueRow(icon: "globe", title: "Data Provider", color: .cyan) {
+                settingsValueRow(icon: "globe", title: "Train data", color: .cyan) {
                     HStack(spacing: 4) {
-                        Text("OEBB").foregroundStyle(.secondary)
+                        Text("ÖBB").foregroundStyle(.secondary)
                         Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
                     }
                 }
             }.tint(.primary)
         } header: {
-            Text("About")
+            Text("About").textCase(nil)
         }
     }
 
@@ -231,6 +231,7 @@ struct SettingsView: View {
                         let stations = stationNames(for: item.direction)
                         reminderRow(
                             spokenSummary: "\(item.day.fullName), \(item.schedule.lineNumber) at \(item.schedule.departureTimeString), \(stations.from) to \(stations.to)",
+                            removeTitle: "Remove",
                             removeAccessibilityLabel: "Remove repeat journey for \(item.day.fullName)",
                             onRemove: { repeatScheduleToRemove = (item.day, item.direction) }
                         ) {
@@ -255,7 +256,8 @@ struct SettingsView: View {
                         let departure = reminder.departureTime.formatted(date: .omitted, time: .shortened)
                         reminderRow(
                             spokenSummary: "\(weekday?.fullName ?? ""), \(reminder.lineNumber) at \(departure) to \(reminder.destination)",
-                            removeAccessibilityLabel: "Remove reminder for \(reminder.lineNumber) at \(departure)",
+                            removeTitle: "Cancel",
+                            removeAccessibilityLabel: "Cancel reminder for \(reminder.lineNumber) at \(departure)",
                             onRemove: { cancelReminder(reminder) }
                         ) {
                             HStack(spacing: 6) {
@@ -269,19 +271,19 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Reminders")
+            Text("Reminders").textCase(nil)
         }.onAppear { settingsManager.pruneExpiredReminders() }.confirmationDialog(
-            "Remove Repeat Journey?",
+            "Remove repeat journey?",
             isPresented: Binding(
                 get: { repeatScheduleToRemove != nil }, set: { if !$0 { repeatScheduleToRemove = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove Schedule", role: .destructive) {
+            Button("Remove", role: .destructive) {
                 if let item = repeatScheduleToRemove { removeRepeatSchedule(day: item.day, direction: item.direction) }
             }
         } message: {
-            Text("This will permanently remove this scheduled train from your repeat journeys.")
+            Text("This removes the train from your repeat journeys.")
         }
     }
 
@@ -297,6 +299,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func reminderRow<Details: View>(
         spokenSummary: String,
+        removeTitle: String,
         removeAccessibilityLabel: String,
         onRemove: @escaping () -> Void,
         @ViewBuilder details: () -> Details
@@ -308,7 +311,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 detailsColumn
                 Button(role: .destructive, action: onRemove) {
-                    Label("Remove", systemImage: "bell.slash.fill").foregroundStyle(.red)
+                    Label(removeTitle, systemImage: "bell.slash.fill").foregroundStyle(.red)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(removeAccessibilityLabel)
@@ -382,12 +385,12 @@ struct ReminderMessageEditor: View {
     @State private var draft: String = ""
 
     private static let maximumLength = 80
-    private static let defaultMessage = "🚂 Time to catch your train!"
+    private static let defaultMessage = "🚂 Time to catch your train."
 
     var body: some View {
         Form {
             Section {
-                TextField("Time to catch your train!", text: $draft, axis: .vertical)
+                TextField("Time to catch your train.", text: $draft, axis: .vertical)
                     .lineLimit(1...)
                     .onChange(of: draft) { _, newValue in
                         if newValue.count > Self.maximumLength {
@@ -395,20 +398,21 @@ struct ReminderMessageEditor: View {
                         }
                     }
             } header: {
-                Text("Message")
+                Text("Message").textCase(nil)
             } footer: {
-                Text("Shown at the top of the five-minute warning. \(Self.maximumLength - draft.count) characters left.")
+                let charactersLeft = Self.maximumLength - draft.count
+                Text("Shown at the top of the 5-minute reminder. \(charactersLeft) \(charactersLeft == 1 ? "character" : "characters") left.")
             }
 
             Section {
-                Button("Reset To Default") {
+                Button("Reset to default") {
                     draft = Self.defaultMessage
                     Haptics.selection()
                 }
                 .disabled(draft == Self.defaultMessage)
             }
         }
-        .navigationTitle("Reminder Message")
+        .navigationTitle("Reminder message")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { draft = settingsManager.trainCommuteConfig.notificationSettings.customMessage }
         .onDisappear(perform: persist)
@@ -429,6 +433,7 @@ struct SettingsRow: View {
     let title: String
     let color: Color
     @ScaledMetric(relativeTo: .body) private var iconTileSize: CGFloat = 28
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(icon: String, title: String, color: Color) {
         self.icon = icon
@@ -437,7 +442,11 @@ struct SettingsRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        // At accessibility sizes the icon sits above the title so the title keeps the full width and no word splits.
+        let iconAndTitleLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 12))
+        iconAndTitleLayout {
             Image(systemName: icon).font(.body).foregroundStyle(.white).frame(width: iconTileSize, height: iconTileSize)
                 .background(color, in: RoundedRectangle(cornerRadius: 6))
                 .accessibilityHidden(true)

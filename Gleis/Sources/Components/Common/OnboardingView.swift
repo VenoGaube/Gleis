@@ -164,10 +164,10 @@ struct OnboardingView: View {
             } label: {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) {
-                        Text(isLastStep ? "Start Commuting" : "Continue")
+                        Text(isLastStep ? "Get started" : "Continue")
                         Image(systemName: isLastStep ? "checkmark.circle.fill" : "arrow.right")
                     }
-                    Text(isLastStep ? "Start Commuting" : "Continue")
+                    Text(isLastStep ? "Get started" : "Continue")
                         .multilineTextAlignment(.center)
                 }
                 .font(.headline.weight(.semibold))
@@ -274,27 +274,27 @@ enum OnboardingStep: CaseIterable {
         case .journey: "SETUP"
         case .timing: "TIMING"
         case .widget: "WIDGET"
-        case .notifications: "ALERTS"
+        case .notifications: "REMINDERS"
         }
     }
 
     var title: String {
         switch self {
-        case .welcome: "Your Real Train View"
-        case .journey: "Pick Your Daily Route"
-        case .timing: "How Long To The Platform?"
-        case .widget: "See It On Your Home Screen"
-        case .notifications: "Get The Right Nudge"
+        case .welcome: "Your trains, live"
+        case .journey: "Pick your daily route"
+        case .timing: "Time to station"
+        case .widget: "See it on your Home Screen"
+        case .notifications: "Know when to leave"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .welcome: "This is the exact My Journey and connection card UI you get in the Train tab."
-        case .journey: "Select origin and destination and preview the real connection cards from your route."
-        case .timing: "Gleis subtracts this from each departure to tell you when to leave. Without it, leave time is just departure time."
-        case .widget: "Add the widget to your home screen for live departure, countdown, and platform info."
-        case .notifications: "Allow alerts so Gleis can remind you when it is actually time to leave."
+        case .welcome: "This is how My Journey and your connections look in the Train tab."
+        case .journey: "Pick your start and destination stations to see your connections."
+        case .timing: "Gleis takes this off each departure time to tell you when to leave. Without it, your leave time is the departure time."
+        case .widget: "Add the widget to your Home Screen to see your next train, when to leave and the platform."
+        case .notifications: "Allow reminders so Gleis can tell you when to leave."
         }
     }
 
@@ -305,7 +305,7 @@ enum OnboardingStep: CaseIterable {
 
 /// Collects walking and buffer time during setup.
 ///
-/// These default to zero, and nothing in the app used to ask for them — so a new
+/// These default to zero, and nothing in the app used to ask for them, so a new
 /// user's "leave at" time was identical to the departure time, quietly making the
 /// app's core number useless until they discovered the per-station sheets.
 struct TimingSetupStepView: View {
@@ -330,8 +330,8 @@ struct TimingSetupStepView: View {
         OnboardingPanel(step: step) {
             VStack(spacing: 14) {
                 OnboardingTimingStepper(
-                    title: "Getting to the platform",
-                    subtitle: originStation.map { "From home to \($0.name)" } ?? "Door to platform",
+                    title: "Time to station",
+                    subtitle: originStation.map { "From home to \($0.name)" } ?? "From home to the station",
                     systemImage: "figure.walk",
                     tint: .trainBlue,
                     minutes: walkingMinutes,
@@ -340,8 +340,8 @@ struct TimingSetupStepView: View {
                 )
 
                 OnboardingTimingStepper(
-                    title: "Extra buffer",
-                    subtitle: "Breathing room so you are not sprinting",
+                    title: "Buffer",
+                    subtitle: "Extra minutes so you don't have to rush",
                     systemImage: "hourglass",
                     tint: .orange,
                     minutes: bufferMinutes,
@@ -357,10 +357,10 @@ struct TimingSetupStepView: View {
     private var summaryCard: some View {
         VStack(spacing: 6) {
             if totalLeadMinutes == 0 {
-                Text("Leave time will equal departure time")
+                Text("Your leave time is the departure time")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.orange)
-                Text("Set at least a walking time so Gleis can tell you when to head out.")
+                Text("Set your time to station so Gleis can tell you when to leave.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -368,7 +368,7 @@ struct TimingSetupStepView: View {
                 Text("Leave \(totalLeadMinutes) min before departure")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                Text("You can fine-tune this per station any time.")
+                Text("You can change this for each station later.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -592,7 +592,7 @@ struct ExactTrainViewPreviewCard: View {
     }
 
     private var previewTitle: some View {
-        Label("Exact Train Tab Cards", systemImage: "rectangle.stack.fill")
+        Label("Same as the Train tab", systemImage: "rectangle.stack.fill")
             .font(.caption.weight(.bold))
             .foregroundStyle(Color(red: 0.11, green: 0.29, blue: 0.53))
     }
@@ -698,14 +698,14 @@ struct SetupChecklistCard: View {
 
             OnboardingCheckRow(
                 title: "Choose your route",
-                subtitle: "Set origin and destination in the Setup step.",
+                subtitle: "Pick your start and destination stations in Setup.",
                 isComplete: isJourneyConfigured,
                 actionTitle: isJourneyConfigured ? nil : "Open Setup",
                 action: isJourneyConfigured ? nil : onOpenSetup
             )
             OnboardingCheckRow(
                 title: "Enable notifications",
-                subtitle: "Receive leave-time reminders.",
+                subtitle: "Get a reminder when it's time to leave.",
                 isComplete: isNotificationEnabled,
                 actionTitle: isNotificationEnabled ? nil : (isRequestingNotificationPermission ? "Requesting..." : "Enable"),
                 action: (isNotificationEnabled || isRequestingNotificationPermission) ? nil : onEnableNotifications
@@ -804,7 +804,7 @@ struct JourneySetupStepView: View {
                 routePickerCard
 
                 if usingSampleData {
-                    statusRow(icon: "wifi.slash", text: "Offline preview shown. Pull to refresh after setup.", color: .orange)
+                    statusRow(icon: "wifi.slash", text: "Can't reach ÖBB right now, so these are sample trains.", color: .orange)
                 }
 
                 connectionContent
@@ -853,13 +853,13 @@ struct JourneySetupStepView: View {
         if originStation == nil || destinationStation == nil {
             emptyStateCard(
                 icon: "arrow.trianglehead.branch",
-                title: "Choose Two Stations",
-                subtitle: "We will load the same connection cards you see in the Train tab."
+                title: "Pick two stations",
+                subtitle: "You'll see the same connections as in the Train tab."
             )
         } else if isLoadingConnections {
             VStack(spacing: 10) {
                 ProgressView().tint(.trainBlue)
-                Text("Finding departures...")
+                Text("Finding connections...")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -869,16 +869,16 @@ struct JourneySetupStepView: View {
         } else if connections.isEmpty {
             emptyStateCard(
                 icon: "exclamationmark.triangle",
-                title: "No Connections Right Now",
-                subtitle: "Try another station pair or continue and set it later in Train tab."
+                title: "No connections right now",
+                subtitle: "Try other stations, or continue and set your route later in the Train tab."
             )
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 statusRow(
                     icon: pinnedJourney == nil ? "square.stack.3d.down.right" : "checkmark.circle.fill",
                     text: pinnedJourney == nil
-                        ? "These are the real Train tab cards. Tap one to use it for onboarding previews."
-                        : "Selected for onboarding previews. This does not pin it in the app.",
+                        ? "These are your connections, as in the Train tab. Tap one to use it in the next steps."
+                        : "Used in the next steps. This doesn't pin it as My Journey.",
                     color: pinnedJourney == nil ? .secondary : .green
                 )
 
@@ -1106,7 +1106,7 @@ struct WidgetStepView: View {
     @ScaledMetric(relativeTo: .caption) private var stepNumberDiameter: CGFloat = 20
 
     private let instructionRows: [(String, String)] = [
-        ("1", "Long press your home screen"),
+        ("1", "Long press your Home Screen"),
         ("2", "Tap the + button in the top corner"),
         ("3", "Search for Gleis and add the widget"),
     ]
@@ -1120,13 +1120,13 @@ struct WidgetStepView: View {
                         data: widgetPreviewData(referenceDate: context.date)
                     )
                     VStack(spacing: 10) {
-                        OnboardingWidgetPreviewSurface(title: "Small Widget") {
+                        OnboardingWidgetPreviewSurface(title: "Small widget") {
                             OnboardingSmallWidgetView(entry: entry)
                                 .frame(width: widgetPreviewSide)
                                 .frame(minHeight: widgetPreviewSide, idealHeight: widgetPreviewSide)
                         }
 
-                        OnboardingWidgetPreviewSurface(title: "Medium Widget") {
+                        OnboardingWidgetPreviewSurface(title: "Medium widget") {
                             // The ideal height fills the box; wrapped text that needs more makes it taller instead of cut.
                             OnboardingMediumWidgetView(entry: entry)
                                 .frame(minHeight: widgetPreviewSide, idealHeight: widgetPreviewSide)
@@ -1302,13 +1302,13 @@ struct NotificationStepView: View {
                 notificationPreview
 
                 VStack(spacing: 10) {
-                    Text("These are the exact notification texts scheduled by the app.")
+                    Text("These are the reminders Gleis will send you.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
                     if notificationStatus == .authorized || notificationStatus == .provisional || notificationStatus == .ephemeral {
-                        Label("Notifications Enabled", systemImage: "checkmark.circle.fill")
+                        Label("Notifications enabled", systemImage: "checkmark.circle.fill")
                             .font(.callout.weight(.semibold))
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.green)
@@ -1326,7 +1326,7 @@ struct NotificationStepView: View {
                                     Image(systemName: "bell.badge.fill")
                                 }
 
-                                Text(isRequestingPermission ? "Requesting..." : "Enable Notifications")
+                                Text(isRequestingPermission ? "Requesting..." : "Enable notifications")
                                     .font(.headline.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)
@@ -1406,7 +1406,7 @@ struct NotificationStepView: View {
     }
 
     private func interruptionTag(for level: UNNotificationInterruptionLevel) -> some View {
-        Text(level == .timeSensitive ? "Time Sensitive" : "Active")
+        Text(level == .timeSensitive ? "Time sensitive" : "Active")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
@@ -1645,7 +1645,7 @@ struct OnboardingMediumWidgetView: View {
                     if conn.isDelayed {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
-                            Text("+\(conn.delay) min delay").font(.caption.weight(.medium))
+                            Text("+\(conn.delay) min").font(.caption.weight(.medium))
                         }
                         .foregroundStyle(.orange)
                     }
@@ -1675,7 +1675,7 @@ struct OnboardingMediumWidgetView: View {
             if conn.isPinned {
                 HStack(spacing: 2) {
                     Image(systemName: "pin.fill").font(.system(size: 7))
-                    Text("MY JOURNEY").font(.system(size: 7, weight: .semibold))
+                    Text("My Journey").textCase(.uppercase).font(.system(size: 7, weight: .semibold))
                 }
                 .foregroundStyle(.secondary)
             }
@@ -1684,7 +1684,7 @@ struct OnboardingMediumWidgetView: View {
 
     private func departureColumn(for conn: WidgetConnection) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("DEPARTURE").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+            Text("Departs").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             if conn.isDelayed {
                 // The struck timetable time moves above the live one when both do not fit on a line.
                 ViewThatFits(in: .horizontal) {
@@ -1713,7 +1713,7 @@ struct OnboardingMediumWidgetView: View {
 
     private func platformColumn(for conn: WidgetConnection, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
-            Text("PLATFORM").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+            Text("Platform").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             Text(conn.platform ?? "–")
                 .font(.title2.weight(.bold).monospacedDigit())
                 .scalableText(minimumScale: 0.8)
@@ -1766,7 +1766,7 @@ struct OnboardingWidgetCountdownDisplay: View {
     var body: some View {
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("GO!")
+                Text("Leave now")
                     .font(mainFont)
                     .foregroundStyle(.secondary)
                     .scalableText(minimumScale: 0.8)
@@ -1776,7 +1776,7 @@ struct OnboardingWidgetCountdownDisplay: View {
                     .foregroundStyle(Color.urgency(for: remaining))
                     .multilineTextAlignment(.center)
                     .scalableText(minimumScale: 0.8)
-                Text("leave now")
+                Text("to leave")
                     .font(labelFont.weight(.medium))
                     .foregroundStyle(.secondary)
             } else {
@@ -1802,14 +1802,14 @@ struct OnboardingWidgetDepartureInfo: View {
     var body: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("DEP").font(labelFont).foregroundStyle(.secondary)
+                Text("Departs").font(labelFont).foregroundStyle(.secondary)
                 if connection.isDelayed {
                     HStack(spacing: 4) {
                         Text(onboardingWidgetTimeFormatter.string(from: connection.departureTime))
                             .font(valueFont)
                             .foregroundStyle(.orange)
                             .scalableText(minimumScale: 0.8)
-                        Text("+\(connection.delay)'")
+                        Text("+\(connection.delay) min")
                             .font(delayFont)
                             .foregroundStyle(.orange)
                     }
@@ -1823,7 +1823,7 @@ struct OnboardingWidgetDepartureInfo: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("PL").font(labelFont).foregroundStyle(.secondary)
+                Text("Platform").font(labelFont).foregroundStyle(.secondary)
                 Text(connection.platform ?? "–").font(valueFont).scalableText(minimumScale: 0.8)
             }
         }
@@ -1843,8 +1843,8 @@ struct OnboardingWidgetEmptyState: View {
         default: .trainBlue
         }
         let title = switch data?.state {
-        case .fallback: "Offline data"
-        case .stale: "No departures"
+        case .fallback: "Not up to date"
+        case .stale: "No connections"
         default: "Set up route"
         }
 
@@ -1910,10 +1910,10 @@ private func onboardingFormatCountdown(_ seconds: TimeInterval) -> String {
     let minutes = totalMinutes % 60
 
     if hours > 0 {
-        if minutes == 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
+        if minutes == 0 { return "\(hours) h" }
+        return "\(hours) h \(minutes) min"
     }
-    return "\(minutes)m"
+    return "\(minutes) min"
 }
 
 private func onboardingWidgetGradient(remaining: TimeInterval) -> some View {

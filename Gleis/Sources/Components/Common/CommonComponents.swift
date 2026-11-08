@@ -354,8 +354,8 @@ struct ConnectionsLoadingView: View {
     private func message(at now: Date) -> String {
         switch now.timeIntervalSince(startedAt) {
         case ..<Self.slowThreshold: "Loading live departures…"
-        case ..<Self.verySlowThreshold: "Still loading — ÖBB is answering slowly."
-        default: "ÖBB is taking longer than usual. Hang tight."
+        case ..<Self.verySlowThreshold: "Still loading. ÖBB is slow to answer."
+        default: "ÖBB is taking longer than usual."
         }
     }
 
@@ -610,7 +610,7 @@ struct ErrorView: View {
                 Haptics.notification(.warning)
                 onRetry()
             } label: {
-                Label("Try Again", systemImage: "arrow.clockwise")
+                Label("Try again", systemImage: "arrow.clockwise")
             }.buttonStyle(.borderedProminent)
         }.padding(32)
     }
@@ -794,7 +794,7 @@ struct RouteHeader: View {
         Button {
             onSetTravelTime(station)
         } label: {
-            Label("Set travel time", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
+            Label("Set time to station", systemImage: "plus.circle.fill").font(.caption).foregroundStyle(.blue).opacity(
                 pulseHint ? 0.6 : 1)
         }
         .buttonStyle(.plain)
@@ -830,7 +830,7 @@ struct StationButton: View {
                     Text(label).foregroundStyle(.secondary)
                 }.font(.caption)
                 // Wraps rather than truncates, so a long station name is always readable in full.
-                Text(station?.name ?? "Select").font(.subheadline.weight(.medium)).foregroundStyle(
+                Text(station?.name ?? "Pick a station").font(.subheadline.weight(.medium)).foregroundStyle(
                     station == nil ? .secondary : .primary
                 ).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).padding(12).background(
@@ -947,7 +947,7 @@ struct EndOfListFooter: View {
     var body: some View {
         VStack(spacing: 6) {
             Capsule().frame(width: 40, height: 4).foregroundStyle(.quaternary)
-            Text("Showing \(count) connections").font(.caption).foregroundStyle(.secondary)
+            Text(count == 1 ? "Showing 1 connection" : "Showing \(count) connections").font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity).padding(.vertical, 12)
     }
@@ -995,11 +995,11 @@ struct TravelTimeSheet: View {
                         }
                     }
                 } header: {
-                    Text("Travel time to \(station.name)")
+                    Text("How long does it take you to get to \(station.name)?")
                 } footer: {
-                    Text("How long it takes you to reach this station from home/work.")
+                    Text("From home or work.")
                 }
-            }.navigationTitle("Travel Time").navigationBarTitleDisplayMode(.inline).toolbar {
+            }.navigationTitle("Time to station").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -1039,11 +1039,11 @@ struct BufferTimeSheet: View {
                         }
                     }
                 } header: {
-                    Text("Buffer time for \(station.name)")
+                    Text("Buffer for \(station.name)")
                 } footer: {
-                    Text("Extra time before departure to account for delays, queues, or finding your platform.")
+                    Text("Extra minutes on top of your time to the station, for delays, queues or finding your platform.")
                 }
-            }.navigationTitle("Buffer Time").navigationBarTitleDisplayMode(.inline).toolbar {
+            }.navigationTitle("Buffer").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -1097,8 +1097,8 @@ struct DepartureTimeSheet: View {
 
     private func quickChoices(now: Date, calendar: Calendar = .current) -> [QuickChoice] {
         var choices = [
-            QuickChoice(title: "+1 h", date: now.addingTimeInterval(60 * 60)),
-            QuickChoice(title: "+2 h", date: now.addingTimeInterval(2 * 60 * 60)),
+            QuickChoice(title: "In 1 hour", date: now.addingTimeInterval(60 * 60)),
+            QuickChoice(title: "In 2 hours", date: now.addingTimeInterval(2 * 60 * 60)),
         ]
         let startOfToday = calendar.startOfDay(for: now)
         if let eveningToday = calendar.date(

@@ -541,7 +541,7 @@ actor OebbAPIClient {
             guard !seenAlertIDs.contains(id) else { continue }
             seenAlertIDs.insert(id)
 
-            let title = gateNormalizedString(source.head) ?? "Service disruption"
+            let title = gateNormalizedString(source.head) ?? "Service alert"
             let message = gatePlainText(source.text)
             let startsAt = gateDateTime(date: source.sDate, time: source.sTime)
             let endsAt = gateDateTime(date: source.eDate, time: source.eTime)

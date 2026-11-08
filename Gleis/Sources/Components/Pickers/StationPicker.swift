@@ -52,9 +52,9 @@ struct StationPickerSheet: View {
             Section("Recent") { ForEach(recentStations) { stationRow($0, isFavorite: favoriteIds.contains($0.id)) } }
         }
         if !stations.isEmpty {
-            Section("Popular Stations") { ForEach(stations) { stationRow($0, isFavorite: favoriteIds.contains($0.id)) } }
+            Section("Popular stations") { ForEach(stations) { stationRow($0, isFavorite: favoriteIds.contains($0.id)) } }
         } else if recentStations.isEmpty, favoriteStations.isEmpty {
-            Section("Loading Stations") { ForEach(0 ..< 4, id: \.self) { _ in SkeletonStationRow() } }
+            Section("Loading stations") { ForEach(0 ..< 4, id: \.self) { _ in SkeletonStationRow() } }
         }
     }
 

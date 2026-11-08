@@ -124,7 +124,7 @@ struct NotificationSettings: Codable, Equatable {
 
     init() {
         soundEnabled = true
-        customMessage = "🚂 Time to catch your train!"
+        customMessage = "🚂 Time to catch your train."
     }
 }
 

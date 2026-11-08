@@ -6,7 +6,7 @@ import WidgetKit
 
 struct SelectTransportIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Gleis Widget"
-    static var description: IntentDescription = "Shows the same departures as the Transport view"
+    static var description: IntentDescription = "Shows the same departures as the Train tab"
 }
 
 // MARK: - GleisProvider
@@ -50,7 +50,7 @@ struct GleisProvider: AppIntentTimelineProvider {
                     routeText: "",
                     compactRouteText: "",
                     state: .stale,
-                    stateMessage: "Open Gleis to refresh departures.",
+                    stateMessage: "Open Gleis to refresh.",
                     recoveryAction: .openLiveRoute,
                     connection: nil,
                     leaveTime: nil
@@ -71,7 +71,7 @@ struct GleisProvider: AppIntentTimelineProvider {
             }
             let entry = GleisEntry(
                 date: now,
-                snapshot: data.renderSnapshot(at: now, overridingState: .stale, message: "Refreshing departures..."),
+                snapshot: data.renderSnapshot(at: now, overridingState: .stale, message: "Open Gleis to refresh."),
                 configuration: configuration
             )
             return Timeline(entries: [entry], policy: timelineReloadPolicy(now: now, data: data, entryCount: 1))
@@ -87,7 +87,7 @@ struct GleisProvider: AppIntentTimelineProvider {
                 snapshot: data.renderSnapshot(
                     at: instant,
                     overridingState: isPastCoverage ? .stale : nil,
-                    message: isPastCoverage ? "Refreshing departures..." : nil
+                    message: isPastCoverage ? "Open Gleis to refresh." : nil
                 ),
                 configuration: configuration,
                 laterDepartureTimes: isPastCoverage ? [] : data.laterDepartureTimes(at: instant)
@@ -340,7 +340,7 @@ struct SmallWidgetView: View {
                 Image(systemName: "xmark.octagon.fill")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.red)
-                    .accessibilityLabel("Service cancelled")
+                    .accessibilityLabel("Cancelled")
             } else if connection.hasServiceAlert {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.semibold))
@@ -434,11 +434,11 @@ struct MediumWidgetView: View {
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     departureTimeText(connection)
-                    platformText("Pl \(connection.displayPlatform)")
+                    platformText("Pl. \(connection.displayPlatform)")
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     departureTimeText(connection)
-                    platformText("Pl \(connection.displayPlatform)")
+                    platformText("Pl. \(connection.displayPlatform)")
                 }
             }
 
@@ -486,7 +486,7 @@ struct CircularWidgetView: View {
                 }
 
                 if remaining <= 0 {
-                    Text("GO")
+                    Text("Now")
                         .font(.system(.headline, design: .rounded, weight: .black))
                         .scalableText(minimumScale: 0.8)
                 } else if remaining <= 60 {
@@ -599,7 +599,7 @@ struct RectangularWidgetView: View {
             HStack(spacing: 6) {
                 lineText
                 departureText
-                Text("Pl \(connection.displayPlatform)")
+                Text("Pl. \(connection.displayPlatform)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .scalableText(minimumScale: 0.8)
@@ -621,7 +621,7 @@ struct RectangularWidgetView: View {
             HStack(spacing: 4) {
                 countdownValue(current, remaining: remaining)
                 if remaining > 0, remaining <= 60 {
-                    Text("to go").font(.caption).foregroundStyle(.secondary).scalableText(minimumScale: 0.8)
+                    Text("to leave").font(.caption).foregroundStyle(.secondary).scalableText(minimumScale: 0.8)
                 }
                 statusLabel(current.connection)
             }
@@ -637,14 +637,14 @@ struct RectangularWidgetView: View {
     private func countdownValue(_ current: ScheduledConnection, remaining: TimeInterval) -> some View {
         let font = Font.subheadline.weight(.bold).monospacedDigit()
         if remaining <= 0 {
-            Text("GO!").font(font).widgetAccentable().scalableText(minimumScale: 0.8)
+            Text("Leave now").font(font).widgetAccentable().scalableText(minimumScale: 0.8)
         } else if remaining <= 60 {
             Text(timerInterval: entry.date...max(entry.date, current.leaveTime), countsDown: true, showsHours: false)
                 .font(font)
                 .widgetAccentable()
                 .scalableText(minimumScale: 0.8)
         } else {
-            Text("\(minutesRemaining(remaining))m")
+            Text("\(minutesRemaining(remaining)) min")
                 .font(font)
                 .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
                 .widgetAccentable()
@@ -771,7 +771,7 @@ private struct CompactDepartureLine: View {
 
     var body: some View {
         let time = timeFormatter.string(from: connection.departureTime)
-        let platform = "Pl \(connection.displayPlatform)"
+        let platform = "Pl. \(connection.displayPlatform)"
         VStack(alignment: alignment, spacing: 2) {
             ViewThatFits(in: .horizontal) {
                 Text("\(time) · \(platform)").lineLimit(1)
@@ -859,7 +859,12 @@ struct CountdownDisplay: View {
         let remaining = leaveTime.timeIntervalSince(referenceDate)
         VStack(spacing: 2) {
             if remaining <= 0 {
-                Text("GO!").font(Self.mainFont).foregroundStyle(.secondary).scalableText(minimumScale: 0.8)
+                Text("Leave now")
+                    .font(Self.mainFont)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             } else if remaining <= 60 {
                 // A closed range stops at 0:00, where the style: .timer form would start counting up.
                 Text(timerInterval: referenceDate...max(referenceDate, leaveTime), countsDown: true, showsHours: false)
@@ -867,9 +872,9 @@ struct CountdownDisplay: View {
                     .foregroundStyle(urgencyColor(remaining))
                     .multilineTextAlignment(.center)
                     .scalableText(minimumScale: 0.8)
-                label("leave now")
+                label("to leave")
             } else {
-                Text("\(minutesRemaining(remaining))m")
+                Text("\(minutesRemaining(remaining)) min")
                     .font(Self.mainFont.monospacedDigit())
                     .foregroundStyle(urgencyColor(remaining))
                     .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
@@ -914,7 +919,7 @@ struct DepartureInfo: View {
                 HStack(spacing: 4) {
                     Image(systemName: "clock.badge.exclamationmark")
                         .font(.caption2.weight(.semibold))
-                    Text("Delay +\(connection.delay) m")
+                    Text("+\(connection.delay) min")
                         .font(.caption2.weight(.semibold))
                         .scalableText(minimumScale: 0.8)
                 }
@@ -926,7 +931,7 @@ struct DepartureInfo: View {
 
     private var departureColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Departure")
+            Text("Departs")
                 .font(labelFont)
                 .foregroundStyle(.secondary)
                 .scalableText(minimumScale: 0.8)
@@ -983,9 +988,9 @@ struct EmptyWidgetView: View {
         }
         let hasSnapshot = snapshot != nil
         let title = switch snapshot?.state {
-        case .fallback: "Offline data"
-        case .stale: "No departures"
-        default: hasSnapshot ? "No departures" : "Set up route"
+        case .fallback: "Not up to date"
+        case .stale: "No connections"
+        default: hasSnapshot ? "No connections" : "Set up route"
         }
         let subtitle = snapshot?.emptyHintText ?? WidgetRenderSnapshot.missingHintText
 
@@ -1115,7 +1120,7 @@ private func spokenLeaveSummary(for current: ScheduledConnection, at date: Date)
     if connection.isCancelled {
         parts.append("cancelled")
     } else {
-        if connection.isDelayed { parts.append("\(connection.delay) \(connection.delay == 1 ? "minute" : "minutes") late") }
+        if connection.isDelayed { parts.append("delayed \(connection.delay) \(connection.delay == 1 ? "minute" : "minutes")") }
         if connection.hasServiceAlert { parts.append("service alert") }
     }
     return parts.joined(separator: ", ")

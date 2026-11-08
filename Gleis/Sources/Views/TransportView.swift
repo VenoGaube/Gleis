@@ -128,11 +128,11 @@ struct TransportView: View {
                     }
                 }
             }.toastOverlay(viewModel.toastManager).alert(
-                viewModel.errorTitle ?? "Error", isPresented: $viewModel.showError
+                viewModel.errorTitle ?? "Something went wrong", isPresented: $viewModel.showError
             ) {
                 Button("OK") { viewModel.showError = false }
             } message: {
-                Text(viewModel.errorMessage ?? "Unknown error")
+                Text(viewModel.errorMessage ?? "Try again in a moment.")
             }.tint(.trainBlue)
     }
 
@@ -171,7 +171,7 @@ struct TransportView: View {
 
             if showsRefreshErrorBanner {
                 RefreshErrorBanner(
-                    title: viewModel.lastRefreshError?.userFacingTitle ?? "Live updates are delayed",
+                    title: viewModel.lastRefreshError?.userFacingTitle ?? "Not up to date. Showing saved departures.",
                     onRetry: { Task { await viewModel.refreshConnections(isUserInitiated: true) } }
                 )
             }
@@ -263,13 +263,13 @@ struct TransportView: View {
         case .idle:
             if startStation == nil || endStation == nil {
                 EmptyStateView(
-                    icon: "tram.fill", title: "Select Your Route",
-                    message: "Tap the stations above to choose your start and destination"
+                    icon: "tram.fill", title: "Select your route",
+                    message: "Tap above to pick your start and destination stations."
                 ).frame(maxWidth: .infinity).padding(.top, 40).transition(.opacity)
             } else if !isRouteValid {
                 EmptyStateView(
                     icon: "arrow.left.arrow.right", title: "Pick two different stations",
-                    message: "Start and destination are the same station",
+                    message: "Your start and destination stations are the same.",
                     action: { showEndPicker = true }, actionTitle: "Change destination"
                 ).frame(maxWidth: .infinity).padding(.top, 40).transition(.opacity)
             }
@@ -294,15 +294,15 @@ struct TransportView: View {
         if !types.isEmpty, types.allSatisfy({ excluded.contains($0) }) {
             EmptyStateView(
                 icon: "line.3.horizontal.decrease.circle", title: "All train types are hidden",
-                message: "Turn a train type back on to see departures",
+                message: "Turn a train type back on to see departures.",
                 action: { setExcludedTrainTypes([]) }, actionTitle: "Show all"
             )
         } else if viewModel.displayConnections.isEmpty, let error = viewModel.lastRefreshError {
             ErrorView(error: error) { Task { await viewModel.refreshConnections(isUserInitiated: true) } }
         } else {
             EmptyStateView(
-                icon: "tram.fill.tunnel", title: "No Connections",
-                message: "No upcoming connections found for this route",
+                icon: "tram.fill.tunnel", title: "No connections",
+                message: "Nothing leaves on this route right now.",
                 action: { Task { await viewModel.refreshConnections(isUserInitiated: true) } }, actionTitle: "Refresh"
             )
         }
@@ -355,7 +355,7 @@ struct TransportView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Text("Leave window passed (\(count))")
+                Text("Leave time passed (\(count))")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -380,8 +380,8 @@ struct TransportView: View {
         case .loaded:
             if rows.isEmpty {
                 EmptyStateView(
-                    icon: "clock.badge.questionmark", title: "No trains found",
-                    message: "Nothing leaves after \(RouteHeader.departureChipTitle(for: anchor)) on this route",
+                    icon: "clock.badge.questionmark", title: "No connections",
+                    message: "No connections after \(RouteHeader.departureChipTitle(for: anchor)) on this route.",
                     action: returnToNow, actionTitle: "Back to now"
                 ).frame(maxWidth: .infinity).padding(.top, 24).transition(.opacity)
             } else {
@@ -392,7 +392,7 @@ struct TransportView: View {
                 if viewModel.isLoadingMoreAnchored {
                     SkeletonLoadingView(count: 1).transition(.opacity)
                 } else if viewModel.anchoredReachedEnd {
-                    Text("End of results")
+                    Text("No more connections")
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
@@ -804,9 +804,9 @@ private struct NextLiveTrainBanner: View {
     @ViewBuilder private var summary: some View {
         Group {
             if let next = nextLiveConnection {
-                Text("Next now: \(next.connection.lineNumber), leave ") + Text(next.leaveTime, style: .time)
+                Text("Next from now: \(next.connection.lineNumber), leave at ") + Text(next.leaveTime, style: .time)
             } else {
-                Text("Showing trains from \(RouteHeader.departureChipTitle(for: anchor))")
+                Text("Showing connections from \(RouteHeader.departureChipTitle(for: anchor))")
             }
         }
         .font(.subheadline.weight(.medium).monospacedDigit())
@@ -828,11 +828,8 @@ private struct ReminderRecoveryBanner: View {
     let onApply: () -> Void
     let onDismiss: () -> Void
 
-    private var actionTitle: String {
-        if let line = recovery.suggestedConnection?.lineNumber {
-            return "Use \(line)"
-        }
-        return "Review"
+    private var actionTitle: String? {
+        recovery.suggestedConnection.map { "Use \($0.lineNumber)" }
     }
 
     var body: some View {
@@ -863,9 +860,12 @@ private struct ReminderRecoveryBanner: View {
     }
 
     @ViewBuilder private var actionButtons: some View {
-        Button(actionTitle, action: onApply)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+        // With no suggested train, accepting only dismisses, so only Dismiss is shown.
+        if let actionTitle {
+            Button(actionTitle, action: onApply)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
 
         Button("Dismiss", action: onDismiss)
             .buttonStyle(.bordered)

@@ -80,7 +80,7 @@ struct ConnectionCard: View {
         parts.append(tripFactsLine)
         if isLeaveTimePast { parts.append("leave time passed") }
         if isSelected { parts.append("reminder set") }
-        if isPinned { parts.append("pinned as my journey") }
+        if isPinned { parts.append("pinned as My Journey") }
         return parts.joined(separator: ", ")
     }
 
@@ -153,7 +153,7 @@ struct ConnectionCard: View {
 
     private var missedExpandHint: some View {
         HStack(spacing: 12) {
-            Text("GO!").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            Text("Leave now").font(.caption.weight(.bold)).foregroundStyle(.secondary)
             Image(systemName: "chevron.down").font(.caption).foregroundStyle(.tertiary)
         }
     }
@@ -226,10 +226,10 @@ struct ConnectionCard: View {
     private var oneRowTimesAndPlatform: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
-                timeColumn("DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
+                timeColumn("Departs", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
                     .layoutPriority(2)
                 tripFactsColumn.frame(maxWidth: .infinity)
-                timeColumn("ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
+                timeColumn("Arrives", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
                     .layoutPriority(2)
             }.frame(maxWidth: .infinity)
             Divider().frame(height: 40).padding(2)
@@ -241,9 +241,9 @@ struct ConnectionCard: View {
     private var twoRowTimesAndPlatform: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
-                timeColumn("DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
+                timeColumn("Departs", time: connection.departureTime, scheduledTime: scheduledDepartureTime)
                 tripFactsColumn.frame(maxWidth: .infinity)
-                timeColumn("ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
+                timeColumn("Arrives", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime)
             }
             HStack(spacing: 8) {
                 platformColumn(alignment: .leading)
@@ -256,10 +256,10 @@ struct ConnectionCard: View {
     private var stackedTimesAndPlatform: some View {
         VStack(alignment: .leading, spacing: 10) {
             timeColumn(
-                "DEPARTS", time: connection.departureTime, scheduledTime: scheduledDepartureTime,
+                "Departs", time: connection.departureTime, scheduledTime: scheduledDepartureTime,
                 alignment: .leading)
             timeColumn(
-                "ARRIVES", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime, alignment: .leading)
+                "Arrives", time: connection.arrivalTime, scheduledTime: scheduledArrivalTime, alignment: .leading)
             Text(tripFactsLine).font(.caption.weight(.medium)).foregroundStyle(.secondary)
             transferChip
             HStack(spacing: 8) {
@@ -274,7 +274,7 @@ struct ConnectionCard: View {
         _ title: String, time: Date, scheduledTime: Date?, alignment: HorizontalAlignment = .center
     ) -> some View {
         VStack(alignment: alignment, spacing: 6) {
-            Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            Text(title).textCase(.uppercase).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
             if let scheduledTime {
                 VStack(alignment: alignment, spacing: 2) {
                     Text(scheduledTime, style: .time)
@@ -424,16 +424,18 @@ struct ConnectionCard: View {
             ).rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 if timeRemaining <= 0 {
-                    Text("GO!").font(.system(.caption, design: .monospaced).weight(.bold))
+                    Text("Leave now").font(.system(.caption, design: .monospaced).weight(.bold))
+                        .multilineTextAlignment(.center)
                 } else if timeRemaining <= 60 {
                     Text(leaveTime, style: .timer).font(.system(.caption, design: .monospaced).weight(.bold))
                         .multilineTextAlignment(.center)
-                    Text("to go").font(.system(size: ringCaptionSize)).foregroundStyle(.secondary)
+                    Text("to leave").font(.system(size: ringCaptionSize)).foregroundStyle(.secondary)
                 } else {
                     Text(countdownText)
                         .font(.system(.caption, design: .monospaced).weight(.bold))
                         .contentTransition(.numericText(countsDown: true))
                         .animation(reduceMotion ? nil : .default, value: countdownText)
+                        .accessibilityLabel(spokenCountdown(timeRemaining))
                     Text("to leave").font(.system(size: ringCaptionSize)).foregroundStyle(.secondary)
                 }
             }
@@ -479,6 +481,11 @@ struct ConnectionCard: View {
         }
     }
 
+    private func spokenCountdown(_ seconds: TimeInterval) -> String {
+        let totalMinutes = Int(ceil(max(0, seconds) / 60))
+        return Duration.seconds(totalMinutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide))
+    }
+
     private func formatCountdown(_ seconds: TimeInterval) -> String {
         // Rounded up so the ring never shows less time than the user has.
         let totalMinutes = Int(ceil(max(0, seconds) / 60))
@@ -486,10 +493,10 @@ struct ConnectionCard: View {
         let minutes = totalMinutes % 60
 
         if hours > 0 {
-            if minutes == 0 { return "\(hours)h" }
-            return "\(hours)h\(minutes)m"
+            if minutes == 0 { return "\(hours) h" }
+            return "\(hours) h \(minutes) min"
         }
-        return "\(minutes)m"
+        return "\(minutes) min"
     }
 }
 
@@ -569,7 +576,7 @@ struct CompactConnectionRow: View {
     }
 
     private var leavePlatformText: some View {
-        var text = Text("leave ") + Text(displayConnection.leaveTime, style: .time)
+        var text = Text("Leave ") + Text(displayConnection.leaveTime, style: .time)
         if let platform = connection.platform { text = text + Text(" · Platform \(platform)") }
         return text.font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
     }
@@ -630,7 +637,7 @@ private extension DisplayConnection {
         parts.append("leave at \(spoken(leaveTime))")
         var departs = "departs \(spoken(connection.departureTime))"
         if let scheduled = scheduledTimeIfDelayed(from: connection.departureTime, delayMinutes: connection.delay) {
-            let lateness = connection.delay == 1 ? "1 minute late" : "\(connection.delay) minutes late"
+            let lateness = connection.delay == 1 ? "delayed 1 minute" : "delayed \(connection.delay) minutes"
             departs += ", \(lateness), scheduled \(spoken(scheduled))"
         }
         parts.append(departs)
@@ -698,13 +705,13 @@ struct DelayBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock.badge.exclamationmark")
-            Text("+\(minutes)'")
+            Text("+\(minutes) min")
                 .contentTransition(.numericText())
                 .animation(reduceMotion ? nil : .default, value: minutes)
         }.font(.caption.weight(.semibold)).foregroundStyle(.orange).padding(.horizontal, 6).padding(.vertical, 4)
             .background(Color.orange.opacity(colorScheme == .dark ? 0.25 : 0.15), in: Capsule())
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(minutes == 1 ? "1 minute late" : "\(minutes) minutes late")
+            .accessibilityLabel(minutes == 1 ? "Delayed 1 minute" : "Delayed \(minutes) minutes")
     }
 }
 
@@ -721,7 +728,7 @@ struct CancelledBadge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .background(Color.red.opacity(colorScheme == .dark ? 0.3 : 0.18), in: Capsule())
-        .accessibilityLabel("Service cancelled")
+        .accessibilityLabel("Cancelled")
     }
 }
 
@@ -750,7 +757,7 @@ struct PinBadge: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "pin.fill").font(.system(size: iconSize))
-            Text("MY JOURNEY").font(.system(size: labelSize, weight: .bold))
+            Text("My Journey").textCase(.uppercase).font(.system(size: labelSize, weight: .bold))
         }.foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 3).background(
             Color.accentColor, in: Capsule()
         )

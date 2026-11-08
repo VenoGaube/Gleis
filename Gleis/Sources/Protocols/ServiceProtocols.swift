@@ -202,10 +202,10 @@ enum GleisError: LocalizedError {
         case let .timeout(msg): "Timed out: \(msg)"
         case let .apiError(msg): "API error: \(msg)"
         case .stationNotFound: "Station not found"
-        case .noConnectionsAvailable: "No connections available"
+        case .noConnectionsAvailable: "No connections"
         case .noRouteConfigured: "No route configured"
         case .notificationPermissionDenied: "Notifications disabled"
-        case .reminderTimeAlreadyPassed: "Departure is too soon"
+        case .reminderTimeAlreadyPassed: "Leave time passed"
         case let .storageError(msg): "Storage error: \(msg)"
         case let .unknown(msg): msg
         }
@@ -214,58 +214,58 @@ enum GleisError: LocalizedError {
     var userFacingTitle: String {
         switch self {
         case .networkError:
-            return "Connection Problem"
+            return "Can't reach ÖBB"
         case .timeout:
-            return "Request Timed Out"
+            return "ÖBB is slow to answer"
         case .offline:
-            return "No Internet Connection"
+            return "No internet connection"
         case .apiError:
-            if isRateLimitedLike || isServerOverloadLike { return "Service Is Busy" }
-            return "Service Temporarily Unavailable"
+            if isRateLimitedLike || isServerOverloadLike { return "ÖBB is busy" }
+            return "ÖBB isn't working right now"
         case .stationNotFound:
-            return "Station Not Found"
+            return "Station not found"
         case .noConnectionsAvailable:
-            return "No Connections Available"
+            return "No connections"
         case .noRouteConfigured:
-            return "Route Not Configured"
+            return "No route set"
         case .notificationPermissionDenied:
-            return "Notifications Disabled"
+            return "Notifications disabled"
         case .reminderTimeAlreadyPassed:
-            return "Departure Too Soon"
+            return "Leave time passed"
         case .storageError:
-            return "Data Error"
+            return "Can't load saved data"
         case .unknown:
-            return "Something Went Wrong"
+            return "Something went wrong"
         }
     }
 
     var userFacingMessage: String {
         switch self {
         case .networkError:
-            return "We couldn't reach the service right now. Please try again shortly."
+            return "Can't reach ÖBB right now. Try again in a moment."
         case .timeout:
-            return "The server is taking too long to respond. We will keep trying in the background."
+            return "ÖBB is taking too long to answer. Gleis keeps trying."
         case .offline:
-            return "You appear to be offline. Check your connection and try again."
+            return "You're offline. Check your connection and try again."
         case .apiError:
             if isRateLimitedLike || isServerOverloadLike {
-                return "Travel service is under heavy load right now. Showing latest available data and retrying automatically."
+                return "ÖBB is busy right now. Showing saved departures and trying again soon."
             }
-            return "The travel service returned an unexpected response. Please try again in a moment."
+            return "Something went wrong at ÖBB. Try again in a moment."
         case .stationNotFound:
-            return "We couldn't resolve one of the selected stations. Please choose a station from the list."
+            return "Can't find one of your stations. Pick it again from the list."
         case .noConnectionsAvailable:
-            return "No departures are available for this route right now."
+            return "No connections on this route right now."
         case .noRouteConfigured:
-            return "Select both start and destination stations to load departures."
+            return "Pick your start and destination stations to see departures."
         case .notificationPermissionDenied:
-            return "Enable notifications in Settings to receive journey alerts."
+            return "Turn on notifications in Settings to get reminders."
         case .reminderTimeAlreadyPassed:
-            return "It is already time to leave for this train, so there is nothing left to remind you about."
+            return "Your leave time for this train has passed, so there is nothing to remind you about."
         case .storageError:
-            return "Saved data couldn't be loaded. Please try again."
+            return "Can't load your saved data. Try again."
         case .unknown:
-            return "An unexpected error occurred. Please try again."
+            return "Something went wrong. Try again."
         }
     }
 
@@ -282,11 +282,11 @@ enum GleisError: LocalizedError {
 
     var recoverySuggestion: String? {
         switch self {
-        case .networkError, .offline, .timeout: "Check your internet connection"
-        case .apiError: "The server may be temporarily unavailable"
-        case .noRouteConfigured: "Select start and end stations"
-        case .notificationPermissionDenied: "Enable in device Settings"
-        default: "Try again later"
+        case .networkError, .offline, .timeout: "Check your internet connection."
+        case .apiError: "ÖBB may be down right now. Try again later."
+        case .noRouteConfigured: "Pick your start and destination stations."
+        case .notificationPermissionDenied: "Turn on notifications in Settings."
+        default: "Try again later."
         }
     }
 

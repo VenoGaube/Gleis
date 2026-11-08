@@ -40,6 +40,10 @@ struct CommuteScheduleView: View {
         return "\(from) → \(to)"
     }
 
+    private var spokenActiveRouteLabel: String {
+        activeRouteLabel.replacingOccurrences(of: " → ", with: " to ")
+    }
+
     private var directionIcon: String {
         viewModel.selectedDirection == .toWork ? "arrow.right" : "arrow.left"
     }
@@ -52,7 +56,7 @@ struct CommuteScheduleView: View {
         var title: String {
             switch self {
             case .workweek: "Workweek"
-            case .allDays: "All Days"
+            case .allDays: "All days"
             case .custom: "Custom"
             }
         }
@@ -100,12 +104,12 @@ struct CommuteScheduleView: View {
                     scheduleSection
                         .id(listTopAnchorId)
                     Section {
-                        Button("Reset to Defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
-                            "Reset to Defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
+                        Button("Reset to defaults", role: .destructive) { showResetConfirm = true }.confirmationDialog(
+                            "Reset to defaults?", isPresented: $showResetConfirm, titleVisibility: .visible
                         ) {
-                            Button("Reset All Settings", role: .destructive) { viewModel.resetToDefaults() }
+                            Button("Reset", role: .destructive) { viewModel.resetToDefaults() }
                         } message: {
-                            Text("This will clear all stations, schedules, and reset timing to defaults.")
+                            Text("This clears your stations, repeat journeys and days off.")
                         }
                     }
                 }.onChange(of: scrollToTopTrigger) { _, _ in
@@ -130,7 +134,7 @@ struct CommuteScheduleView: View {
             }
             .sheet(isPresented: $showFromStationPicker) {
                 stationPicker(
-                    title: "From Station",
+                    title: "From",
                     selection: Binding(
                         get: { viewModel.currentFromStation },
                         set: { viewModel.handleFromStationChange($0) }
@@ -138,7 +142,7 @@ struct CommuteScheduleView: View {
                 )
             }.sheet(isPresented: $showToStationPicker) {
                 stationPicker(
-                    title: "To Station",
+                    title: "To",
                     selection: Binding(
                         get: { viewModel.currentToStation },
                         set: { viewModel.handleToStationChange($0) }
@@ -154,7 +158,7 @@ struct CommuteScheduleView: View {
                     ) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             viewModel.toastManager.show(
-                                "Great start! Keep going to complete your week", type: .success
+                                "First train saved. Add the rest of your week.", type: .success
                             )
                         }
                     }
@@ -190,27 +194,27 @@ struct CommuteScheduleView: View {
                 )
             }
             .confirmationDialog(
-                "Enable Weekend Days?",
+                "Add Saturday and Sunday?",
                 isPresented: Binding(
                     get: { weekendActivationPromptDirection != nil },
                     set: { if !$0 { weekendActivationPromptDirection = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Enable Saturday + Sunday") {
+                Button("Add both days") {
                     guard let direction = weekendActivationPromptDirection else { return }
                     var activeDays = viewModel.route.activeDays(for: direction)
                     activeDays.formUnion(Weekday.weekend)
                     setActiveDays(activeDays, for: direction)
                     weekendActivationPromptDirection = nil
-                    viewModel.toastManager.show("Weekend days enabled for \(direction.title.lowercased())", type: .success)
+                    viewModel.toastManager.show("Saturday and Sunday added to your \(direction.title.lowercased()) journeys", type: .success)
                 }
                 Button("Not now", role: .cancel) {
                     weekendActivationPromptDirection = nil
                 }
             } message: {
                 if let direction = weekendActivationPromptDirection {
-                    Text("You set a weekend train for \(direction.title.lowercased()). Also enable both Saturday and Sunday?")
+                    Text("You picked a weekend train for your \(direction.title.lowercased()) journey. Add both Saturday and Sunday?")
                 }
             }
             .toastOverlay(viewModel.toastManager)
@@ -219,14 +223,14 @@ struct CommuteScheduleView: View {
     private var headerContent: some View {
         VStack(spacing: 20) {
             HStack(alignment: .center) {
-                Text("Repeat Journeys").font(.largeTitle.bold())
+                Text("Repeat journeys").font(.largeTitle.bold())
                 Spacer()
                 Menu {
                     Button {
                         excludedDateSelection = dateComponentsSet(from: viewModel.excludedDates)
                         showExcludedDatesSheet = true
                     } label: {
-                        Label("Holidays / OOO", systemImage: "calendar.badge.minus")
+                        Label("Days off", systemImage: "calendar.badge.minus")
                     }
 
                     if !viewModel.excludedDates.isEmpty {
@@ -234,7 +238,7 @@ struct CommuteScheduleView: View {
                             excludedDateSelection = []
                             viewModel.updateExcludedDates(dates(from: excludedDateSelection))
                         } label: {
-                            Label("Clear Excluded Dates", systemImage: "trash")
+                            Label("Clear days off", systemImage: "trash")
                         }
                     }
                 } label: {
@@ -249,7 +253,7 @@ struct CommuteScheduleView: View {
                     }
                 }
                 .padding(.trailing, 4)
-                .accessibilityLabel("Commute options")
+                .accessibilityLabel("More options")
             }
 
             RouteHeader(
@@ -270,7 +274,7 @@ struct CommuteScheduleView: View {
                 },
                 swapIcon: directionIcon,
                 swapAccessibilityLabel: "Switch direction",
-                swapAccessibilityValue: directionLabel
+                swapAccessibilityValue: spokenActiveRouteLabel
             )
 
             commuteDaysControls
@@ -280,7 +284,7 @@ struct CommuteScheduleView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.subheadline)
                         .foregroundStyle(.orange)
-                    Text("Changing stations archives current schedules")
+                    Text("Changing a station hides your current trains. Pick the same stations again to bring them back.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -307,7 +311,7 @@ struct CommuteScheduleView: View {
     private var commuteDaysControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStackFallingBackToVStack(spacing: 8) {
-                Label("Commute Days", systemImage: "calendar")
+                Label("Repeat days", systemImage: "calendar")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Menu {
@@ -315,7 +319,7 @@ struct CommuteScheduleView: View {
                         applyPreset(.workweek, for: viewModel.selectedDirection)
                     } label: {
                         HStack {
-                            Text("Workweek (Mon-Fri)")
+                            Text("Workweek (Mon to Fri)")
                             if selectedDirectionPreset == .workweek { Image(systemName: "checkmark") }
                         }
                     }
@@ -323,7 +327,7 @@ struct CommuteScheduleView: View {
                         applyPreset(.allDays, for: viewModel.selectedDirection)
                     } label: {
                         HStack {
-                            Text("All Days")
+                            Text("All days")
                             if selectedDirectionPreset == .allDays { Image(systemName: "checkmark") }
                         }
                     }
@@ -425,7 +429,9 @@ struct CommuteScheduleView: View {
             }
         } header: {
             if viewModel.route.isConfigured {
-                Text("Schedule for \(activeRouteLabel)")
+                Text(activeRouteLabel)
+                    .textCase(nil)
+                    .accessibilityLabel(spokenActiveRouteLabel)
             }
         }
     }
@@ -549,7 +555,7 @@ struct CommuteScheduleView: View {
         dismissSuggestion(for: day, direction: direction)
 
         viewModel.toastManager.show(
-            "Applied \(schedule.lineNumber) to \(day.fullName).",
+            "\(schedule.lineNumber) set for \(day.fullName).",
             type: .success
         )
     }
@@ -577,7 +583,7 @@ struct CommuteScheduleView: View {
 
         if isActive {
             if hasSchedule {
-                viewModel.toastManager.show("Clear \(day.fullName) schedule first to deactivate it.", type: .info)
+                viewModel.toastManager.show("Clear \(day.fullName)'s train first to turn the day off.", type: .info)
                 return
             }
             if activeDays.count <= 1 {
@@ -631,13 +637,13 @@ private struct ExcludedDatesSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Exclude holidays or OOO days so commute suggestions can ignore them.")
+                    Text("Pick your days off. Repeat journeys and suggestions skip them.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
 
                     MultiDatePicker(
-                        "Excluded dates",
+                        "Days off",
                         selection: $selection,
                         in: Date()...
                     )
@@ -645,7 +651,7 @@ private struct ExcludedDatesSheet: View {
                 }
                 .padding(.top, 12)
             }
-            .navigationTitle("Excluded Dates")
+            .navigationTitle("Days off")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -785,7 +791,7 @@ struct DayScheduleRow: View {
         } else if isSuggestionLoading {
             suggestionLoadingView
         } else {
-            Text("Not set - Tap to add").font(.subheadline).foregroundStyle(.secondary)
+            Text("No train yet. Tap to add one.").font(.subheadline).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -810,7 +816,7 @@ struct DayScheduleRow: View {
                     Haptics.selection()
                     onEnableDay()
                 } label: {
-                    Text("Enable")
+                    Text("Turn on")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
@@ -818,9 +824,9 @@ struct DayScheduleRow: View {
                         .background(Color.accentColor, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Enable \(day.fullName)")
+                .accessibilityLabel("Turn on \(day.fullName)")
             }
-            Text("Tap to set manually")
+            Text("Tap to pick a train")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -865,6 +871,8 @@ struct DayScheduleRow: View {
                 }
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.orange)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(changeCountLabel(s.transfers))
             }
         }
     }
@@ -886,8 +894,10 @@ struct DayScheduleRow: View {
             if schedule != nil {
                 HStack(spacing: 3) {
                     Image(systemName: "bell.fill").font(.caption2)
-                    Text("ON").font(.caption2.weight(.semibold))
+                    Text("On").font(.caption2.weight(.semibold))
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Reminder on")
                 .foregroundStyle(.white)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
@@ -921,6 +931,7 @@ struct DayScheduleRow: View {
             } label: {
                 Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
             }.buttonStyle(.plain).padding(.leading, 8)
+                .accessibilityLabel("Clear \(day.fullName)'s train")
         }
     }
 
@@ -935,7 +946,7 @@ struct DayScheduleRow: View {
                 accessibilityHint: "Opens the train list for \(day.fullName)", action: onChooseDifferentSuggestion
             )
             suggestionButton(
-                title: "Skip day", systemImage: "minus.circle.fill", tint: .secondary,
+                title: "Hide suggestion", systemImage: "minus.circle.fill", tint: .secondary,
                 accessibilityHint: "Hides this suggestion for \(day.fullName)", action: onDismissSuggestion
             )
         }
@@ -1003,9 +1014,9 @@ struct ScheduleEmptyState: View {
             .accessibilityHidden(true)
 
             VStack(spacing: 8) {
-                Text("Set up your daily commute").font(.title3.weight(.semibold))
+                Text("Set up a repeat journey").font(.title3.weight(.semibold))
 
-                Text("Select both stations above to get started with your repeat journey schedules").font(.subheadline)
+                Text("Pick your start and destination stations above.").font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
@@ -1031,9 +1042,9 @@ struct ReadyToScheduleHint: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Ready to set your schedule").font(.subheadline.weight(.semibold))
+                Text("Ready to pick your trains").font(.subheadline.weight(.semibold))
 
-                Text("Tap any day below to select your regular train").font(.caption).foregroundStyle(.secondary)
+                Text("Tap a day below to pick your usual train.").font(.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(16).background(
             RoundedRectangle(cornerRadius: 12).fill(Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.08))
@@ -1115,7 +1126,7 @@ struct CopyScheduleSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 VStack(spacing: 12) {
-                    Text("Copy \(sourceDay.fullName)'s Schedule").font(.title3.weight(.semibold))
+                    Text("Copy \(sourceDay.fullName)'s train").font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
                     if let schedule = sourceSchedule {
@@ -1148,7 +1159,7 @@ struct CopyScheduleSheet: View {
                                         Text(day.fullName).font(.body.weight(.medium)).foregroundStyle(.primary)
 
                                         if hasExisting {
-                                            Text("Will replace existing schedule").font(.caption).foregroundStyle(
+                                            Text("Replaces the train already set").font(.caption).foregroundStyle(
                                                 .orange)
                                         }
                                     }
@@ -1158,10 +1169,10 @@ struct CopyScheduleSheet: View {
                             }.buttonStyle(.plain)
                         }
                     } header: {
-                        Text("Select days to copy to")
+                        Text("Pick days").textCase(nil)
                     } footer: {
                         if !selectedDays.isEmpty {
-                            Text("Copying to \(selectedDays.count) day\(selectedDays.count > 1 ? "s" : "")")
+                            Text("Copying to \(selectedDays.count) \(selectedDays.count == 1 ? "day" : "days")")
                         }
                     }
                 }
@@ -1169,7 +1180,7 @@ struct CopyScheduleSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Copy to \(selectedDays.count) day\(selectedDays.count > 1 ? "s" : "")") { copySchedule() }
+                    Button("Copy to \(selectedDays.count) \(selectedDays.count == 1 ? "day" : "days")") { copySchedule() }
                         .disabled(selectedDays.isEmpty).fontWeight(.semibold)
                 }
             }
@@ -1188,7 +1199,7 @@ struct CopyScheduleSheet: View {
 
         let sortedDays = Weekday.mondayFirst.filter { selectedDays.contains($0) }
         let dayNames = sortedDays.map(\.shortName).joined(separator: ", ")
-        onCopied("Copied \(sourceDay.shortName) schedule to \(dayNames)")
+        onCopied("Copied \(sourceDay.shortName) train to \(dayNames)")
 
         dismiss()
     }
@@ -1275,7 +1286,7 @@ struct DayTrainPicker: View {
                 if isLoading {
                     List { ForEach(0 ..< 5, id: \.self) { _ in SkeletonTrainRow() } }.listStyle(.plain)
                 } else if connections.isEmpty {
-                    ContentUnavailableView("No Trains", systemImage: "tram.fill", description: Text("No trains found"))
+                    ContentUnavailableView("No connections", systemImage: "tram.fill", description: Text("Nothing found for \(day.fullName). Close this and try again."))
                 } else {
                     List {
                         ForEach(connections) { conn in
@@ -1287,7 +1298,7 @@ struct DayTrainPicker: View {
                         if isLoadingMore { SkeletonTrainRow() }
                     }.listStyle(.plain)
                 }
-            }.navigationTitle("Select Train").navigationBarTitleDisplayMode(.inline).toolbar {
+            }.navigationTitle("Pick a train").navigationBarTitleDisplayMode(.inline).toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { saveSelection() }.disabled(selectedConnection == nil)
@@ -1305,7 +1316,7 @@ struct DayTrainPicker: View {
         let dayEnd = window.end
 
         // Seed before the first useful departure rather than at midnight. A
-        // midnight-anchored search spends its whole first response on night trains —
+        // midnight-anchored search spends its whole first response on night trains:
         // for Stadlau to Graz that was 23:57 through 05:36, putting every morning
         // departure two round trips out of reach.
         paginationSeedDateTime = calendar.date(byAdding: .hour, value: 4, to: dayStart) ?? dayStart
@@ -1514,7 +1525,7 @@ struct TrainSelectionRow: View {
     private var detailButton: some View {
         Button(action: onDetail) { Image(systemName: "info.circle").font(.title3).foregroundStyle(.blue) }
             .buttonStyle(.plain)
-            .accessibilityLabel("Train details")
+            .accessibilityLabel("Connection details")
     }
 
     private var timesAndStats: some View {
@@ -1525,9 +1536,11 @@ struct TrainSelectionRow: View {
                 Text(connection.arrivalTime, style: .time).font(.body).foregroundStyle(.secondary)
             }
             HStackFallingBackToVStack(spacing: 10) {
-                Text("\(Int(connection.duration / 60)) min").font(.subheadline).foregroundStyle(.secondary)
+                let durationMinutes = Int(connection.duration / 60)
+                Text("\(durationMinutes) min").font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityLabel(durationMinutes == 1 ? "1 minute" : "\(durationMinutes) minutes")
                 if let stops = connection.totalStopCount, stops > 0 {
-                    Text("\(stops) stops").font(.subheadline).foregroundStyle(.blue)
+                    Text("\(stops) \(stops == 1 ? "stop" : "stops")").font(.subheadline).foregroundStyle(.blue)
                 }
                 if connection.transfers > 0 {
                     HStack(spacing: 3) {
@@ -1536,10 +1549,17 @@ struct TrainSelectionRow: View {
                     }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.orange)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(changeCountLabel(connection.transfers))
                 }
             }
         }
     }
+}
+
+/// What VoiceOver reads for a change count badge, for example "1 change" or "2 changes".
+private func changeCountLabel(_ count: Int) -> String {
+    count == 1 ? "1 change" : "\(count) changes"
 }
 
 #Preview {

@@ -144,7 +144,7 @@ final class CommuteScheduleViewModel: ObservableObject {
         route.removeSchedule(for: day, direction: direction)
         save()
         rescheduleAllNotifications()
-        toastManager.show("Cleared \(day.fullName) schedule", type: .info)
+        toastManager.show("Cleared \(day.fullName)'s train", type: .info)
     }
 
     func updateExcludedDates(_ dates: [Date]) {

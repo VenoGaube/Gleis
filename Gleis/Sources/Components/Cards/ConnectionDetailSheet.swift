@@ -52,7 +52,7 @@ struct ConnectionDetailSheet: View {
                 if !stacksForAccessibilitySize { journeyActionBar(leaveTime: leaveTime) }
             }
             .refreshable { await loadConnectionDetailsIfNeeded(force: true) }
-            .navigationTitle("Connection Details")
+            .navigationTitle("Connection details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         }
@@ -78,7 +78,7 @@ struct ConnectionDetailSheet: View {
             if isLoadingDetails {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text("Loading intermediate stops")
+                    Text("Loading stops")
                 }.font(.caption2).foregroundStyle(.secondary)
             }
             departArriveRow
@@ -108,8 +108,8 @@ struct ConnectionDetailSheet: View {
             let minutesLeft = Int((remaining / 60).rounded(.up))
             return LeaveCountdown(text: "in \(abbreviatedDurationText(minutes: minutesLeft))", color: .urgency(for: remaining))
         }
-        if resolvedConnection.departureTime > now { return LeaveCountdown(text: "leave now", color: .urgencyRed) }
-        return LeaveCountdown(text: "train has left", color: .secondary)
+        if resolvedConnection.departureTime > now { return LeaveCountdown(text: "Leave now", color: .urgencyRed) }
+        return LeaveCountdown(text: "Departed", color: .secondary)
     }
 
     private var summaryHeader: some View {
@@ -148,7 +148,7 @@ struct ConnectionDetailSheet: View {
             : AnyLayout(HStackLayout(alignment: .top))
         return layout {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Depart").font(.caption2).foregroundStyle(.secondary)
+                Text("Departs").font(.caption2).foregroundStyle(.secondary)
                 DelayedTimeText(time: resolvedConnection.departureTime, delayMinutes: resolvedConnection.delay)
                 if let platform = summaryDeparturePlatform {
                     Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
@@ -156,7 +156,7 @@ struct ConnectionDetailSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: stacksForAccessibilitySize ? .leading : .trailing, spacing: 4) {
-                Text("Arrive").font(.caption2).foregroundStyle(.secondary)
+                Text("Arrives").font(.caption2).foregroundStyle(.secondary)
                 DelayedTimeText(time: resolvedConnection.arrivalTime, delayMinutes: resolvedConnection.delay)
                 if let platform = summaryArrivalPlatform {
                     Text("Platform \(platform)").font(.caption2).foregroundStyle(.secondary)
@@ -224,7 +224,7 @@ struct ConnectionDetailSheet: View {
         if let onPin {
             Button(action: onPin) {
                 Label {
-                    Text(isPinned ? "Unpin journey" : "Pin as my journey")
+                    Text(isPinned ? "Unpin" : "Pin as My Journey")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
@@ -250,7 +250,7 @@ struct ConnectionDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                    Text("Service Alerts").font(.headline)
+                    Text("Service alerts").font(.headline)
                 }
                 ForEach(alerts) { alert in
                     VStack(alignment: .leading, spacing: 6) {
@@ -464,7 +464,7 @@ struct ConnectionLegRow: View {
     private var walkingTitle: String {
         if let arrivalPlatform { return "Walk to Platform \(arrivalPlatform)" }
         if leg.from.name != leg.to.name { return "Walk to \(leg.to.name)" }
-        return "Walk to transfer point"
+        return "Walk to your next platform"
     }
 
     var body: some View {
@@ -627,7 +627,7 @@ struct ConnectionLegRow: View {
         }
 
         if let delayMinutes = stop.delayMinutes, delayMinutes > 0 {
-            Text("+\(delayMinutes)'")
+            Text("+\(delayMinutes) min")
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.orange)
         }
@@ -736,8 +736,8 @@ struct TransferRow: View {
     }
     private var transferTitle: String {
         if nextLegIsWalking, !hasUpcomingTransitLeg { return "Walk to destination" }
-        if urgency == .missed { return "Missed transfer at \(stationName)" }
-        return "Transfer at \(stationName)"
+        if urgency == .missed { return "Missed change at \(stationName)" }
+        return "Change at \(stationName)"
     }
     private var riskBadgeText: String? {
         if urgency == .missed { return "Missed" }
@@ -759,11 +759,11 @@ struct TransferRow: View {
     }
     private var detailsText: String {
         if urgency == .missed {
-            return "Incoming delay likely misses \(normalizedNextLine ?? "the next connection"). Pull to refresh alternatives."
+            return "This delay will likely make you miss \(normalizedNextLine ?? "your next train"). Pull down to see other trains."
         }
-        let changeText = "Change to \(normalizedNextLine ?? "next connection")"
+        let changeText = "Change to \(normalizedNextLine ?? "your next train")"
         if let nextPlatform = normalizedNextPlatform {
-            return "\(changeText) · board from Platform \(nextPlatform)"
+            return "\(changeText) at Platform \(nextPlatform)"
         }
         return changeText
     }
@@ -777,7 +777,7 @@ struct TransferRow: View {
         }
         if let platform = normalizedNextPlatform { return "Walk to Platform \(platform)" }
         if let line = normalizedNextLine { return "Walk to \(line)" }
-        return "Walk transfer at \(stationName)"
+        return "Walk to your next platform at \(stationName)"
     }
     private var connectorSegmentHeight: CGFloat { 24 }
     private var shouldShowMetaRow: Bool { platformChange != nil || nextDepartureTime != nil }
@@ -906,7 +906,7 @@ struct TransferRow: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.blue.opacity(colorScheme == .dark ? 0.18 : 0.1), in: Capsule())
-                .accessibilityLabel("Platform \(platformChange.from) to \(platformChange.to)")
+                .accessibilityLabel("Platform \(platformChange.from) to platform \(platformChange.to)")
         }
 
         if let nextDepartureTime {

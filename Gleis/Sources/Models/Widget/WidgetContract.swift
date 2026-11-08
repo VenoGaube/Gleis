@@ -197,11 +197,11 @@ struct WidgetData: Codable {
         if let message = data?.stateMessage, !message.isEmpty { return message }
         switch data?.state {
         case .fallback:
-            return "Open the app to refresh."
+            return "Open Gleis to refresh."
         case .stale:
-            return "Check again soon or update route."
+            return "Open Gleis to refresh."
         default:
-            return "Tap to set up your commute"
+            return "Tap to set up your route"
         }
     }
 
@@ -342,7 +342,7 @@ enum AppGroupStorage {
     }
 
     /// Distinguishes "no route configured yet" from "a snapshot is there but this
-    /// build can't decode it" — previously both rendered as "set up your commute",
+    /// build can't decode it". Both used to render as "set up your commute",
     /// which tells a configured user to redo setup they have already done.
     static func loadPrimaryWidgetSnapshot() -> SnapshotLoadResult {
         guard let defaults = sharedDefaults,
@@ -388,13 +388,13 @@ struct WidgetRenderSnapshot: Codable, Sendable {
     var emptyHintText: String {
         if let stateMessage, !stateMessage.isEmpty { return stateMessage }
         switch state {
-        case .fallback: return "Open the app to refresh."
-        case .stale: return "Check again soon or update route."
-        case .fresh: return "Tap to set up your commute"
+        case .fallback: return "Open Gleis to refresh."
+        case .stale: return "Open Gleis to refresh."
+        case .fresh: return "Tap to set up your route"
         }
     }
 
-    static let missingHintText = "Tap to set up your commute"
+    static let missingHintText = "Tap to set up your route"
 }
 
 extension WidgetData {

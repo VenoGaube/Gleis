@@ -22,7 +22,7 @@ struct MyJourneyCard: View {
     }
 
     private func statusText(at now: Date) -> String {
-        if isInProgress(at: now) { "In Progress" } else if hasDeparted(at: now) { "Completed" } else { "Upcoming" }
+        if isInProgress(at: now) { "In progress" } else if hasDeparted(at: now) { "Arrived" } else { "Upcoming" }
     }
 
     private func statusColor(at now: Date) -> Color {
@@ -171,7 +171,8 @@ struct MyJourneyCard: View {
     }
 
     private var myJourneyPill: some View {
-        Text("MY JOURNEY")
+        Text("My Journey")
+            .textCase(.uppercase)
             .font(.caption.weight(.bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 8)
@@ -192,7 +193,7 @@ struct MyJourneyCard: View {
         } label: {
             Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
         }
-        .accessibilityLabel("Unpin journey")
+        .accessibilityLabel("Unpin")
     }
 
     private func timingSection(at now: Date) -> some View {
@@ -247,7 +248,7 @@ struct MyJourneyCard: View {
 
     private func arrivalColumn(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
-            Text("Arrival").font(.caption2).foregroundStyle(.secondary)
+            Text("Arrives").font(.caption2).foregroundStyle(.secondary)
             DelayedTimeText(time: journey.arrivalTime, delayMinutes: journey.delay, weight: .bold)
             if let finalArrivalPlatformLabel {
                 Text("Platform \(finalArrivalPlatformLabel)")
@@ -287,8 +288,10 @@ struct MyJourneyCard: View {
         if journey.delay > 0 {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Image(systemName: "clock.badge.exclamationmark")
-                Text("+\(journey.delay) min delay")
+                Text("+\(journey.delay) min")
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(journey.delay == 1 ? "Delayed 1 minute" : "Delayed \(journey.delay) minutes")
             .font(.caption.weight(.medium))
             .foregroundStyle(.orange)
             .padding(.horizontal, 8)
@@ -377,7 +380,7 @@ private struct LeaveCountdownText: View {
     private static func countdownLabel(minutes: Int) -> String {
         switch minutes {
         case 0: "now"
-        case 1: "in <1 min"
+        case 1: "in 1 min"
         default: "in \(minutes) min"
         }
     }
@@ -640,7 +643,7 @@ private struct JourneyStopRow: View {
                     ).foregroundStyle(isPassed ? .secondary : .primary)
 
                     if let delay, delay > 0 {
-                        Text("+\(delay)'").font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                        Text("+\(delay) min").font(.caption2.weight(.medium)).foregroundStyle(.orange)
                     }
                 }
                 .fixedSize()

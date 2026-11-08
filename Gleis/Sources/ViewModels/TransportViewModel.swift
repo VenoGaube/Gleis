@@ -525,10 +525,11 @@ final class TransportViewModel: ObservableObject {
                 throw GleisError.reminderTimeAlreadyPassed
             }
 
+            let lineNumber = connection.lineNumber.uppercased()
             toastManager.show(
                 scheduledFiveMinute
-                    ? "Reminder set for \(connection.lineNumber.uppercased())"
-                    : "Leave-time alert set for \(connection.lineNumber.uppercased())",
+                    ? "Reminder set for \(lineNumber)"
+                    : "Reminder set for \(lineNumber) at leave time only",
                 type: .success
             )
             selectedConnection = connection
@@ -608,7 +609,7 @@ final class TransportViewModel: ObservableObject {
             Task { [notificationService] in
                 await CommuteNotificationReconciler.reconcile(notificationService: notificationService)
             }
-            toastManager.show("Skipped this trip", type: .info)
+            toastManager.show("Skipped this connection", type: .info)
         } else {
             toastManager.show("Reminder cancelled", type: .info)
         }
@@ -651,7 +652,7 @@ final class TransportViewModel: ObservableObject {
 
     func unpinJourney() {
         settingsManager.unpinJourney()
-        toastManager.show("Unpinned journey", type: .info)
+        toastManager.show("Unpinned My Journey", type: .info)
         rebuildDisplayConnections()
         refreshWidgetsFromLoadedConnections()
     }
@@ -762,7 +763,7 @@ final class TransportViewModel: ObservableObject {
             // A user refresh replaces the list, so a batch paged from the old tail would leave a gap.
             guard connections.value?.contains(where: { $0.id == last.id }) == true else { return }
             appendConnectionsToLoadedList(appendedConnections, routeKey: routeKey, referenceDate: Date())
-        } catch { if !(error is CancellationError) { toastManager.show("Failed to load more", type: .error) } }
+        } catch { if !(error is CancellationError) { toastManager.show("Can't load more connections. Try again.", type: .error) } }
     }
 
     // MARK: - Jumped Departure Time
@@ -826,7 +827,7 @@ final class TransportViewModel: ObservableObject {
             appendAnchoredPage(run.additions, generation: generation)
         } catch {
             guard isCurrentAnchoredRequest(generation), !(error is CancellationError) else { return }
-            toastManager.show("Failed to load more", type: .error)
+            toastManager.show("Can't load more connections. Try again.", type: .error)
         }
     }
 
@@ -1177,7 +1178,7 @@ final class TransportViewModel: ObservableObject {
             message = "Set up your route to see departures."
         } else if storedConnections.isEmpty {
             state = .fresh
-            message = "No upcoming departures."
+            message = "No connections."
         } else if isServiceDegraded, isShowingCachedData {
             state = .fallback
             message = widgetServiceDegradedMessage(referenceDate: now)
@@ -1524,7 +1525,7 @@ final class TransportViewModel: ObservableObject {
             connectionRecovery = ConnectionRecoveryState(
                 id: signature,
                 kind: .missingSelection,
-                title: "Selected train unavailable",
+                title: "Your train isn't running",
                 message: recoveryMessageForMissing(reminder: reminder, replacement: replacement),
                 originalReminderId: reminder.id,
                 suggestedConnection: replacement
@@ -1626,7 +1627,7 @@ final class TransportViewModel: ObservableObject {
             let replacementTime = formatter.string(from: replacement.departureTime)
             return "\(reminder.lineNumber) at \(originalTime) is no longer running. Try \(replacement.lineNumber) at \(replacementTime)."
         }
-        return "\(reminder.lineNumber) at \(originalTime) is no longer running. Open the list and choose a replacement."
+        return "\(reminder.lineNumber) at \(originalTime) is no longer running. Pick another train from the list."
     }
 
     private func recoveryMessageForUpdate(
@@ -1635,12 +1636,12 @@ final class TransportViewModel: ObservableObject {
     ) -> String {
         var parts: [String] = []
         if liveConnection.delay > reminder.delayMinutes {
-            parts.append("delay is now \(liveConnection.delay) min")
+            parts.append("+\(liveConnection.delay) min")
         }
         if ConnectionIdentity.normalizePlatform(reminder.platform) != ConnectionIdentity.normalizePlatform(liveConnection.platform),
            let platform = liveConnection.platform, !platform.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
-            parts.append("platform changed to \(platform)")
+            parts.append("platform \(platform)")
         }
 
         let formatter = DateFormatter()
@@ -1651,9 +1652,9 @@ final class TransportViewModel: ObservableObject {
         }
 
         if parts.isEmpty {
-            return "Live train data changed. Re-apply your reminder to stay synced."
+            return "ÖBB changed \(reminder.lineNumber). Set your reminder again."
         }
-        return parts.joined(separator: ", ") + "."
+        return "\(reminder.lineNumber) now " + parts.joined(separator: ", ") + "."
     }
 
     private func resyncReminderIfNeeded(
@@ -1849,11 +1850,11 @@ final class TransportViewModel: ObservableObject {
 
     private func widgetServiceDegradedMessage(referenceDate: Date) -> String {
         guard let retryAt = serviceRetryAt else {
-            return "Live data delayed. Showing cached departures."
+            return "Not up to date. Showing saved departures."
         }
         if retryAt <= referenceDate {
-            return "Live data delayed. Retrying now."
+            return "Not up to date. Trying again now."
         }
-        return "Live data delayed. Retry around \(Self.widgetRetryTimeFormatter.string(from: retryAt))."
+        return "Not up to date. Trying again around \(Self.widgetRetryTimeFormatter.string(from: retryAt))."
     }
 }

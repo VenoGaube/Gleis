@@ -45,7 +45,7 @@ final class NotificationService: NotificationServiceProtocol, @unchecked Sendabl
         config: RouteConfiguration,
         type: NotificationType
     ) -> (title: String, body: String, interruptionLevel: UNNotificationInterruptionLevel) {
-        let title = type == .fiveMinuteWarning ? "⏰ 5 Minutes" : "🚨 GO!"
+        let title = type == .fiveMinuteWarning ? "5 min to leave" : "Time to leave"
         let body = notificationBody(for: connection, config: config, type: type)
         let interruptionLevel: UNNotificationInterruptionLevel = type == .exactTime ? .timeSensitive : .active
         return (title: title, body: body, interruptionLevel: interruptionLevel)
@@ -61,7 +61,7 @@ final class NotificationService: NotificationServiceProtocol, @unchecked Sendabl
         guard alert.isActive else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "⚠️ Service Alert"
+        content.title = "Service alert"
         content.body = serviceAlertBody(for: connection, alert: alert)
         content.sound = .default
         content.categoryIdentifier = "service_alert_\(connection.lineNumber)"
@@ -119,16 +119,16 @@ final class NotificationService: NotificationServiceProtocol, @unchecked Sendabl
         try await scheduleDatedNotification(
             id: commuteNotificationId(direction: direction, day: day, suffix: "5min", occurrenceIndex: occurrenceIndex),
             fireDate: occurrence.leaveDate.addingTimeInterval(-5 * 60),
-            title: "⏰ 5 Minutes",
-            body: "\(schedule.lineNumber) to \(destination) departs at \(schedule.departureTimeString)",
+            title: "5 min to leave",
+            body: "\(schedule.lineNumber) to \(destination) leaves at \(schedule.departureTimeString).",
             level: .active,
             deepLink: NotificationPayload.repeatScheduleDeepLink
         )
         try await scheduleDatedNotification(
             id: commuteNotificationId(direction: direction, day: day, suffix: "leave", occurrenceIndex: occurrenceIndex),
             fireDate: occurrence.leaveDate,
-            title: "🚨 GO!",
-            body: "Catch \(schedule.lineNumber) at \(schedule.departureTimeString) → \(destination)",
+            title: "Time to leave",
+            body: "\(schedule.lineNumber) to \(destination) leaves at \(schedule.departureTimeString).",
             level: .timeSensitive,
             deepLink: NotificationPayload.repeatScheduleDeepLink
         )
@@ -175,27 +175,26 @@ final class NotificationService: NotificationServiceProtocol, @unchecked Sendabl
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         let departureStr = formatter.string(from: config.effectiveDepartureTime(for: connection))
-        var detailParts: [String] = []
-        if connection.delay > 0 { detailParts.append("+\(connection.delay) min delay") }
+        let delaySuffix = connection.delay > 0 ? " (+\(connection.delay) min)" : ""
+        var platformSuffix = ""
         if let platform = connection.platform, !platform.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            detailParts.append("Platform \(platform)")
+            platformSuffix = " from platform \(platform)"
         }
-        let detailSuffix = detailParts.isEmpty ? "" : " (\(detailParts.joined(separator: ", ")))"
+        let departureDetail = "leaves at \(departureStr)\(delaySuffix)\(platformSuffix)."
 
         return type == .fiveMinuteWarning
-            ? "\(config.notificationSettings.customMessage)\n\(connection.lineNumber) departs at \(departureStr)\(detailSuffix)"
-            : "Catch \(connection.lineNumber) at \(departureStr)\(detailSuffix) → \(connection.arrivalStation.name)"
+            ? "\(config.notificationSettings.customMessage)\n\(connection.lineNumber) \(departureDetail)"
+            : "\(connection.lineNumber) to \(connection.arrivalStation.name) \(departureDetail)"
     }
 
     private func serviceAlertBody(for connection: TrainConnection, alert: ServiceAlert) -> String {
-        var parts: [String] = ["\(connection.lineNumber) to \(connection.arrivalStation.name)"]
-        if !alert.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append(alert.title) }
-        if let until = alert.endsAt {
-            let formatter = DateFormatter()
-            formatter.timeStyle = .short
-            parts.append("until \(formatter.string(from: until))")
-        }
-        return parts.joined(separator: " • ")
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        var body = "\(connection.lineNumber) to \(connection.arrivalStation.name) at \(formatter.string(from: connection.departureTime))"
+        let alertTitle = alert.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !alertTitle.isEmpty { body += ": \(alertTitle)" }
+        if let until = alert.endsAt { body += ", until \(formatter.string(from: until))" }
+        return body + ". Tap for details."
     }
 
     private func serviceAlertNotificationId(

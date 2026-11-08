@@ -126,8 +126,8 @@ enum WidgetSnapshotReconciler {
             snapshotSignature: snapshotSignature,
             state: state,
             stateMessage: candidates.isEmpty
-                ? "No upcoming departures."
-                : (state == .fallback ? "Live data delayed. Showing cached departures." : nil),
+                ? "No connections."
+                : (state == .fallback ? "Not up to date. Showing saved departures." : nil),
             recoveryAction: .openLiveRoute
         )
         AppGroupStorage.savePrimaryWidgetData(widgetData)
