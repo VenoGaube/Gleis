@@ -254,9 +254,11 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 seedDateTime: seedDateTime,
                 cursor: cursor
             )
-            let connections = page.connections.map {
-                ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station)
-            }
+            // The gate can list the same trip twice in one page; every consumer assumes unique ids.
+            var seenIds = Set<String>()
+            let connections = page.connections
+                .map { ConnectionMapper.map($0, from: resolvedFrom.station, to: resolvedTo.station) }
+                .filter { seenIds.insert($0.id).inserted }
             return ConnectionPage(
                 connections: connections,
                 forwardCursor: page.forwardCursor,

@@ -1490,7 +1490,7 @@ final class TransportViewModel: ObservableObject {
             return
         }
 
-        let liveConnectionsById = Dictionary(uniqueKeysWithValues: liveConnections.map { ($0.id, $0) })
+        let liveConnectionsById = Dictionary(liveConnections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let lastLoadedDeparture = liveConnections.map(config.effectiveDepartureTime(for:)).max()
 
         for reminder in relevantReminders {
