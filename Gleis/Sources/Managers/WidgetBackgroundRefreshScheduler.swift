@@ -1,7 +1,6 @@
 import BackgroundTasks
 import Foundation
 import OSLog
-import WidgetKit
 
 enum WidgetBackgroundRefreshScheduler {
     static let taskIdentifier = "com.veno.gleis.widget.refresh"

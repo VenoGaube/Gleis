@@ -804,10 +804,14 @@ final class TransportViewModel: ObservableObject {
     }
 
     func loadMoreAnchored() async {
-        await loadMoreAnchored(untilShownCount: filteredByTrainType(anchoredTrainConnections).count + 1)
+        await loadMoreAnchored(
+            untilShownCount: filteredByTrainType(anchoredTrainConnections).count + 1,
+            deadline: Date().addingTimeInterval(Self.userInitiatedFetchTimeout),
+            earlierPagesLoaded: false
+        )
     }
 
-    private func loadMoreAnchored(untilShownCount shownTarget: Int) async {
+    private func loadMoreAnchored(untilShownCount shownTarget: Int, deadline: Date, earlierPagesLoaded: Bool) async {
         guard departureAnchor != nil, anchoredConnections.isLoaded, !isLoadingMoreAnchored, !anchoredReachedEnd,
               !isAnchoredListAtCap, let start = config.startStation, let end = config.endStation,
               let seedDateTime = anchoredSeedDateTime
@@ -819,7 +823,8 @@ final class TransportViewModel: ObservableObject {
 
         do {
             guard let run = try await fetchNextAnchoredPages(
-                from: start, to: end, seedDateTime: seedDateTime, generation: generation, untilShownCount: shownTarget
+                from: start, to: end, seedDateTime: seedDateTime, generation: generation,
+                untilShownCount: shownTarget, deadline: deadline, earlierPagesLoaded: earlierPagesLoaded
             ) else { return }
             anchoredForwardCursor = run.forwardCursor
             if run.forwardCursor == nil { anchoredReachedEnd = true }
@@ -836,13 +841,15 @@ final class TransportViewModel: ObservableObject {
     }
 
     /// Pages forward until the filtered list holds `shownTarget` trains or the provider runs out; nil when a newer jump superseded it.
-    /// Each page gets its own timeout, and a page that fails after earlier ones landed ends the run with what it has.
+    /// The whole run shares one `deadline`; a page that fails or runs out of time after earlier ones landed, in this run or a jump before it, ends the run with what it has.
     private func fetchNextAnchoredPages(
         from start: Station,
         to end: Station,
         seedDateTime: Date,
         generation: Int,
-        untilShownCount shownTarget: Int
+        untilShownCount shownTarget: Int,
+        deadline: Date,
+        earlierPagesLoaded: Bool
     ) async throws -> AnchoredPageRun? {
         let startCursor = anchoredForwardCursor
         var cursor = startCursor
@@ -854,9 +861,9 @@ final class TransportViewModel: ObservableObject {
             do {
                 page = try await fetchConnectionsPageWithTimeout(
                     from: start, to: end, seedDateTime: seedDateTime, cursor: cursor,
-                    timeoutSeconds: Self.userInitiatedFetchTimeout
+                    timeoutSeconds: deadline.timeIntervalSinceNow
                 )
-            } catch let error where !(error is CancellationError) && cursor != startCursor {
+            } catch let error where !(error is CancellationError) && (earlierPagesLoaded || cursor != startCursor) {
                 guard isCurrentAnchoredRequest(generation) else { return nil }
                 Self.logger.error(
                     "Anchored page after seed \(seedDateTime.formatted(.iso8601), privacy: .public) failed, keeping earlier pages: \(error.localizedDescription, privacy: .public)"
@@ -870,7 +877,7 @@ final class TransportViewModel: ObservableObject {
             }
             cursor = nextCursor
             let preview = mergedAnchoredConnections(anchoredTrainConnections, adding: additions, now: Date())
-            if filteredByTrainType(preview).count >= target { break }
+            if filteredByTrainType(preview).count >= target || Date() >= deadline { break }
         }
         return AnchoredPageRun(additions: additions, forwardCursor: cursor)
     }
@@ -879,9 +886,11 @@ final class TransportViewModel: ObservableObject {
         let seedDateTime = anchor.addingTimeInterval(-Self.anchoredSearchLeadTime)
         let service = transportService
         let coverage = ConnectionCoverage(minimumCount: Self.anchoredInitialConnectionTarget, notBefore: seedDateTime)
+        // The coverage run stops starting pages once its budget is spent, so allow one more page on top.
+        let jumpTimeout = coverage.budget + Self.userInitiatedFetchTimeout
+        let jumpDeadline = Date().addingTimeInterval(jumpTimeout)
         do {
-            // The coverage run stops starting pages once its budget is spent, so allow one more page on top.
-            let result = try await withTimeout(seconds: coverage.budget + Self.userInitiatedFetchTimeout) { [weak self] in
+            let result = try await withTimeout(seconds: jumpTimeout) { [weak self] in
                 try await service.fetchConnectionsCovering(
                     from: start,
                     to: end,
@@ -897,9 +906,11 @@ final class TransportViewModel: ObservableObject {
             anchoredForwardCursor = result.forwardCursor
             if result.forwardCursor == nil { anchoredReachedEnd = true }
             appendAnchoredPage(result.connections, generation: generation)
-            // The coverage target counts trains the filter may hide, so page on until enough of them show.
-            if filteredByTrainType(anchoredTrainConnections).count < Self.anchoredInitialConnectionTarget {
-                await loadMoreAnchored(untilShownCount: Self.anchoredInitialConnectionTarget)
+            // The coverage target counts trains the filter may hide, so page on until enough show or the jump's time is up.
+            if filteredByTrainType(anchoredTrainConnections).count < Self.anchoredInitialConnectionTarget, Date() < jumpDeadline {
+                await loadMoreAnchored(
+                    untilShownCount: Self.anchoredInitialConnectionTarget, deadline: jumpDeadline, earlierPagesLoaded: true
+                )
             }
         } catch {
             guard isCurrentAnchoredRequest(generation), !(error is CancellationError) else { return }

@@ -21,6 +21,7 @@
 		B013 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013 /* NetworkMonitor.swift */; };
 		B014 /* ConnectionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014 /* ConnectionCache.swift */; };
 		B015 /* OebbAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F015 /* OebbAPIModels.swift */; };
+		57A2B2048AA191271C2196BB /* OebbSeatReservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 969B75BC7B024963DD1247F0 /* OebbSeatReservationModels.swift */; };
 		B016 /* OebbRequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016 /* OebbRequestModels.swift */; };
 		B017 /* Station.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017 /* Station.swift */; };
 		B018 /* TrainConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018 /* TrainConnection.swift */; };
@@ -32,6 +33,7 @@
 		B024 /* ConnectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024 /* ConnectionCard.swift */; };
 		B025 /* ConnectionDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025 /* ConnectionDetailSheet.swift */; };
 		B026 /* CommonComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026 /* CommonComponents.swift */; };
+		FEAF18B854373DA1637B80A8 /* TimingSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C1DB873F620C444FCAD1B4 /* TimingSheets.swift */; };
 		B027 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027 /* OnboardingView.swift */; };
 		B028 /* StationPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028 /* StationPicker.swift */; };
 		B029 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029 /* SettingsView.swift */; };
@@ -104,6 +106,7 @@
 		F013 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		F014 /* ConnectionCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCache.swift; sourceTree = "<group>"; };
 		F015 /* OebbAPIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbAPIModels.swift; sourceTree = "<group>"; };
+		969B75BC7B024963DD1247F0 /* OebbSeatReservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbSeatReservationModels.swift; sourceTree = "<group>"; };
 		F016 /* OebbRequestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OebbRequestModels.swift; sourceTree = "<group>"; };
 		F017 /* Station.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Station.swift; sourceTree = "<group>"; };
 		F018 /* TrainConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainConnection.swift; sourceTree = "<group>"; };
@@ -115,6 +118,7 @@
 		F024 /* ConnectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCard.swift; sourceTree = "<group>"; };
 		F025 /* ConnectionDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionDetailSheet.swift; sourceTree = "<group>"; };
 		F026 /* CommonComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonComponents.swift; sourceTree = "<group>"; };
+		F4C1DB873F620C444FCAD1B4 /* TimingSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimingSheets.swift; sourceTree = "<group>"; };
 		F027 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F028 /* StationPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationPicker.swift; sourceTree = "<group>"; };
 		F029 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -230,6 +234,7 @@
 			children = (
 				F015 /* OebbAPIModels.swift */,
 				F016 /* OebbRequestModels.swift */,
+				969B75BC7B024963DD1247F0 /* OebbSeatReservationModels.swift */,
 			);
 			path = API;
 			sourceTree = "<group>";
@@ -384,6 +389,7 @@
 			children = (
 				F026 /* CommonComponents.swift */,
 				F027 /* OnboardingView.swift */,
+				F4C1DB873F620C444FCAD1B4 /* TimingSheets.swift */,
 			);
 			path = Common;
 			sourceTree = "<group>";
@@ -540,6 +546,7 @@
 				B013 /* NetworkMonitor.swift in Sources */,
 				B014 /* ConnectionCache.swift in Sources */,
 				B015 /* OebbAPIModels.swift in Sources */,
+				57A2B2048AA191271C2196BB /* OebbSeatReservationModels.swift in Sources */,
 				B016 /* OebbRequestModels.swift in Sources */,
 				B017 /* Station.swift in Sources */,
 				B018 /* TrainConnection.swift in Sources */,
@@ -551,6 +558,7 @@
 				B024 /* ConnectionCard.swift in Sources */,
 				B025 /* ConnectionDetailSheet.swift in Sources */,
 				B026 /* CommonComponents.swift in Sources */,
+				FEAF18B854373DA1637B80A8 /* TimingSheets.swift in Sources */,
 				B027 /* OnboardingView.swift in Sources */,
 				B028 /* StationPicker.swift in Sources */,
 				B029 /* SettingsView.swift in Sources */,
