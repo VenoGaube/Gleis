@@ -1218,7 +1218,10 @@ actor OebbAPIClient {
                     captureRaw: captureRaw
                 )
             }
-            throw GleisError.apiError(http.statusCode == 440 ? "Session expired" : "Auth failed")
+            let path = request.url?.path ?? "?"
+            throw GleisError.apiError(
+                http.statusCode == 440 ? "Session expired (\(path))" : "Auth failed (HTTP \(http.statusCode), \(path))"
+            )
         }
 
         if retryTransient, http.statusCode == 429 || (500 ... 504).contains(http.statusCode) {
@@ -1277,7 +1280,8 @@ actor OebbAPIClient {
 
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-            throw GleisError.apiError("Auth failed")
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw GleisError.apiError("Auth failed (sign-in, HTTP \(status))")
         }
 
         let auth = try decoder.decode(OebbAuthResponse.self, from: data)

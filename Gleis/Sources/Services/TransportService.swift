@@ -351,9 +351,28 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     private static let preferredReservationClasses = ["1", "2"]
     /// Session lifetime the seat lookup needs, so its chain of shop calls stays on one ÖBB session.
     private static let seatMapSessionMinimumLifetime: TimeInterval = 300
+    // Longer than any ÖBB session, so asking for it always starts a new one.
+    private static let forcedSessionRenewalWindow: TimeInterval = 7 * 24 * 60 * 60
 
     /// Seat availability per leg, read from the ÖBB shop: timetable, offers, reservation details, then seat maps.
     func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
+        do {
+            return try await fetchSeatMapsOnce(for: connection)
+        } catch let error as SeatMapLoadError where Self.isSignInFailure(error.underlying) {
+            // The first lookup after a while can be refused by ÖBB's sign-in; a fresh session and one
+            // full rerun is what fixed it by hand, so do that once instead of making the user retry.
+            Self.seatLogger.info("Seat lookup retries once with a new ÖBB session after: \(error.step, privacy: .public)")
+            try await apiClient.ensureSessionValid(forAtLeast: Self.forcedSessionRenewalWindow)
+            return try await fetchSeatMapsOnce(for: connection)
+        }
+    }
+
+    private static func isSignInFailure(_ error: Error) -> Bool {
+        guard case let GleisError.apiError(message) = error else { return false }
+        return message.hasPrefix("Auth failed") || message.hasPrefix("Session expired")
+    }
+
+    private func fetchSeatMapsOnce(for connection: TrainConnection) async throws -> [LegSeatMap] {
         var step = "session"
         do {
             try await apiClient.ensureSessionValid(forAtLeast: Self.seatMapSessionMinimumLifetime)
