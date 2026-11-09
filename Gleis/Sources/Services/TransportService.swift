@@ -358,7 +358,9 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
     func fetchSeatMaps(for connection: TrainConnection) async throws -> [LegSeatMap] {
         do {
             return try await fetchSeatMapsOnce(for: connection)
-        } catch let error as SeatMapLoadError where Self.isSignInFailure(error.underlying) {
+        } catch let error as SeatMapLoadError
+            where Self.isSignInFailure(error.underlying) && !GleisError.from(error.underlying).isBusyLike
+        {
             // The first lookup after a while can be refused by ÖBB's sign-in; a fresh session and one
             // full rerun is what fixed it by hand, so do that once instead of making the user retry.
             Self.seatLogger.info("Seat lookup retries once with a new ÖBB session after: \(error.step, privacy: .public)")
@@ -446,6 +448,7 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
 
         var searchedRefNumbers = Set<[Int]>()
         var searchedRoutes: [String] = []
+        var lastRouteFailure: GleisError?
         for route in Self.shopSearchRoutes(for: connection, trainLegs: trainLegs) {
             do {
                 async let resolvedFromTask = resolveStation(route.from)
@@ -478,9 +481,14 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 // answer is about this station pair, so the next route may still find the train.
                 if Self.stopsSeatRouteSearch(mapped) || Self.isSignInFailure(error) { throw mapped }
                 searchedRoutes.append("\(route.from.name) to \(route.to.name): \(String(describing: mapped))")
+                lastRouteFailure = mapped
             }
         }
-        if searchedRefNumbers.isEmpty { throw GleisError.stationNotFound }
+        if searchedRefNumbers.isEmpty {
+            // Only a plain "no such station" answer should read as one; any other failure keeps its own text.
+            if let otherFailure = lastRouteFailure { throw otherFailure }
+            throw GleisError.stationNotFound
+        }
         let trip = "\(connection.lineNumber) leaving \(connection.departureStation.name)"
         throw GleisError.apiError(
             "The ÖBB shop does not list \(trip), so its seats cannot be shown. Searched: \(searchedRoutes.joined(separator: "; "))."
