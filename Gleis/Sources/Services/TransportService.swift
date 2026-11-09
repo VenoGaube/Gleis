@@ -367,6 +367,13 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
         }
     }
 
+    private static func stopsSeatRouteSearch(_ error: GleisError) -> Bool {
+        switch error {
+        case .timeout, .offline, .networkError: return true
+        default: return error.isBusyLike
+        }
+    }
+
     private static func isSignInFailure(_ error: Error) -> Bool {
         guard case let GleisError.apiError(message) = error else { return false }
         return message.hasPrefix("Auth failed") || message.hasPrefix("Session expired")
@@ -466,8 +473,11 @@ final class TransportService: TransportServiceProtocol, @unchecked Sendable {
                 searchedRoutes.append("\(route.from.name) to \(route.to.name): station not found")
             } catch {
                 if isCancellation(error) { throw CancellationError() }
-                // A failed call stops here instead of repeating on each route.
-                throw mapError(error)
+                let mapped = mapError(error)
+                // A dead connection, a busy ÖBB or a refused sign-in fails the same way on every route; any other
+                // answer is about this station pair, so the next route may still find the train.
+                if Self.stopsSeatRouteSearch(mapped) || Self.isSignInFailure(error) { throw mapped }
+                searchedRoutes.append("\(route.from.name) to \(route.to.name): \(String(describing: mapped))")
             }
         }
         if searchedRefNumbers.isEmpty { throw GleisError.stationNotFound }

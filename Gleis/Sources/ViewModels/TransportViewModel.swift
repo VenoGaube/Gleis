@@ -1677,7 +1677,9 @@ final class TransportViewModel: ObservableObject {
     private func isSameScheduledTrain(_ connection: TrainConnection, as reminder: ScheduledReminder) -> Bool {
         guard ConnectionIdentity.normalizeLine(connection.lineNumber) == ConnectionIdentity.normalizeLine(reminder.lineNumber)
         else { return false }
-        let connectionScheduled = connection.departureTime.addingTimeInterval(-TimeInterval(connection.delay * 60))
+        // The reminder stored the effective departure, so project the live trip the same way before removing the delay.
+        let connectionScheduled = config.effectiveDepartureTime(for: connection)
+            .addingTimeInterval(-TimeInterval(connection.delay * 60))
         let reminderScheduled = reminder.departureTime.addingTimeInterval(-TimeInterval(reminder.delayMinutes * 60))
         return ConnectionIdentity.minuteTimestamp(connectionScheduled) == ConnectionIdentity.minuteTimestamp(reminderScheduled)
     }

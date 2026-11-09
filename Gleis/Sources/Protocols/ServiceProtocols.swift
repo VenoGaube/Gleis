@@ -303,6 +303,9 @@ enum GleisError: LocalizedError {
         }
     }
 
+    /// ÖBB is throttling or overloaded, so asking again right away will not help.
+    var isBusyLike: Bool { isRateLimitedLike || isServerOverloadLike }
+
     private var isRateLimitedLike: Bool {
         rawText.contains("http 429") || rawText.contains("rate limit")
     }
